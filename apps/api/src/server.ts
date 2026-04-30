@@ -4,6 +4,8 @@ import express from 'express';
 import { requireClerkAuth } from './auth/clerkMiddleware';
 import { getLogFilePath, logger } from './lib/logger';
 import { healthRouter } from './routes/health';
+import { streamRouter } from './routes/stream';
+import { tasksRouter } from './routes/tasks';
 
 export async function createServer() {
   const app = express();
@@ -24,6 +26,8 @@ export async function createServer() {
   app.use('/health', healthRouter);
 
   app.use('/api', clerkMiddleware(), requireClerkAuth);
+  app.use('/api/tasks', tasksRouter);
+  app.use('/api/tasks', streamRouter);
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'Not found' });
   });
