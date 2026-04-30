@@ -1,10 +1,12 @@
 import 'dotenv/config';
+import { expireStalePendingApprovals } from './approvals/staleApprovals';
 import { createServer } from './server';
 import { initBuildInfo } from './lib/buildInfo';
 import { logger } from './lib/logger';
 
 async function main() {
   await initBuildInfo();
+  await expireStalePendingApprovals();
 
   const port = Number.parseInt(process.env.HANDLE_API_PORT ?? '3001', 10);
   const host = process.env.HANDLE_API_HOST ?? '127.0.0.1';
