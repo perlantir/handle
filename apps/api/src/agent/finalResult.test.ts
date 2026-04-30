@@ -4,7 +4,7 @@ import { parseAgentFinalResult } from './finalResult';
 describe('parseAgentFinalResult', () => {
   it('marks structured successful completions as success and strips the marker', () => {
     const result = parseAgentFinalResult(
-      'Created /tmp/hn.json and printed its contents.\n<handle_result>{"success":true}</handle_result>',
+      'Created /tmp/hn.json and printed its contents.\n[[HANDLE_RESULT:SUCCESS]]',
     );
 
     expect(result).toEqual({
@@ -15,7 +15,7 @@ describe('parseAgentFinalResult', () => {
 
   it('marks structured failures as errors with a reason', () => {
     const result = parseAgentFinalResult(
-      'I could not read /tmp/hn.json.\n<handle_result>{"success":false,"reason":"File was not created"}</handle_result>',
+      'I could not read /tmp/hn.json.\n[[HANDLE_RESULT:FAILURE reason="File was not created"]]',
     );
 
     expect(result).toEqual({

@@ -1,6 +1,6 @@
 import { ChatPromptTemplate, MessagesPlaceholder } from '@langchain/core/prompts';
 import { ChatOpenAI } from '@langchain/openai';
-import { AgentExecutor, createOpenAIToolsAgent } from 'langchain/agents';
+import { AgentExecutor, createOpenAIToolsAgent, type CreateOpenAIToolsAgentParams } from 'langchain/agents';
 import { configureLangSmithTracing } from '../lib/langsmith';
 import { logger } from '../lib/logger';
 import { createLangChainTools, type ToolExecutionContext } from './toolRegistry';
@@ -22,9 +22,13 @@ export function createOpenAIChatModel({ streaming = true, temperature = 0.2 } = 
   });
 }
 
-export async function createPhase1Agent(context: ToolExecutionContext) {
+interface CreatePhase1AgentOptions {
+  llm?: CreateOpenAIToolsAgentParams['llm'];
+}
+
+export async function createPhase1Agent(context: ToolExecutionContext, options: CreatePhase1AgentOptions = {}) {
   const tools = createLangChainTools(createPhase1ToolDefinitions(), context);
-  const llm = createOpenAIChatModel();
+  const llm = options.llm ?? createOpenAIChatModel();
   const prompt = ChatPromptTemplate.fromMessages([
     ['system', PHASE_1_SYSTEM_PROMPT],
     new MessagesPlaceholder('chat_history'),
