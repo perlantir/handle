@@ -14,7 +14,7 @@ Run this from a clean checkout of the `phase-1/foundation` branch after `.env` i
   - `E2B_API_KEY`
   - `LANGSMITH_API_KEY` optional
 
-The API workspace loads this root `.env` through `dotenv-cli`; do not create a separate `apps/api/.env`.
+API and web workspace commands load this root `.env` through `dotenv-cli`. Do not create local `.env` files under `apps/`; there should be no `apps/api/.env*` or `apps/web/.env*` files.
 
 ## Start
 

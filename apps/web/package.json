@@ -4,14 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "next build",
-    "dev": "next dev --hostname 127.0.0.1 --port 3000",
+    "build": "dotenv -e ../../.env -- next build",
+    "dev": "dotenv -e ../../.env -- next dev --hostname 127.0.0.1 --port 3000",
     "lint": "eslint .",
+    "start": "dotenv -e ../../.env -- next start",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@clerk/nextjs": "^5.7.6",
+    "@clerk/nextjs": "^7.2.9",
     "@handle/design-refs": "workspace:*",
     "@handle/design-tokens": "workspace:*",
     "@handle/shared": "workspace:*",
@@ -27,6 +28,7 @@
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
     "autoprefixer": "^10.5.0",
+    "dotenv-cli": "^11.0.0",
     "postcss": "^8.5.12",
     "tailwindcss": "^3.4.19"
   }

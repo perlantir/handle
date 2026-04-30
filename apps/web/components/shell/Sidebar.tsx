@@ -1,3 +1,5 @@
+'use client';
+
 import { Calendar, Folder, Home, Plug, Settings, Sparkles } from 'lucide-react';
 import { SidebarNavItem } from './SidebarNavItem';
 import { Wordmark } from './Wordmark';

@@ -7,7 +7,8 @@ export const dynamic = 'force-dynamic';
 const apiBaseUrl = process.env.HANDLE_API_BASE_URL ?? process.env.NEXT_PUBLIC_HANDLE_API_BASE_URL ?? 'http://127.0.0.1:3001';
 
 async function loadTask(taskId: string): Promise<TaskDetailResponse | null> {
-  const token = await auth().getToken();
+  const { getToken } = await auth();
+  const token = await getToken();
   if (!token) return null;
 
   const response = await fetch(`${apiBaseUrl}/api/tasks/${taskId}`, {
