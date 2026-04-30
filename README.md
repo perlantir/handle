@@ -35,6 +35,8 @@ Fill in:
 DATABASE_URL=postgresql://perlantir@localhost:5432/handle
 CLERK_SECRET_KEY=
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+NEXT_PUBLIC_HANDLE_WEB_BASE_URL=http://127.0.0.1:3000
+NEXT_PUBLIC_HANDLE_API_BASE_URL=http://127.0.0.1:3001
 OPENAI_API_KEY=
 E2B_API_KEY=
 LANGSMITH_API_KEY=
@@ -66,17 +68,19 @@ Run the web app in a second terminal:
 pnpm --filter @handle/web dev
 ```
 
-Open `http://127.0.0.1:3000`.
+Open `http://127.0.0.1:3000`. This is the canonical local web URL; do not use `http://localhost:3000`.
 
 ## Checks
 
 ```bash
 pnpm typecheck
 pnpm test
+pnpm smoke:web-signin
 pnpm build
 ```
 
 `pnpm build` runs Turborepo. Next.js may rewrite `apps/web/next-env.d.ts` during local builds; keep the source-controlled version unchanged.
+`pnpm smoke:web-signin` starts the web dev server, checks `/sign-in`, and verifies protected-route redirects do not self-proxy through `localhost:3000`.
 
 ## Health And Logs
 

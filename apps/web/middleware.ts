@@ -3,17 +3,20 @@ import type { NextFetchEvent, NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
 const isPublicRoute = createRouteMatcher(['/sign-in(.*)', '/sign-up(.*)']);
+const canonicalWebOrigin = (process.env.NEXT_PUBLIC_HANDLE_WEB_BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/$/, '');
+const signInUrl = `${canonicalWebOrigin}/sign-in`;
+const signUpUrl = `${canonicalWebOrigin}/sign-up`;
 
 const handleClerkMiddleware = clerkMiddleware(
-  async (auth, req) => {
+  async (auth) => {
     await auth.protect({
-      unauthenticatedUrl: new URL('/sign-in', req.url).toString(),
+      unauthenticatedUrl: signInUrl,
     });
   },
   {
     frontendApiProxy: { enabled: false },
-    signInUrl: '/sign-in',
-    signUpUrl: '/sign-up',
+    signInUrl,
+    signUpUrl,
   },
 );
 

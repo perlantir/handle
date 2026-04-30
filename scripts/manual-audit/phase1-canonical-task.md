@@ -10,6 +10,8 @@ Run this from a clean checkout of the `phase-1/foundation` branch after `.env` i
   - `DATABASE_URL=postgresql://perlantir@localhost:5432/handle`
   - `CLERK_SECRET_KEY`
   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+  - `NEXT_PUBLIC_HANDLE_WEB_BASE_URL=http://127.0.0.1:3000`
+  - `NEXT_PUBLIC_HANDLE_API_BASE_URL=http://127.0.0.1:3001`
   - `OPENAI_API_KEY`
   - `E2B_API_KEY`
   - `LANGSMITH_API_KEY` optional
@@ -40,7 +42,16 @@ In a second terminal:
 pnpm --filter @handle/web dev
 ```
 
-Open `http://127.0.0.1:3000`.
+Open `http://127.0.0.1:3000`. This is the canonical local web URL; do not use `http://localhost:3000`.
+
+Before signing in, verify the sign-in route loads without a self-proxy loop:
+
+```bash
+curl -I http://127.0.0.1:3000/sign-in
+```
+
+The web terminal should not print `Failed to proxy http://localhost:3000/` or any similar self-proxy error.
+The same check is covered by `pnpm smoke:web-signin`, which starts its own web dev server and should be run only when port 3000 is free. CI runs it when Clerk secrets are configured.
 
 ## Canonical Task
 

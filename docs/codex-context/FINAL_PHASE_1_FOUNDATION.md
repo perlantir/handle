@@ -43,7 +43,7 @@ ARCHITECTURE OVERVIEW
 
 ```
 ┌─────────────────────────────────────────┐
-│  Browser (localhost:3000)               │
+│  Browser (127.0.0.1:3000)               │
 │  Next.js + React + Tailwind             │
 │  Clerk auth on every request            │
 │  Design system: tokens + components     │
@@ -51,7 +51,7 @@ ARCHITECTURE OVERVIEW
          │ HTTP + SSE
          │ Clerk session token
 ┌────────▼────────────────────────────────┐
-│  Express backend (localhost:3001)       │
+│  Express backend (127.0.0.1:3001)       │
 │  Clerk middleware on all routes         │
 │  Pino logging with redaction            │
 │  ┌─────────────────────────────────┐    │
@@ -553,7 +553,7 @@ export async function createServer() {
 
   app.use(express.json({ limit: '10mb' }));
   app.use(cors({
-    origin: ['http://localhost:3000'],
+    origin: ['http://127.0.0.1:3000'],
     credentials: true,
   }));
 
@@ -1506,7 +1506,7 @@ scripts/manual-audit/phase1-canonical-task.md:
 2. Run migrations: `pnpm --filter @handle/api prisma migrate deploy`
 3. Start backend: `pnpm --filter @handle/api dev`
 4. Start frontend: `pnpm --filter @handle/web dev`
-5. Open http://localhost:3000
+5. Open http://127.0.0.1:3000
 6. Click Sign in, create account via Clerk
 7. Verify Home renders with "Good morning, [your name]"
 8. Submit canonical task in composer

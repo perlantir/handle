@@ -44,5 +44,18 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Web sign-in smoke
+        run: |
+          if [ -z "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" ]; then
+            echo "Skipping web sign-in smoke because Clerk CI secrets are not configured."
+            exit 0
+          fi
+          pnpm smoke:web-signin
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_HANDLE_API_BASE_URL: http://127.0.0.1:3001
+          NEXT_PUBLIC_HANDLE_WEB_BASE_URL: http://127.0.0.1:3000
+
       - name: Build
         run: pnpm build
