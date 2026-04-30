@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { expireStalePendingApprovals } from './approvals/staleApprovals';
 import { createServer } from './server';
 import { initBuildInfo } from './lib/buildInfo';
-import { logger } from './lib/logger';
+import { getDisplayLogFilePath, logger } from './lib/logger';
 
 async function main() {
   await initBuildInfo();
@@ -13,6 +13,7 @@ async function main() {
   const app = await createServer();
 
   const server = app.listen(port, host, () => {
+    console.log(`[Handle API] listening on http://${host}:${port} - log: ${getDisplayLogFilePath()}`);
     logger.info({ host, port }, 'Handle API listening');
   });
 

@@ -26,6 +26,14 @@ pnpm --filter @handle/api prisma migrate deploy
 pnpm --filter @handle/api dev
 ```
 
+Within 5 seconds, the API terminal should print a startup banner like:
+
+```text
+[Handle API] listening on http://127.0.0.1:3001 - log: ~/Library/Logs/Handle/api.log
+```
+
+If that banner does not appear, stop the audit and report the API terminal output.
+
 In a second terminal:
 
 ```bash

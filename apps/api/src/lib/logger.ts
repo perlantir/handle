@@ -10,6 +10,13 @@ function expandHome(path: string) {
   return path;
 }
 
+function collapseHome(path: string) {
+  const home = homedir();
+  if (path === home) return '~';
+  if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
+  return path;
+}
+
 const logDir = expandHome(process.env.HANDLE_LOG_DIR ?? '~/Library/Logs/Handle');
 const logFile = join(logDir, 'api.log');
 const pinoRollCurrentLog = join(logDir, 'current.log');
@@ -35,19 +42,40 @@ function ensureStableLogPath() {
 
 ensureStableLogPath();
 
-const transport = pino.transport({
-  target: 'pino-roll',
-  options: {
-    file: logFile,
-    limit: { count: 5, removeOtherLogFiles: true },
-    mkdir: true,
-    size: '10m',
-    symlink: true,
+const transportTargets: pino.TransportTargetOptions[] = [
+  {
+    target: 'pino-roll',
+    options: {
+      file: logFile,
+      limit: { count: 5, removeOtherLogFiles: true },
+      mkdir: true,
+      size: '10m',
+      symlink: true,
+    },
   },
-});
+  ...(process.env.NODE_ENV === 'production'
+    ? []
+    : [
+        {
+          target: 'pino-pretty',
+          options: {
+            colorize: true,
+            destination: 1,
+            singleLine: true,
+            translateTime: 'SYS:standard',
+          },
+        },
+      ]),
+];
+
+const transport = pino.transport({ targets: transportTargets });
 
 export function getLogFilePath() {
   return logFile;
+}
+
+export function getDisplayLogFilePath() {
+  return collapseHome(logFile);
 }
 
 export function getPinoRollCurrentLogPath() {
