@@ -51,7 +51,11 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
     case 'plan_update':
       return { ...state, planSteps: event.steps };
     case 'status_update':
-      return { ...state, status: event.status };
+      return {
+        ...state,
+        pendingApproval: event.status === 'WAITING' ? state.pendingApproval : null,
+        status: event.status,
+      };
     case 'thought':
       return { ...state, thought: state.thought + event.content };
     case 'tool_call':

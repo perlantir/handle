@@ -92,11 +92,39 @@ export interface ApprovalPayload {
   reason: string;
 }
 
+export type ApprovalDecision = 'approved' | 'denied';
+
+export type ApprovalStatus = ApprovalDecision | 'pending' | 'timeout';
+
+export interface PendingApproval {
+  approvalId: string;
+  request: ApprovalPayload;
+  status: ApprovalStatus;
+  taskId: string;
+  type: ApprovalPayload['type'];
+}
+
 export interface PlanStep {
   id: string;
   title: string;
   state: 'done' | 'active' | 'pending';
   requiresApproval?: boolean;
+}
+
+export interface TaskMessage {
+  content: string;
+  createdAt?: string;
+  id: string;
+  role: MessageRole;
+}
+
+export interface TaskDetailResponse {
+  createdAt?: string;
+  goal: string;
+  id: string;
+  messages: TaskMessage[];
+  status: TaskStatus;
+  updatedAt?: string;
 }
 
 export interface CreateTaskRequest {

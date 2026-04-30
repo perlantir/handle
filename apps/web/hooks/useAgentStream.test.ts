@@ -42,4 +42,25 @@ describe('agentStreamReducer', () => {
     });
     expect(state.finalMessage).toBe('Done');
   });
+
+  it('clears a pending approval when the task leaves WAITING', () => {
+    let state = agentStreamReducer(initialState, {
+      event: {
+        approvalId: 'approval-test',
+        request: { reason: 'Review command', type: 'shell_exec' },
+        taskId: 'task-test',
+        type: 'approval_request',
+      },
+      type: 'event',
+    });
+
+    expect(state.pendingApproval?.approvalId).toBe('approval-test');
+
+    state = agentStreamReducer(state, {
+      event: { status: 'RUNNING', taskId: 'task-test', type: 'status_update' },
+      type: 'event',
+    });
+
+    expect(state.pendingApproval).toBeNull();
+  });
 });

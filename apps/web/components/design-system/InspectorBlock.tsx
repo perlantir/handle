@@ -2,7 +2,7 @@ import { cn } from '@/lib/utils';
 
 interface InspectorBlockProps {
   badge?: string;
-  children: React.ReactNode;
+  children?: React.ReactNode;
   className?: string;
   title: string;
 }
