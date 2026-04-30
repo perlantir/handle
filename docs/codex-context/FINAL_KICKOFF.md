@@ -52,7 +52,7 @@ uses off-the-shelf libraries instead and accepts the tradeoffs:
 - Re-running a task may re-invoke models
 - Standard retry semantics (no idempotency tombstones)
 - LangChain handles agent orchestration
-- Postgres + Prisma for storage
+- PostgreSQL 17 (Homebrew `postgresql@17`) + Prisma for storage
 - Standard try/catch error handling
 
 Do not propose, scaffold, or implement the ruled-out custom
@@ -81,8 +81,8 @@ The third-party stack is FIXED. Do not propose alternatives.
 | Authentication | Clerk |
 | OAuth orchestration (third-party) | Nango |
 | Background jobs / schedules | BullMQ |
-| Database | Postgres + Prisma |
-| Vector store | pgvector on Postgres |
+| Database | PostgreSQL 17 (Homebrew `postgresql@17`) + Prisma |
+| Vector store | pgvector on PostgreSQL 17 |
 | Observability | LangSmith |
 | File storage | Cloudflare R2 |
 | Frontend | Next.js + React + Tailwind |
@@ -359,7 +359,7 @@ PHASE 1 STARTING POINT
 Phase 1 delivers:
 
 - Monorepo skeleton (Next.js frontend + Express backend)
-- Postgres + Prisma + pgvector
+- PostgreSQL 17 (Homebrew `postgresql@17`) + Prisma + pgvector
 - Clerk auth (single user during dev, but properly set up)
 - LangChain agent core (OpenAI Tools agent, OpenAI provider only)
 - E2B sandbox integration

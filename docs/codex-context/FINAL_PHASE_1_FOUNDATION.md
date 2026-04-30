@@ -1502,7 +1502,7 @@ MANUAL AUDIT
 
 scripts/manual-audit/phase1-canonical-task.md:
 
-1. Start Postgres: `pg_ctl start` (or via Docker)
+1. Start PostgreSQL 17: `brew services start postgresql@17`
 2. Run migrations: `pnpm --filter @handle/api prisma migrate deploy`
 3. Start backend: `pnpm --filter @handle/api dev`
 4. Start frontend: `pnpm --filter @handle/web dev`
