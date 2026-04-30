@@ -14,6 +14,8 @@ Run this from a clean checkout of the `phase-1/foundation` branch after `.env` i
   - `E2B_API_KEY`
   - `LANGSMITH_API_KEY` optional
 
+The API workspace loads this root `.env` through `dotenv-cli`; do not create a separate `apps/api/.env`.
+
 ## Start
 
 ```bash

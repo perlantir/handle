@@ -42,6 +42,8 @@ LANGSMITH_API_KEY=
 
 `LANGSMITH_API_KEY` is optional. When present, LangChain tracing is enabled.
 
+API workspace commands load this root `.env` through `dotenv-cli`, so Prisma and the dev server use the same file.
+
 ## Install And Database
 
 ```bash
