@@ -2,6 +2,7 @@ import { clerkMiddleware } from '@clerk/express';
 import cors from 'cors';
 import express from 'express';
 import { requireClerkAuth } from './auth/clerkMiddleware';
+import { corsAllowedHeaders, corsMethods, corsOptions, corsOrigins } from './lib/cors';
 import { getLogFilePath, logger } from './lib/logger';
 import { approvalsRouter } from './routes/approvals';
 import { healthRouter } from './routes/health';
@@ -12,12 +13,11 @@ export async function createServer() {
   const app = express();
 
   app.use(express.json({ limit: '10mb' }));
-  app.use(
-    cors({
-      credentials: true,
-      origin: ['http://127.0.0.1:3000'],
-    }),
+  logger.info(
+    { allowedHeaders: corsAllowedHeaders, credentials: true, methods: corsMethods, origins: corsOrigins },
+    'CORS configured',
   );
+  app.use(cors(corsOptions));
 
   app.use((req, _res, next) => {
     logger.info({ method: req.method, url: req.url }, 'request');
