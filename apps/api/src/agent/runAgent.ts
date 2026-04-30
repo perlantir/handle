@@ -5,6 +5,7 @@ import { logger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import { redactSecrets } from '../lib/redact';
 import { createPhase1Agent } from './createAgent';
+import { parseAgentFinalResult } from './finalResult';
 import { emitInitialPlan } from './plan';
 
 function eventContentToString(content: unknown) {
@@ -68,16 +69,32 @@ export async function runAgent(taskId: string, goal: string) {
       }
     }
 
+    const finalResult = parseAgentFinalResult(finalAnswer);
+    const finalStatus = finalResult.success ? 'STOPPED' : 'ERROR';
+    const finalMessage = finalResult.message || (finalResult.success ? 'Task completed.' : 'Task failed.');
+
     await prisma.message.create({
-      data: { content: finalAnswer, role: 'ASSISTANT', taskId },
+      data: { content: finalMessage, role: 'ASSISTANT', taskId },
     });
     await prisma.task.update({
-      data: { status: 'STOPPED' },
+      data: { status: finalStatus },
       where: { id: taskId },
     });
 
-    emitTaskEvent({ type: 'message', role: 'assistant', content: finalAnswer, taskId });
-    emitTaskEvent({ type: 'status_update', status: 'STOPPED', taskId });
+    emitTaskEvent({ type: 'message', role: 'assistant', content: finalMessage, taskId });
+    if (!finalResult.success) {
+      emitTaskEvent({
+        type: 'error',
+        message: finalResult.reason ?? 'Agent reported task failure',
+        taskId,
+      });
+    }
+    emitTaskEvent({
+      type: 'status_update',
+      status: finalStatus,
+      ...(finalResult.reason ? { detail: finalResult.reason } : {}),
+      taskId,
+    });
   } catch (err) {
     logger.error({ err, taskId }, 'Agent run failed');
 
