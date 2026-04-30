@@ -51,7 +51,7 @@ curl -I http://127.0.0.1:3000/sign-in
 ```
 
 The web terminal should not print `Failed to proxy http://localhost:3000/` or any similar self-proxy error.
-The same check is covered by `pnpm smoke:web-signin`, which starts its own web dev server and should be run only when port 3000 is free. CI runs it when Clerk secrets are configured.
+The same check is covered by `pnpm smoke:web-signin`, which starts its own web dev server and should be run only when port 3000 is free. When the API is running, it also checks `/api/tasks` preflight and POST CORS headers. CI runs it when Clerk secrets are configured.
 
 ## Canonical Task
 

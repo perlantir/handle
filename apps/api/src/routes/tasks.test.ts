@@ -38,6 +38,33 @@ describe('tasks route', () => {
     expect(runAgent).toHaveBeenCalledWith('task-test', 'Write a file');
   });
 
+  it('can skip agent startup for smoke task creation outside production', async () => {
+    const runAgent = vi.fn<Parameters<(taskId: string, goal: string) => Promise<void>>, Promise<void>>().mockResolvedValue();
+    const store: TaskRouteStore = {
+      task: {
+        async create() {
+          return { id: 'task-smoke' };
+        },
+        async findFirst() {
+          return null;
+        },
+      },
+      user: {
+        async upsert() {
+          return {};
+        },
+      },
+    };
+
+    const response = await request(createApp(store, runAgent))
+      .post('/api/tasks')
+      .send({ goal: 'Smoke task', skipAgent: true })
+      .expect(200);
+
+    expect(response.body).toEqual({ taskId: 'task-smoke' });
+    expect(runAgent).not.toHaveBeenCalled();
+  });
+
   it('returns a task owned by the current user', async () => {
     const store: TaskRouteStore = {
       task: {

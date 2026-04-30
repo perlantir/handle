@@ -80,7 +80,7 @@ pnpm build
 ```
 
 `pnpm build` runs Turborepo. Next.js may rewrite `apps/web/next-env.d.ts` during local builds; keep the source-controlled version unchanged.
-`pnpm smoke:web-signin` starts the web dev server, checks `/sign-in`, and verifies protected-route redirects do not self-proxy through `localhost:3000`.
+`pnpm smoke:web-signin` starts the web dev server, checks `/sign-in`, verifies protected-route redirects do not self-proxy through `localhost:3000`, and checks task POST CORS headers when the API is already running.
 
 ## Health And Logs
 

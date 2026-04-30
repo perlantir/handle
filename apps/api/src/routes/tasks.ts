@@ -9,6 +9,7 @@ import { prisma } from '../lib/prisma';
 
 const createTaskSchema = z.object({
   goal: z.string().min(1).max(10_000),
+  skipAgent: z.boolean().optional(),
 });
 
 export interface TaskRouteStore {
@@ -61,9 +62,11 @@ export function createTasksRouter({
         },
       });
 
-      runAgent(task.id, parsed.data.goal).catch((err) => {
-        logger.error({ err, taskId: task.id }, 'runAgent unhandled rejection');
-      });
+      if (!parsed.data.skipAgent || process.env.NODE_ENV === 'production') {
+        runAgent(task.id, parsed.data.goal).catch((err) => {
+          logger.error({ err, taskId: task.id }, 'runAgent unhandled rejection');
+        });
+      }
 
       const response: CreateTaskResponse = { taskId: task.id };
       return res.json(response);
