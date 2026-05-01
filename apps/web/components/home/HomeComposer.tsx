@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useAuth } from '@clerk/nextjs';
-import { useRouter } from 'next/navigation';
-import { Composer } from '@/components/design-system';
-import { createTask } from '@/lib/api';
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Composer } from "@/components/design-system";
+import { useHandleAuth } from "@/lib/handleAuth";
+import { createTask } from "@/lib/api";
 
 interface HomeComposerProps {
   value: string;
@@ -12,7 +12,7 @@ interface HomeComposerProps {
 }
 
 export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
-  const { getToken } = useAuth();
+  const { getToken } = useHandleAuth();
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -26,7 +26,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
       const { taskId } = await createTask({ goal, token });
       router.push(`/tasks/${taskId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not start task');
+      setError(err instanceof Error ? err.message : "Could not start task");
     } finally {
       setSubmitting(false);
     }
@@ -42,7 +42,11 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
         submitDisabled={!value.trim()}
         value={value}
       />
-      {error && <p className="mt-3 text-center text-[12px] text-status-error">{error}</p>}
+      {error && (
+        <p className="mt-3 text-center text-[12px] text-status-error">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

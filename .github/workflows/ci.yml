@@ -16,6 +16,22 @@ jobs:
     name: Typecheck, Test, Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: handle_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d handle_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/handle_test
 
     steps:
       - name: Checkout
@@ -44,6 +60,9 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Web sign-in smoke
         run: |
           if [ -z "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" ]; then
@@ -55,6 +74,15 @@ jobs:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
           NEXT_PUBLIC_HANDLE_API_BASE_URL: http://127.0.0.1:3001
+          NEXT_PUBLIC_HANDLE_WEB_BASE_URL: http://127.0.0.1:3000
+
+      - name: Task E2E smoke
+        run: pnpm smoke:e2e-task
+        env:
+          HANDLE_SMOKE_AGENT: "1"
+          HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_API_BASE_URL: http://127.0.0.1:3001
+          NEXT_PUBLIC_HANDLE_TEST_AUTH_BYPASS: "1"
           NEXT_PUBLIC_HANDLE_WEB_BASE_URL: http://127.0.0.1:3000
 
       - name: Build
