@@ -433,6 +433,45 @@ Reasons:
 - Distributed-ready if Handle ever scales
 
 ==================================================
+RULE 26: ENV LOADING IS A FIRST-CLASS CONCERN
+==================================================
+
+When introducing a workspace or service that reads from the root
+.env file, configure dotenv-cli (or equivalent) explicitly. Do not
+assume the runtime will walk up the tree to find .env.
+
+Verification before any phase signoff:
+- Each workspace's dev/build/start scripts wrap the runtime with
+  `dotenv -e ../../.env --` (or appropriate relative path)
+- No workspace creates its own .env that would shadow the root
+- Variables prefixed NEXT_PUBLIC_ are exposed to client; same key
+  WITHOUT prefix may also be required for server-side code
+
+==================================================
+RULE 27: NEVER MODIFY USER-OWNED .env FILES
+==================================================
+
+When testing env loading, do not modify, overwrite, or delete the
+user's .env file. Use a separate file (.env.test, .env.local) or
+inline environment variables for the duration of the test.
+
+Treat .env as user data — read-only from your perspective.
+
+==================================================
+RULE 28: REAL-WORLD STARTUP IS A TEST
+==================================================
+
+Unit tests and integration tests with mocked dependencies are not
+sufficient evidence that a phase works. Before declaring any phase
+gate-ready, the user must be able to start the app from a clean
+checkout and run the phase's gate task end-to-end.
+
+Every phase adds its own smoke:e2e-* test that exercises the new
+functionality through a real browser-or-CLI path with real
+services where reasonable. CI may skip if credentials aren't
+configured. Local must pass.
+
+==================================================
 COORDINATION: WHEN TO STOP AND ASK
 ==================================================
 
