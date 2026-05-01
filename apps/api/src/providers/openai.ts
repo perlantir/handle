@@ -5,6 +5,14 @@ import type { ProviderConfig, ProviderInstance } from "./types";
 
 type ChatOpenAIArgs = ConstructorParameters<typeof ChatOpenAI>[0];
 
+const omittedSamplingParams = {
+  frequency_penalty: undefined,
+  n: undefined,
+  presence_penalty: undefined,
+  temperature: undefined,
+  top_p: undefined,
+};
+
 interface OpenAIProviderDependencies {
   createChatModel?: (args: ChatOpenAIArgs) => BaseChatModel;
   getCredential?: typeof defaultGetCredential;
@@ -33,9 +41,9 @@ export function createOpenAIProvider(
 
       return createChatModel({
         apiKey,
+        modelKwargs: omittedSamplingParams,
         model: modelOverride ?? config.primaryModel,
         streaming: true,
-        temperature: 0.7,
       });
     },
 

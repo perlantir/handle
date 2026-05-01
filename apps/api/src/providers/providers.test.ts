@@ -1,4 +1,7 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { HumanMessage } from "@langchain/core/messages";
+import { ChatAnthropic } from "@langchain/anthropic";
+import { ChatOpenAI } from "@langchain/openai";
 import { describe, expect, it, vi } from "vitest";
 import { createAnthropicProvider } from "./anthropic";
 import { createOpenAIProvider } from "./openai";
@@ -6,6 +9,8 @@ import { createOpenAICompatibleProvider } from "./openaiCompatible";
 import type { ProviderConfig } from "./types";
 
 const fakeModel = {} as BaseChatModel;
+type ChatAnthropicArgs = ConstructorParameters<typeof ChatAnthropic>[0];
+type ChatOpenAIArgs = ConstructorParameters<typeof ChatOpenAI>[0];
 
 function config(overrides: Partial<ProviderConfig>): ProviderConfig {
   return {
@@ -33,10 +38,53 @@ describe("provider implementations", () => {
     expect(getCredential).toHaveBeenCalledWith("openai:apiKey");
     expect(createChatModel).toHaveBeenCalledWith({
       apiKey: "test-key-not-real",
+      modelKwargs: {
+        frequency_penalty: undefined,
+        n: undefined,
+        presence_penalty: undefined,
+        temperature: undefined,
+        top_p: undefined,
+      },
       model: "test-model",
       streaming: true,
-      temperature: 0.7,
     });
+  });
+
+  it("omits OpenAI sampling defaults from the outgoing request body", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({ error: { message: "capture", type: "capture" } }),
+        { headers: { "content-type": "application/json" }, status: 400 },
+      );
+    });
+    const getCredential = vi.fn().mockResolvedValue("test-key-not-real");
+    const provider = createOpenAIProvider(
+      config({ id: "openai", primaryModel: "gpt-5.2" }),
+      {
+        createChatModel: (args: ChatOpenAIArgs) =>
+          new ChatOpenAI({
+            ...args,
+            configuration: { fetch },
+            maxRetries: 0,
+            streaming: false,
+          }),
+        getCredential,
+      },
+    );
+
+    const model = await provider.createModel();
+    await expect(model.invoke([new HumanMessage("hi")])).rejects.toThrow(
+      "capture",
+    );
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(requestBody).not.toHaveProperty("temperature");
+    expect(requestBody).not.toHaveProperty("top_p");
+    expect(requestBody).not.toHaveProperty("frequency_penalty");
+    expect(requestBody).not.toHaveProperty("presence_penalty");
+    expect(requestBody).not.toHaveProperty("n");
   });
 
   it("keeps OpenAI ChatGPT OAuth disabled until Step 8", async () => {
@@ -69,10 +117,51 @@ describe("provider implementations", () => {
     expect(getCredential).toHaveBeenCalledWith("anthropic:apiKey");
     expect(createChatModel).toHaveBeenCalledWith({
       apiKey: "test-key-not-real",
+      invocationKwargs: {
+        temperature: undefined,
+        top_k: undefined,
+        top_p: undefined,
+      },
       model: "override-model",
       streaming: true,
-      temperature: 0.7,
+      temperature: null,
+      topP: null,
     });
+  });
+
+  it("omits Anthropic sampling defaults from the Claude request body", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(
+        JSON.stringify({
+          error: { message: "capture", type: "capture" },
+          type: "error",
+        }),
+        { headers: { "content-type": "application/json" }, status: 400 },
+      );
+    });
+    const getCredential = vi.fn().mockResolvedValue("test-key-not-real");
+    const provider = createAnthropicProvider(config({ id: "anthropic" }), {
+      createChatModel: (args: ChatAnthropicArgs) =>
+        new ChatAnthropic({
+          ...args,
+          clientOptions: { fetch },
+          maxRetries: 0,
+          streaming: false,
+        }),
+      getCredential,
+    });
+
+    const model = await provider.createModel("claude-opus-4-7");
+    await expect(model.invoke([new HumanMessage("hi")])).rejects.toThrow(
+      "capture",
+    );
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(requestBody).not.toHaveProperty("temperature");
+    expect(requestBody).not.toHaveProperty("top_p");
+    expect(requestBody).not.toHaveProperty("top_k");
   });
 
   it("creates KIMI models with provider base URLs", async () => {

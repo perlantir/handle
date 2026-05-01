@@ -5,6 +5,16 @@ import type { ProviderConfig, ProviderInstance } from "./types";
 
 type ChatAnthropicArgs = ConstructorParameters<typeof ChatAnthropic>[0];
 
+const omittedSamplingParams = {
+  invocationKwargs: {
+    temperature: undefined,
+    top_k: undefined,
+    top_p: undefined,
+  },
+  temperature: null,
+  topP: null,
+} satisfies Partial<ChatAnthropicArgs>;
+
 interface AnthropicProviderDependencies {
   createChatModel?: (args: ChatAnthropicArgs) => BaseChatModel;
   getCredential?: typeof defaultGetCredential;
@@ -27,9 +37,9 @@ export function createAnthropicProvider(
 
       return createChatModel({
         apiKey,
+        ...omittedSamplingParams,
         model: modelOverride ?? config.primaryModel,
         streaming: true,
-        temperature: 0.7,
       });
     },
 
