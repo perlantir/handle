@@ -63,6 +63,13 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
+      - name: Settings API proxy smoke
+        run: pnpm smoke:settings-api-proxy
+        env:
+          HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_WEB_BASE_URL: http://127.0.0.1:3000
+
       - name: Web sign-in smoke
         run: |
           if [ -z "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" ]; then
