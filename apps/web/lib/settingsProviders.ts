@@ -19,6 +19,7 @@ export interface SettingsProvider {
 }
 
 export interface UpdateSettingsProviderInput {
+  authMode?: "apiKey" | "chatgpt-oauth";
   baseURL?: string;
   enabled?: boolean;
   fallbackOrder?: number;
@@ -38,6 +39,26 @@ export interface TestProviderResponse {
   ok: boolean;
   providerId: SettingsProviderId;
   response?: string;
+}
+
+export interface OpenAIChatGptOAuthStatus {
+  accountId: string | null;
+  email: string | null;
+  expires: number | null;
+  flowError: string | null;
+  flowState: string | null;
+  planType: string | null;
+  port: number | null;
+  signedIn: boolean;
+}
+
+export interface OpenAIChatGptOAuthStart {
+  authUrl: string;
+  expiresInMs: number;
+  port: number;
+  providerId: "openai";
+  redirectUri: string;
+  state: string;
 }
 
 async function parseApiError(response: Response, fallback: string) {
@@ -107,7 +128,42 @@ export async function deleteSettingsProviderKey(id: SettingsProviderId) {
 }
 
 export async function testSettingsProvider(id: SettingsProviderId) {
-  return requestJson<TestProviderResponse>(`/api/settings/providers/${id}/test`, {
-    method: "POST",
-  });
+  return requestJson<TestProviderResponse>(
+    `/api/settings/providers/${id}/test`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function startOpenAIChatGptOAuth() {
+  return requestJson<OpenAIChatGptOAuthStart>(
+    "/api/settings/providers/openai/oauth/start",
+    { method: "POST" },
+  );
+}
+
+export async function getOpenAIChatGptOAuthStatus() {
+  const body = await requestJson<{
+    providerId: "openai";
+    status: OpenAIChatGptOAuthStatus;
+  }>("/api/settings/providers/openai/oauth/status");
+
+  return body.status;
+}
+
+export async function refreshOpenAIChatGptOAuth() {
+  const body = await requestJson<{
+    providerId: "openai";
+    status: OpenAIChatGptOAuthStatus;
+  }>("/api/settings/providers/openai/oauth/refresh", { method: "POST" });
+
+  return body.status;
+}
+
+export async function disconnectOpenAIChatGptOAuth() {
+  return requestJson<{ disconnected: boolean; providerId: "openai" }>(
+    "/api/settings/providers/openai/oauth/disconnect",
+    { method: "DELETE" },
+  );
 }

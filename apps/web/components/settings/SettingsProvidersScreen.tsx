@@ -1,6 +1,14 @@
 "use client";
 
-import { Check, KeyRound, Loader2, Trash2, XCircle } from "lucide-react";
+import {
+  Check,
+  KeyRound,
+  Loader2,
+  LogIn,
+  Trash2,
+  Unplug,
+  XCircle,
+} from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -12,13 +20,19 @@ import { PillButton, Toggle } from "@/components/design-system";
 import { cn } from "@/lib/utils";
 import {
   deleteSettingsProviderKey,
+  disconnectOpenAIChatGptOAuth,
+  getOpenAIChatGptOAuthStatus,
   listSettingsProviders,
   saveSettingsProviderKey,
+  startOpenAIChatGptOAuth,
   testSettingsProvider,
   updateSettingsProvider,
+  type OpenAIChatGptOAuthStatus,
   type SettingsProvider,
   type SettingsProviderId,
 } from "@/lib/settingsProviders";
+
+type OpenAIAuthChoice = "apiKey" | "both" | "chatgpt-oauth";
 
 const providerOrder: SettingsProviderId[] = [
   "openai",
@@ -84,6 +98,7 @@ const settingsNav = [
 
 interface ProviderDraft {
   apiKey: string;
+  authChoice: OpenAIAuthChoice;
   baseURL: string;
   enabled: boolean;
   primaryModel: string;
@@ -97,17 +112,21 @@ interface ProviderStatus {
 function createDraft(provider: SettingsProvider): ProviderDraft {
   return {
     apiKey: "",
+    authChoice:
+      provider.id === "openai" &&
+      provider.authMode === "chatgpt-oauth" &&
+      provider.hasApiKey
+        ? "both"
+        : provider.authMode,
     baseURL: provider.baseURL ?? "",
     enabled: provider.enabled,
     primaryModel: provider.primaryModel,
   };
 }
 
-function providerUpdateBody(
-  provider: SettingsProvider,
-  draft: ProviderDraft,
-) {
+function providerUpdateBody(provider: SettingsProvider, draft: ProviderDraft) {
   const body: {
+    authMode?: "apiKey" | "chatgpt-oauth";
     baseURL?: string;
     enabled: boolean;
     fallbackOrder: number;
@@ -123,7 +142,15 @@ function providerUpdateBody(
     if (baseURL) body.baseURL = baseURL;
   }
 
+  if (provider.id === "openai") {
+    body.authMode = draft.authChoice === "apiKey" ? "apiKey" : "chatgpt-oauth";
+  }
+
   return body;
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function sortProviders(providers: SettingsProvider[]) {
@@ -139,6 +166,11 @@ export function SettingsProvidersScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [providers, setProviders] = useState<SettingsProvider[]>([]);
+  const [openAiOAuthStatus, setOpenAiOAuthStatus] =
+    useState<OpenAIChatGptOAuthStatus | null>(null);
+  const [oauthBusy, setOauthBusy] = useState<"disconnect" | "start" | null>(
+    null,
+  );
   const [saving, setSaving] = useState<SettingsProviderId | null>(null);
   const [statuses, setStatuses] = useState<
     Partial<Record<SettingsProviderId, ProviderStatus>>
@@ -162,6 +194,23 @@ export function SettingsProvidersScreen() {
           ),
         );
         setLoadError(null);
+        void getOpenAIChatGptOAuthStatus()
+          .then((status) => {
+            if (mounted) setOpenAiOAuthStatus(status);
+          })
+          .catch((error: unknown) => {
+            if (!mounted) return;
+            setStatuses((current) => ({
+              ...current,
+              openai: {
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : "Failed to load ChatGPT auth status",
+                tone: "error",
+              },
+            }));
+          });
       })
       .catch((error: unknown) => {
         if (!mounted) return;
@@ -210,12 +259,21 @@ export function SettingsProvidersScreen() {
     setDrafts((current) => ({
       ...current,
       [provider.id]: {
-        ...(current[provider.id] ?? createDraft(provider)),
+        ...createDraft(provider),
+        apiKey: current[provider.id]?.apiKey ?? "",
         baseURL: provider.baseURL ?? "",
         enabled: provider.enabled,
         primaryModel: provider.primaryModel,
       },
     }));
+  }
+
+  function clearProviderStatus(providerId: SettingsProviderId) {
+    setStatuses((current) => {
+      const next = { ...current };
+      delete next[providerId];
+      return next;
+    });
   }
 
   async function handleSave(provider: SettingsProvider) {
@@ -310,6 +368,111 @@ export function SettingsProvidersScreen() {
     }
   }
 
+  async function pollOpenAIChatGptOAuth(expiresInMs: number) {
+    const deadline = Date.now() + Math.min(expiresInMs, 120_000);
+
+    while (Date.now() < deadline) {
+      await delay(1_500);
+      const status = await getOpenAIChatGptOAuthStatus();
+      setOpenAiOAuthStatus(status);
+
+      if (status.signedIn || status.flowError) return status;
+    }
+
+    return getOpenAIChatGptOAuthStatus();
+  }
+
+  async function handleOpenAIChatGptSignIn() {
+    setOauthBusy("start");
+    clearProviderStatus("openai");
+
+    try {
+      const flow = await startOpenAIChatGptOAuth();
+      window.open(flow.authUrl, "_blank", "noopener,noreferrer");
+      setStatuses((current) => ({
+        ...current,
+        openai: {
+          message: "Waiting for ChatGPT sign-in",
+          tone: "success",
+        },
+      }));
+
+      const status = await pollOpenAIChatGptOAuth(flow.expiresInMs);
+      if (status.signedIn) {
+        setStatuses((current) => ({
+          ...current,
+          openai: {
+            message: "ChatGPT subscription connected",
+            tone: "success",
+          },
+        }));
+      } else if (status.flowError) {
+        const flowError = status.flowError;
+        setStatuses((current) => ({
+          ...current,
+          openai: { message: flowError, tone: "error" },
+        }));
+      }
+    } catch (error: unknown) {
+      setStatuses((current) => ({
+        ...current,
+        openai: {
+          message:
+            error instanceof Error ? error.message : "ChatGPT sign-in failed",
+          tone: "error",
+        },
+      }));
+    } finally {
+      setOauthBusy(null);
+    }
+  }
+
+  async function handleOpenAIChatGptDisconnect() {
+    setOauthBusy("disconnect");
+    clearProviderStatus("openai");
+
+    try {
+      await disconnectOpenAIChatGptOAuth();
+      setOpenAiOAuthStatus({
+        accountId: null,
+        email: null,
+        expires: null,
+        flowError: null,
+        flowState: null,
+        planType: null,
+        port: null,
+        signedIn: false,
+      });
+      setStatuses((current) => ({
+        ...current,
+        openai: {
+          message: "ChatGPT subscription disconnected",
+          tone: "success",
+        },
+      }));
+    } catch (error: unknown) {
+      setStatuses((current) => ({
+        ...current,
+        openai: {
+          message:
+            error instanceof Error
+              ? error.message
+              : "ChatGPT disconnect failed",
+          tone: "error",
+        },
+      }));
+    } finally {
+      setOauthBusy(null);
+    }
+  }
+
+  function handleOpenAIAddApiFallback() {
+    updateDraft("openai", { authChoice: "both" });
+    window.setTimeout(() => {
+      document.getElementById("openai-api-key")?.focus();
+    }, 0);
+  }
+
   return (
     <div className="grid h-full min-h-0 grid-cols-[220px_1fr] overflow-hidden">
       <aside className="border-r border-border-subtle px-4 py-6">
@@ -367,8 +530,15 @@ export function SettingsProvidersScreen() {
                 <ProviderSettingsCard
                   draft={drafts[provider.id] ?? createDraft(provider)}
                   key={provider.id}
+                  oauthBusy={provider.id === "openai" ? oauthBusy : null}
+                  oauthStatus={
+                    provider.id === "openai" ? openAiOAuthStatus : null
+                  }
+                  onAddApiFallback={handleOpenAIAddApiFallback}
                   onDeleteKey={() => handleDeleteKey(provider)}
                   onDraftChange={(patch) => updateDraft(provider.id, patch)}
+                  onOAuthDisconnect={handleOpenAIChatGptDisconnect}
+                  onOAuthStart={handleOpenAIChatGptSignIn}
                   onSave={() => handleSave(provider)}
                   onTest={() => handleTest(provider)}
                   provider={provider}
@@ -410,8 +580,13 @@ function TextInput({
 
 function ProviderSettingsCard({
   draft,
+  oauthBusy,
+  oauthStatus,
+  onAddApiFallback,
   onDeleteKey,
   onDraftChange,
+  onOAuthDisconnect,
+  onOAuthStart,
   onSave,
   onTest,
   provider,
@@ -420,8 +595,13 @@ function ProviderSettingsCard({
   testing,
 }: {
   draft: ProviderDraft;
+  oauthBusy: "disconnect" | "start" | null;
+  oauthStatus: OpenAIChatGptOAuthStatus | null;
+  onAddApiFallback: () => void;
   onDeleteKey: () => void;
   onDraftChange: (patch: Partial<ProviderDraft>) => void;
+  onOAuthDisconnect: () => void;
+  onOAuthStart: () => void;
   onSave: () => void;
   onTest: () => void;
   provider: SettingsProvider;
@@ -432,6 +612,10 @@ function ProviderSettingsCard({
   const meta = providerMeta[provider.id];
   const showBaseURL = provider.id === "kimi" || provider.id === "local";
   const showApiKey = provider.id !== "local";
+  const showFallbackAction =
+    provider.id === "openai" &&
+    status?.tone === "error" &&
+    status.message.includes("OpenAI ChatGPT Subscription auth failed");
 
   return (
     <article
@@ -474,19 +658,91 @@ function ProviderSettingsCard({
           <legend className="text-[12.5px] font-medium text-text-secondary">
             OpenAI auth mode
           </legend>
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-3">
             <label className="flex h-[34px] items-center gap-2 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary">
-              <input checked name="openai-auth-mode" readOnly type="radio" />
+              <input
+                checked={draft.authChoice === "apiKey"}
+                name="openai-auth-mode"
+                onChange={() => onDraftChange({ authChoice: "apiKey" })}
+                type="radio"
+              />
               API Key
             </label>
-            <label
-              className="flex h-[34px] items-center gap-2 rounded-md border border-border-subtle bg-bg-subtle px-3 text-[12.5px] text-text-tertiary"
-              title="Coming in step 8"
-            >
-              <input disabled name="openai-auth-mode" type="radio" />
-              ChatGPT Subscription (OAuth)
-              <span className="ml-auto text-[11px]">Coming in step 8</span>
+            <label className="flex h-[34px] items-center gap-2 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary">
+              <input
+                checked={draft.authChoice === "chatgpt-oauth"}
+                name="openai-auth-mode"
+                onChange={() => onDraftChange({ authChoice: "chatgpt-oauth" })}
+                type="radio"
+              />
+              ChatGPT Subscription
             </label>
+            <label className="flex h-[34px] items-center gap-2 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary">
+              <input
+                checked={draft.authChoice === "both"}
+                name="openai-auth-mode"
+                onChange={() => onDraftChange({ authChoice: "both" })}
+                type="radio"
+              />
+              Both (fallback)
+            </label>
+          </div>
+          <div className="mt-2 rounded-md border border-border-subtle bg-bg-canvas px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[12.5px] text-text-secondary">
+                {oauthStatus?.signedIn
+                  ? `Signed in as ${
+                      oauthStatus.email ?? oauthStatus.accountId ?? "ChatGPT"
+                    }`
+                  : "ChatGPT subscription not connected"}
+              </span>
+              <div className="ml-auto flex items-center gap-2">
+                <PillButton
+                  disabled={oauthBusy === "start"}
+                  icon={
+                    oauthBusy === "start" ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <LogIn className="h-3 w-3" />
+                    )
+                  }
+                  onClick={onOAuthStart}
+                  size="sm"
+                  variant="secondary"
+                >
+                  Sign in with ChatGPT
+                </PillButton>
+                <PillButton
+                  disabled={
+                    !oauthStatus?.signedIn || oauthBusy === "disconnect"
+                  }
+                  icon={
+                    oauthBusy === "disconnect" ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Unplug className="h-3 w-3" />
+                    )
+                  }
+                  onClick={onOAuthDisconnect}
+                  size="sm"
+                  variant="ghost"
+                >
+                  Disconnect
+                </PillButton>
+              </div>
+            </div>
+            {oauthStatus?.flowError ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11.5px] text-status-error">
+                <span>{oauthStatus.flowError}</span>
+                <PillButton
+                  onClick={onAddApiFallback}
+                  size="sm"
+                  variant="ghost"
+                >
+                  Add API Key as fallback
+                </PillButton>
+              </div>
+            ) : null}
           </div>
         </fieldset>
       ) : null}
@@ -547,6 +803,7 @@ function ProviderSettingsCard({
               <TextInput
                 aria-label={`${meta.label} API key`}
                 autoComplete="off"
+                id={`${provider.id}-api-key`}
                 onChange={(event) =>
                   onDraftChange({ apiKey: event.currentTarget.value })
                 }
@@ -608,6 +865,12 @@ function ProviderSettingsCard({
             )}
             {status.message}
           </span>
+        ) : null}
+
+        {showFallbackAction ? (
+          <PillButton onClick={onAddApiFallback} size="sm" variant="ghost">
+            Add API Key as fallback
+          </PillButton>
         ) : null}
       </div>
     </article>
