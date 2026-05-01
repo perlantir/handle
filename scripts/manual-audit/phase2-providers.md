@@ -66,7 +66,7 @@ The script starts an isolated API process on the first free port from 3001-3005,
 The smoke test should run the canonical Hacker News task against:
 
 - OpenAI API key mode (`gpt-4o`)
-- OpenAI ChatGPT Subscription OAuth mode (Codex default model)
+- OpenAI ChatGPT Subscription OAuth mode (`gpt-5.3-codex`)
 - Anthropic (`claude-opus-4-7`)
 - KIMI (`kimi-k2.6`, `https://api.moonshot.ai/v1`)
 - OpenRouter (`anthropic/claude-opus-4.7`)

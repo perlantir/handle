@@ -15,9 +15,13 @@ const KEYCHAIN_SERVICE = "com.perlantir.handle";
 const TEST_USER_ID = "user-smoke-e2e";
 const CANONICAL_GOAL =
   "Write a Python script that fetches the top 10 Hacker News stories from https://news.ycombinator.com and saves them as JSON to /tmp/hn.json, then run the script once and show me the contents.";
-const TASK_TIMEOUT_MS = Number.parseInt(
-  process.env.HANDLE_E2E_PROVIDERS_TASK_TIMEOUT_MS ?? "420000",
-  10,
+const MIN_TASK_TIMEOUT_MS = 5 * 60 * 1000;
+const TASK_TIMEOUT_MS = Math.max(
+  MIN_TASK_TIMEOUT_MS,
+  Number.parseInt(
+    process.env.HANDLE_E2E_PROVIDERS_TASK_TIMEOUT_MS ?? "420000",
+    10,
+  ),
 );
 const STARTUP_TIMEOUT_MS = 90_000;
 
@@ -39,7 +43,8 @@ const providerRuns = [
     ],
     id: "openai",
     label: "OpenAI chatgpt-oauth",
-    primaryModel: process.env.HANDLE_E2E_OPENAI_CHATGPT_MODEL ?? "gpt-5.1",
+    primaryModel:
+      process.env.HANDLE_E2E_OPENAI_CHATGPT_MODEL ?? "gpt-5.3-codex",
   },
   {
     credentialAccounts: ["anthropic:apiKey"],
@@ -249,6 +254,7 @@ async function waitForTaskEvents(apiUrl, taskId) {
   const events = [];
   let sawToolCall = false;
   let finalStatus = null;
+  let finalStatusEvent = null;
 
   try {
     const response = await apiFetch(apiUrl, `/api/tasks/${taskId}/stream`, {
@@ -290,6 +296,7 @@ async function waitForTaskEvents(apiUrl, taskId) {
             ["STOPPED", "ERROR"].includes(event.status)
           ) {
             finalStatus = event.status;
+            finalStatusEvent = event;
           }
         }
 
@@ -316,7 +323,40 @@ async function waitForTaskEvents(apiUrl, taskId) {
     );
   }
 
-  return { events, finalStatus };
+  return { events, finalStatus, finalStatusEvent };
+}
+
+function truncate(value, maxLength = 1_200) {
+  if (value === null || value === undefined) return "";
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function eventCounts(events) {
+  return events.reduce((counts, event) => {
+    counts[event.type] = (counts[event.type] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function lastEvent(events, type) {
+  return events.findLast((event) => event.type === type) ?? null;
+}
+
+function taskDiagnostics(events, finalStatusEvent) {
+  const lastAssistant = lastEvent(events, "message");
+  const lastError = lastEvent(events, "error");
+  const lastToolCall = lastEvent(events, "tool_call");
+  const lastToolResult = lastEvent(events, "tool_result");
+
+  return [
+    `SSE event counts: ${JSON.stringify(eventCounts(events))}`,
+    `Final status_update: ${truncate(finalStatusEvent ?? lastEvent(events, "status_update"))}`,
+    `Last error event: ${truncate(lastError) || "<none>"}`,
+    `Last assistant message: ${truncate(lastAssistant?.content) || "<none>"}`,
+    `Last tool_call: ${truncate(lastToolCall) || "<none>"}`,
+    `Last tool_result: ${truncate(lastToolResult?.result) || "<none>"}`,
+  ].join("\n");
 }
 
 function candidateStringsFromEvents(events) {
@@ -507,11 +547,56 @@ async function snapshotProviderConfigs(prisma) {
 }
 
 async function configureOnlyProvider(prisma, run) {
-  await prisma.providerConfig.updateMany({ data: { enabled: false } });
-  await prisma.providerConfig.update({
-    data: providerUpdateForRun(run),
-    where: { id: run.id },
-  });
+  await prisma.$transaction([
+    prisma.providerConfig.updateMany({ data: { enabled: false } }),
+    prisma.providerConfig.update({
+      data: providerUpdateForRun(run),
+      where: { id: run.id },
+    }),
+  ]);
+}
+
+async function verifyProviderIsolation(apiUrl, run) {
+  let lastSnapshot = null;
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const response = await apiFetch(apiUrl, "/api/settings/providers");
+    if (!response.ok) {
+      throw new Error(
+        `/api/settings/providers returned ${response.status} while verifying provider isolation`,
+      );
+    }
+
+    const { providers } = await response.json();
+    lastSnapshot = providers;
+    const selected = providers.find((provider) => provider.id === run.id);
+    const othersDisabled = providers
+      .filter((provider) => provider.id !== run.id)
+      .every((provider) => provider.enabled === false);
+    const authModeMatches =
+      run.id !== "openai" || selected?.authMode === (run.authMode ?? "apiKey");
+    const baseURLMatches = !run.baseURL || selected?.baseURL === run.baseURL;
+    const modelMatches = selected?.primaryModel === run.primaryModel;
+
+    if (
+      selected?.enabled === true &&
+      othersDisabled &&
+      authModeMatches &&
+      baseURLMatches &&
+      modelMatches
+    ) {
+      console.log(
+        `[smoke:e2e-providers] ${run.label}: verified provider isolation (${run.primaryModel})`,
+      );
+      return;
+    }
+
+    await delay(250);
+  }
+
+  throw new Error(
+    `Provider isolation did not settle for ${run.label}: ${truncate(lastSnapshot, 2_000)}`,
+  );
 }
 
 async function restoreProviderConfigs(prisma, snapshot) {
@@ -534,13 +619,29 @@ async function restoreProviderConfigs(prisma, snapshot) {
 
 async function runProviderSmoke({ apiUrl, prisma, run }) {
   await configureOnlyProvider(prisma, run);
+  await verifyProviderIsolation(apiUrl, run);
 
   console.log(`[smoke:e2e-providers] ${run.label}: starting ${CANONICAL_GOAL}`);
   const taskId = await createTask(apiUrl, run.id);
   console.log(`[smoke:e2e-providers] ${run.label}: task ${taskId} created`);
 
-  const { events, finalStatus } = await waitForTaskEvents(apiUrl, taskId);
-  const entries = assertCanonicalResult(events, finalStatus);
+  const { events, finalStatus, finalStatusEvent } = await waitForTaskEvents(
+    apiUrl,
+    taskId,
+  );
+  console.log(
+    `[smoke:e2e-providers] ${run.label}: final status ${finalStatus}; ${events.length} SSE events; counts ${JSON.stringify(eventCounts(events))}`,
+  );
+
+  let entries;
+  try {
+    entries = assertCanonicalResult(events, finalStatus);
+  } catch (error) {
+    console.error(
+      `[smoke:e2e-providers] ${run.label}: task diagnostics for ${taskId}\n${taskDiagnostics(events, finalStatusEvent)}`,
+    );
+    throw error;
+  }
 
   console.log(
     `[smoke:e2e-providers] ${run.label}: PASS task ${taskId}, ${entries.length} HN entries, ${events.length} SSE events`,
