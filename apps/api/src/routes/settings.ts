@@ -33,8 +33,40 @@ const updateProviderSchema = z
   });
 
 const setKeySchema = z.object({
-  apiKey: z.string().min(1),
+  apiKey: z.string(),
 });
+
+const apiKeyFormatDescriptions: Record<ProviderId, string> = {
+  anthropic: "sk-ant- followed by 20+ letters, numbers, underscores, or dashes",
+  kimi: "sk- followed by 20+ letters, numbers, underscores, or dashes",
+  local: "any non-empty string",
+  openai:
+    "sk- or sk-proj- followed by 20+ letters, numbers, underscores, or dashes",
+  openrouter: "sk-or- followed by 20+ letters, numbers, underscores, or dashes",
+};
+
+const apiKeyFormatSchema = z.discriminatedUnion("providerId", [
+  z.object({
+    apiKey: z.string().regex(/^(?:sk|sk-proj)-[A-Za-z0-9_-]{20,}$/),
+    providerId: z.literal("openai"),
+  }),
+  z.object({
+    apiKey: z.string().regex(/^sk-ant-[A-Za-z0-9_-]{20,}$/),
+    providerId: z.literal("anthropic"),
+  }),
+  z.object({
+    apiKey: z.string().regex(/^sk-[A-Za-z0-9_-]{20,}$/),
+    providerId: z.literal("kimi"),
+  }),
+  z.object({
+    apiKey: z.string().regex(/^sk-or-[A-Za-z0-9_-]{20,}$/),
+    providerId: z.literal("openrouter"),
+  }),
+  z.object({
+    apiKey: z.string().min(1),
+    providerId: z.literal("local"),
+  }),
+]);
 
 export interface ProviderConfigRow {
   authMode: string;
@@ -97,6 +129,12 @@ function errorMessage(err: unknown) {
   }
 
   return "Unknown provider error";
+}
+
+function validateApiKeyFormat(providerId: ProviderId, apiKey: string) {
+  const result = apiKeyFormatSchema.safeParse({ apiKey, providerId });
+
+  return result.success;
 }
 
 function normalizeProviderConfig(
@@ -250,6 +288,13 @@ export function createSettingsRouter({
         return res
           .status(400)
           .json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      if (!validateApiKeyFormat(providerId, parsed.data.apiKey)) {
+        return res.status(400).json({
+          error: `Invalid API key format for ${providerId}`,
+          expected: apiKeyFormatDescriptions[providerId],
+        });
       }
 
       const account = accountForProvider(providerId);

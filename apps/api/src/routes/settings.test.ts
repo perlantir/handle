@@ -3,7 +3,11 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createKeychainClient } from "../lib/keychain";
-import type { ProviderConfig, ProviderInstance } from "../providers/types";
+import type {
+  ProviderConfig,
+  ProviderId,
+  ProviderInstance,
+} from "../providers/types";
 import {
   createSettingsRouter,
   type CreateSettingsRouterOptions,
@@ -90,6 +94,31 @@ function createApp({
   return app;
 }
 
+const validApiKeys: Record<ProviderId, string> = {
+  anthropic: `sk-ant-${"a".repeat(30)}`,
+  kimi: `sk-${"k".repeat(30)}`,
+  local: "placeholder",
+  openai: `sk-${"o".repeat(30)}`,
+  openrouter: `sk-or-${"r".repeat(30)}`,
+};
+
+const expectedKeyFormats: Record<ProviderId, string> = {
+  anthropic: "sk-ant- followed by 20+ letters, numbers, underscores, or dashes",
+  kimi: "sk- followed by 20+ letters, numbers, underscores, or dashes",
+  local: "any non-empty string",
+  openai:
+    "sk- or sk-proj- followed by 20+ letters, numbers, underscores, or dashes",
+  openrouter: "sk-or- followed by 20+ letters, numbers, underscores, or dashes",
+};
+
+function mockKeychain(readBack = "unused-key") {
+  return {
+    deleteCredential: vi.fn().mockResolvedValue(undefined),
+    getCredential: vi.fn().mockResolvedValue(readBack),
+    setCredential: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 describe("settings providers route", () => {
   it("lists provider configs without secrets", async () => {
     const routeStore = store([
@@ -170,6 +199,7 @@ describe("settings providers route", () => {
   });
 
   it("writes provider keys to Keychain and verifies by reading back", async () => {
+    const apiKey = validApiKeys.openrouter;
     const values = new Map<string, string>();
     const runSecurity = vi.fn(async (_command: string, args: string[]) => {
       const account = args.at(args.indexOf("-a") + 1) ?? "";
@@ -187,7 +217,7 @@ describe("settings providers route", () => {
 
     const response = await request(createApp({ keychain }))
       .post("/api/settings/providers/openrouter/key")
-      .send({ apiKey: "test-key-not-real" })
+      .send({ apiKey })
       .expect(200);
 
     expect(response.body).toEqual({ providerId: "openrouter", saved: true });
@@ -200,6 +230,77 @@ describe("settings providers route", () => {
       expect.arrayContaining(["find-generic-password"]),
     );
   });
+
+  it.each(["openai", "anthropic", "kimi", "openrouter"] as const)(
+    "rejects invalid API key formats for %s before writing to Keychain",
+    async (providerId) => {
+      const keychain = mockKeychain();
+
+      for (const apiKey of ["placeholder", "test", "", "sk-short"]) {
+        const response = await request(createApp({ keychain }))
+          .post(`/api/settings/providers/${providerId}/key`)
+          .send({ apiKey })
+          .expect(400);
+
+        expect(response.body).toEqual({
+          error: `Invalid API key format for ${providerId}`,
+          expected: expectedKeyFormats[providerId],
+        });
+      }
+
+      expect(keychain.setCredential).not.toHaveBeenCalled();
+      expect(keychain.getCredential).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects empty local keys but accepts non-empty local keys", async () => {
+    const invalidKeychain = mockKeychain();
+
+    const invalidResponse = await request(
+      createApp({ keychain: invalidKeychain }),
+    )
+      .post("/api/settings/providers/local/key")
+      .send({ apiKey: "" })
+      .expect(400);
+
+    expect(invalidResponse.body).toEqual({
+      error: "Invalid API key format for local",
+      expected: expectedKeyFormats.local,
+    });
+    expect(invalidKeychain.setCredential).not.toHaveBeenCalled();
+
+    const keychain = mockKeychain(validApiKeys.local);
+
+    await request(createApp({ keychain }))
+      .post("/api/settings/providers/local/key")
+      .send({ apiKey: validApiKeys.local })
+      .expect(200);
+
+    expect(keychain.setCredential).toHaveBeenCalledWith(
+      "local:apiKey",
+      validApiKeys.local,
+    );
+  });
+
+  it.each(Object.entries(validApiKeys) as Array<[ProviderId, string]>)(
+    "accepts valid-shaped fake keys for %s",
+    async (providerId, apiKey) => {
+      const keychain = mockKeychain(apiKey);
+
+      await request(createApp({ keychain }))
+        .post(`/api/settings/providers/${providerId}/key`)
+        .send({ apiKey })
+        .expect(200);
+
+      expect(keychain.setCredential).toHaveBeenCalledWith(
+        `${providerId}:apiKey`,
+        apiKey,
+      );
+      expect(keychain.getCredential).toHaveBeenCalledWith(
+        `${providerId}:apiKey`,
+      );
+    },
+  );
 
   it("deletes provider keys from Keychain", async () => {
     const runSecurity = vi.fn().mockResolvedValue({});

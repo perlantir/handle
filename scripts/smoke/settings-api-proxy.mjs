@@ -11,6 +11,9 @@ const WEB_PORT = new URL(WEB_URL).port || "3000";
 const TIMEOUT_MS = 45_000;
 const PROXY_LOOP_TEXT = "Failed to proxy http://localhost:3000";
 const EXPECTED_AUTHORIZATION = "Bearer test-key-not-real";
+const VALID_OPENROUTER_KEY = `sk-or-${"r".repeat(30)}`;
+const OPENROUTER_KEY_FORMAT =
+  "sk-or- followed by 20+ letters, numbers, underscores, or dashes";
 
 const output = [];
 const upstreamRequests = [];
@@ -34,7 +37,7 @@ const proxyCalls = [
     path: "/api/settings/providers/local",
   },
   {
-    body: { apiKey: "test-key-not-real" },
+    body: { apiKey: VALID_OPENROUTER_KEY },
     method: "POST",
     path: "/api/settings/providers/openrouter/key",
   },
@@ -49,6 +52,14 @@ const proxyCalls = [
     path: "/api/settings/providers/openrouter/test",
   },
 ];
+
+const invalidProxyCall = {
+  body: { apiKey: "placeholder" },
+  method: "POST",
+  path: "/api/settings/providers/openrouter/key",
+};
+
+const expectedUpstreamRequests = [...proxyCalls, invalidProxyCall];
 
 function recordOutput(label, chunk) {
   const text = chunk.toString();
@@ -81,6 +92,21 @@ function startMockApi() {
       method: request.method,
       url: request.url,
     });
+
+    if (
+      request.method === invalidProxyCall.method &&
+      request.url === invalidProxyCall.path &&
+      body === JSON.stringify(invalidProxyCall.body)
+    ) {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          error: "Invalid API key format for openrouter",
+          expected: OPENROUTER_KEY_FORMAT,
+        }),
+      );
+      return;
+    }
 
     response.writeHead(200, { "content-type": "application/json" });
     response.end(
@@ -192,13 +218,13 @@ async function waitForWeb() {
 }
 
 function assertUpstreamRequests() {
-  if (upstreamRequests.length !== proxyCalls.length) {
+  if (upstreamRequests.length !== expectedUpstreamRequests.length) {
     throw new Error(
-      `Mock API received ${upstreamRequests.length} requests, expected ${proxyCalls.length}`,
+      `Mock API received ${upstreamRequests.length} requests, expected ${expectedUpstreamRequests.length}`,
     );
   }
 
-  proxyCalls.forEach((expected, index) => {
+  expectedUpstreamRequests.forEach((expected, index) => {
     const actual = upstreamRequests[index];
     if (!actual) throw new Error(`Missing upstream request ${index + 1}`);
 
@@ -264,6 +290,37 @@ async function hitProxyRoutes(page) {
   }
 }
 
+async function assertInvalidKeyResponse(page) {
+  const result = await page.evaluate(async ({ body, method, path }) => {
+    const response = await fetch(path, {
+      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json" },
+      method,
+    });
+
+    return {
+      body: await response.json(),
+      status: response.status,
+    };
+  }, invalidProxyCall);
+
+  if (result.status !== 400) {
+    throw new Error(
+      `Invalid key proxy returned ${result.status}, expected 400: ${JSON.stringify(result.body)}`,
+    );
+  }
+
+  const expectedBody = {
+    error: "Invalid API key format for openrouter",
+    expected: OPENROUTER_KEY_FORMAT,
+  };
+  if (JSON.stringify(result.body) !== JSON.stringify(expectedBody)) {
+    throw new Error(
+      `Invalid key proxy body was ${JSON.stringify(result.body)}, expected ${JSON.stringify(expectedBody)}`,
+    );
+  }
+}
+
 let browser;
 let mockApi;
 let web;
@@ -278,12 +335,18 @@ try {
   const pageErrors = [];
 
   page.on("console", (message) => {
-    if (message.type() === "error") pageErrors.push(message.text());
+    if (
+      message.type() === "error" &&
+      !message.text().includes("the server responded with a status of 400")
+    ) {
+      pageErrors.push(message.text());
+    }
   });
   page.on("pageerror", (error) => pageErrors.push(error.message));
 
   await page.goto(`${WEB_URL}/sign-in`);
   await hitProxyRoutes(page);
+  await assertInvalidKeyResponse(page);
 
   if (pageErrors.length > 0) {
     throw new Error(`Browser errors were reported: ${pageErrors.join(" | ")}`);
@@ -292,7 +355,7 @@ try {
   assertUpstreamRequests();
 
   console.log(
-    `[smoke:settings-api-proxy] ${proxyCalls.length} Settings provider proxy routes forwarded to ${mockApi.url}`,
+    `[smoke:settings-api-proxy] ${expectedUpstreamRequests.length} Settings provider proxy requests forwarded to ${mockApi.url}`,
   );
 } catch (error) {
   console.error(
