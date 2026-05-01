@@ -15,7 +15,8 @@ Run this from a clean checkout of the `phase-2/multi-provider` branch after `.en
   - `E2B_API_KEY`
   - `LANGSMITH_API_KEY` optional
 - Provider credentials are configured through Settings and stored in Keychain:
-  - OpenAI
+  - OpenAI API key
+  - OpenAI ChatGPT Subscription OAuth
   - Anthropic
   - KIMI
   - OpenRouter
@@ -58,7 +59,20 @@ Run:
 pnpm smoke:e2e-providers
 ```
 
-The smoke test should run the canonical Hacker News task against OpenAI, Anthropic, KIMI, OpenRouter, and local. Each configured provider must return more than 5 valid entries with `title`, `url`, and `score`, then finish with status `STOPPED`.
+The smoke test is local-only and skips in CI because mocking would defeat the purpose of this phase gate. It uses real Keychain credentials, real provider APIs, E2B, and the real agent loop. Expected runtime with all six provider configurations is 10-15 minutes; the script prints progress per provider so a slow model does not look hung.
+
+The script starts an isolated API process on the first free port from 3001-3005, temporarily isolates each provider in `ProviderConfig`, then restores the original provider settings before exit. Do not change provider settings in the UI while this script is running.
+
+The smoke test should run the canonical Hacker News task against:
+
+- OpenAI API key mode (`gpt-4o`)
+- OpenAI ChatGPT Subscription OAuth mode (Codex default model)
+- Anthropic (`claude-opus-4-7`)
+- KIMI (`kimi-k2.6`, `https://api.moonshot.ai/v1`)
+- OpenRouter (`anthropic/claude-opus-4.7`)
+- Local (`llama3.1:8b`)
+
+Each configured provider must return more than 5 valid entries with `title`, `url`, and `score`, then finish with status `STOPPED`. Providers with missing credentials are reported as `SKIP`; the Phase 2 gate requires the user-run audit to show all six as `PASS`.
 
 ## Canonical Task
 
@@ -78,7 +92,8 @@ Write a Python script that fetches the top 10 Hacker News stories from https://n
 - [ ] OpenRouter key saves to Keychain and read-back verification succeeds.
 - [ ] Local provider settings save successfully.
 - [ ] Test Connection surfaces provider-specific errors verbatim enough to distinguish invalid key, rate limit, and network unreachable.
-- [ ] OpenAI runs the canonical task and returns more than 5 valid Hacker News entries.
+- [ ] OpenAI API key mode runs the canonical task and returns more than 5 valid Hacker News entries.
+- [ ] OpenAI ChatGPT Subscription OAuth mode runs the canonical task and returns more than 5 valid Hacker News entries.
 - [ ] Anthropic runs the canonical task and returns more than 5 valid Hacker News entries.
 - [ ] KIMI runs the canonical task and returns more than 5 valid Hacker News entries.
 - [ ] OpenRouter runs the canonical task and returns more than 5 valid Hacker News entries.
@@ -90,8 +105,7 @@ Write a Python script that fetches the top 10 Hacker News stories from https://n
 - [ ] Workspace status bar updates the visible model name after fallback.
 - [ ] Fallback toast appears.
 - [ ] Cost counter splits usage across providers.
-- [ ] OpenAI is API-key-only unless public OpenAI OAuth for agentic API usage exists.
-- [ ] Any OpenAI OAuth gap is visible in the UI and recorded in SIGNOFF.
+- [ ] OpenAI API key, ChatGPT Subscription OAuth, and Both (fallback) auth modes are visible in Settings.
 - [ ] `/health` returns `service: "handle-api"`, `status: "ok"`, build info, and timestamp.
 - [ ] Logs are present at `~/Library/Logs/Handle/api.log`.
 - [ ] Design fidelity matches `docs/codex-context/FINAL_DESIGN_SYSTEM.md` and `packages/design-refs/screen-specs.md` for Settings and Workspace.
@@ -108,8 +122,10 @@ Provider smoke:
 - Notes:
 
 OpenAI:
-- Task id:
-- Final status:
+- API key task id:
+- API key final status:
+- ChatGPT OAuth task id:
+- ChatGPT OAuth final status:
 - Notes:
 
 Anthropic:
@@ -138,7 +154,7 @@ Fallback:
 - Event observed:
 - UI notes:
 
-OpenAI OAuth availability:
+OpenAI OAuth notes:
 
 /health output:
 
