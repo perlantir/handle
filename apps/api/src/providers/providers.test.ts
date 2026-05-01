@@ -20,6 +20,10 @@ const omittedOpenAICompatibleSamplingParams = {
   temperature: undefined,
   top_p: undefined,
 };
+const kimiModelKwargs = {
+  ...omittedOpenAICompatibleSamplingParams,
+  extra_body: { thinking: { type: "disabled" } },
+};
 
 function config(overrides: Partial<ProviderConfig>): ProviderConfig {
   return {
@@ -286,7 +290,7 @@ describe("provider implementations", () => {
       configuration: {
         baseURL: "https://api.moonshot.ai/v1",
       },
-      modelKwargs: omittedOpenAICompatibleSamplingParams,
+      modelKwargs: kimiModelKwargs,
       model: "test-model",
       streaming: true,
     });
@@ -313,7 +317,7 @@ describe("provider implementations", () => {
       configuration: {
         baseURL: "https://api.moonshot.cn/v1",
       },
-      modelKwargs: omittedOpenAICompatibleSamplingParams,
+      modelKwargs: kimiModelKwargs,
       model: "test-model",
       streaming: true,
     });
@@ -331,6 +335,14 @@ describe("provider implementations", () => {
       expect(requestBody).not.toHaveProperty("frequency_penalty");
     },
   );
+
+  it("disables KIMI thinking mode for tool-calling compatibility", async () => {
+    const requestBody = await captureOpenAICompatibleRequestBody("kimi");
+
+    expect(requestBody).toMatchObject({
+      extra_body: { thinking: { type: "disabled" } },
+    });
+  });
 
   it("adds OpenRouter attribution headers", async () => {
     const getCredential = vi.fn().mockResolvedValue("test-key-not-real");

@@ -22,9 +22,25 @@ const omittedSamplingParams = {
   top_p: undefined,
 };
 
-const diagnosticSamplingParams = Object.fromEntries(
-  Object.keys(omittedSamplingParams).map((key) => [key, "[undefined]"]),
-);
+function modelKwargsForProvider(id: OpenAICompatibleProviderId) {
+  return {
+    ...omittedSamplingParams,
+    ...(id === "kimi"
+      ? { extra_body: { thinking: { type: "disabled" } } }
+      : {}),
+  };
+}
+
+function diagnosticModelKwargsForProvider(id: OpenAICompatibleProviderId) {
+  return {
+    ...Object.fromEntries(
+      Object.keys(omittedSamplingParams).map((key) => [key, "[undefined]"]),
+    ),
+    ...(id === "kimi"
+      ? { extra_body: { thinking: { type: "disabled" } } }
+      : {}),
+  };
+}
 
 export const OPENAI_COMPATIBLE_ENDPOINTS: Record<
   OpenAICompatibleProviderId,
@@ -196,7 +212,7 @@ export function createOpenAICompatibleProvider(
             baseURL,
             label: options.diagnostics.label,
             model,
-            modelKwargs: diagnosticSamplingParams,
+            modelKwargs: diagnosticModelKwargsForProvider(id),
             providerId: id,
           },
           "OpenAI-compatible provider test diagnostic",
@@ -224,7 +240,10 @@ export function createOpenAICompatibleProvider(
         // Kimi K2.6/K2.5 can report sampler mismatches as "401 Invalid
         // Authentication"; suppress LangChain's defaults for all compatible
         // providers unless a future settings field explicitly opts in.
-        modelKwargs: omittedSamplingParams,
+        // Kimi K2.6 also enables thinking by default; disable it for Phase 2
+        // because its multi-step tool-calling protocol requires preserving
+        // reasoning_content between assistant tool-call turns.
+        modelKwargs: modelKwargsForProvider(id),
         model,
         streaming: options?.streaming ?? true,
       });
