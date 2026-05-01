@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "dotenv -e ../../.env -- tsx watch src/index.ts",
     "prisma": "dotenv -e ../../.env -- prisma",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --passWithNoTests --no-file-parallelism",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
