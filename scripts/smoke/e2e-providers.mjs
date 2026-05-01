@@ -30,6 +30,7 @@ const providerRuns = [
     authMode: "apiKey",
     credentialAccounts: ["openai:apiKey"],
     id: "openai",
+    key: "openai-apikey",
     label: "OpenAI apiKey",
     primaryModel: "gpt-4o",
   },
@@ -42,6 +43,7 @@ const providerRuns = [
       "openai:chatgpt:accountId",
     ],
     id: "openai",
+    key: "openai-chatgpt-oauth",
     label: "OpenAI chatgpt-oauth",
     primaryModel:
       process.env.HANDLE_E2E_OPENAI_CHATGPT_MODEL ?? "gpt-5.3-codex",
@@ -49,6 +51,7 @@ const providerRuns = [
   {
     credentialAccounts: ["anthropic:apiKey"],
     id: "anthropic",
+    key: "anthropic",
     label: "Anthropic",
     primaryModel: "claude-opus-4-7",
   },
@@ -56,6 +59,7 @@ const providerRuns = [
     baseURL: "https://api.moonshot.ai/v1",
     credentialAccounts: ["kimi:apiKey"],
     id: "kimi",
+    key: "kimi",
     label: "KIMI",
     primaryModel: "kimi-k2.6",
   },
@@ -63,6 +67,7 @@ const providerRuns = [
     baseURL: "https://openrouter.ai/api/v1",
     credentialAccounts: ["openrouter:apiKey"],
     id: "openrouter",
+    key: "openrouter",
     label: "OpenRouter",
     primaryModel: "anthropic/claude-opus-4.7",
   },
@@ -70,6 +75,7 @@ const providerRuns = [
     baseURL: "http://127.0.0.1:11434/v1",
     credentialAccounts: [],
     id: "local",
+    key: "local",
     label: "Local",
     modelName: "Local LLM",
     primaryModel: "llama3.1:8b",
@@ -77,6 +83,21 @@ const providerRuns = [
 ];
 
 const output = [];
+
+function onlyFilter() {
+  const arg = process.argv.find((value) => value.startsWith("--only="));
+  const value = arg?.slice("--only=".length).trim();
+  if (!value) return null;
+
+  const allowed = new Set(providerRuns.map((run) => run.key));
+  if (!allowed.has(value)) {
+    throw new Error(
+      `Unknown --only provider key "${value}". Expected one of: ${Array.from(allowed).join(", ")}`,
+    );
+  }
+
+  return value;
+}
 
 function recordOutput(label, chunk) {
   const text = chunk.toString();
@@ -270,7 +291,7 @@ async function waitForTaskEvents(apiUrl, taskId) {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    while (!finalStatus || !sawToolCall) {
+    while (!finalStatus) {
       const { done, value } = await reader.read();
       if (done) break;
 
@@ -314,16 +335,13 @@ async function waitForTaskEvents(apiUrl, taskId) {
     clearTimeout(timeout);
   }
 
-  if (!sawToolCall) {
-    throw new Error(`Task ${taskId} did not emit a tool_call event`);
-  }
   if (!finalStatus) {
     throw new Error(
       `Task ${taskId} did not emit a terminal status_update event`,
     );
   }
 
-  return { events, finalStatus, finalStatusEvent };
+  return { events, finalStatus, finalStatusEvent, sawToolCall };
 }
 
 function truncate(value, maxLength = 1_200) {
@@ -459,9 +477,13 @@ function findHnEntries(events) {
   return [];
 }
 
-function assertCanonicalResult(events, finalStatus) {
+function assertCanonicalResult(events, finalStatus, sawToolCall) {
   if (finalStatus !== "STOPPED") {
     throw new Error(`Task ended with ${finalStatus}, expected STOPPED`);
+  }
+
+  if (!sawToolCall) {
+    throw new Error("Task reached STOPPED without emitting a tool_call event");
   }
 
   const assistantMessages = events
@@ -625,17 +647,15 @@ async function runProviderSmoke({ apiUrl, prisma, run }) {
   const taskId = await createTask(apiUrl, run.id);
   console.log(`[smoke:e2e-providers] ${run.label}: task ${taskId} created`);
 
-  const { events, finalStatus, finalStatusEvent } = await waitForTaskEvents(
-    apiUrl,
-    taskId,
-  );
+  const { events, finalStatus, finalStatusEvent, sawToolCall } =
+    await waitForTaskEvents(apiUrl, taskId);
   console.log(
     `[smoke:e2e-providers] ${run.label}: final status ${finalStatus}; ${events.length} SSE events; counts ${JSON.stringify(eventCounts(events))}`,
   );
 
   let entries;
   try {
-    entries = assertCanonicalResult(events, finalStatus);
+    entries = assertCanonicalResult(events, finalStatus, sawToolCall);
   } catch (error) {
     console.error(
       `[smoke:e2e-providers] ${run.label}: task diagnostics for ${taskId}\n${taskDiagnostics(events, finalStatusEvent)}`,
@@ -650,8 +670,8 @@ async function runProviderSmoke({ apiUrl, prisma, run }) {
   return { entries: entries.length, status: "PASS", taskId };
 }
 
-function printSummary(results) {
-  const summary = providerRuns
+function printSummary(results, runs) {
+  const summary = runs
     .map((run) => {
       const result = results.find((item) => item.label === run.label);
       if (!result) return `${run.label}: NOT RUN`;
@@ -678,11 +698,17 @@ try {
   }
 
   const apiUrl = await findApiUrl();
+  const filter = onlyFilter();
+  const runs = filter
+    ? providerRuns.filter((run) => run.key === filter)
+    : providerRuns;
   const env = smokeEnv(apiUrl);
   assertBaseEnv(env);
 
   console.log(
-    "[smoke:e2e-providers] Expected runtime: 10-15 minutes with all six provider configurations.",
+    filter
+      ? `[smoke:e2e-providers] Running only ${filter}; expected runtime: 1-3 minutes.`
+      : "[smoke:e2e-providers] Expected runtime: 10-15 minutes with all six provider configurations.",
   );
   console.log(`[smoke:e2e-providers] Starting isolated API at ${apiUrl}`);
 
@@ -718,7 +744,7 @@ try {
   );
   await waitForServer(`${apiUrl}/health`, "API");
 
-  for (const run of providerRuns) {
+  for (const run of runs) {
     const reason = await skipReason(run);
     if (reason) {
       console.log(`[smoke:e2e-providers] ${run.label}: SKIP (${reason})`);
@@ -736,7 +762,7 @@ try {
     }
   }
 
-  printSummary(results);
+  printSummary(results, runs);
 
   const failures = results.filter((result) => result.status === "FAIL");
   if (failures.length > 0) {

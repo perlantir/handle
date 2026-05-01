@@ -59,6 +59,14 @@ Run:
 pnpm smoke:e2e-providers
 ```
 
+To re-test one provider while debugging, use:
+
+```bash
+pnpm smoke:e2e-providers --only=anthropic
+```
+
+Valid `--only` keys are `openai-apikey`, `openai-chatgpt-oauth`, `anthropic`, `kimi`, `openrouter`, and `local`.
+
 The smoke test is local-only and skips in CI because mocking would defeat the purpose of this phase gate. It uses real Keychain credentials, real provider APIs, E2B, and the real agent loop. Expected runtime with all six provider configurations is 10-15 minutes; the script prints progress per provider so a slow model does not look hung.
 
 The script starts an isolated API process on the first free port from 3001-3005, temporarily isolates each provider in `ProviderConfig`, then restores the original provider settings before exit. Do not change provider settings in the UI while this script is running.
