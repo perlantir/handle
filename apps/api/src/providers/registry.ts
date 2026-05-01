@@ -48,7 +48,7 @@ function normalizeProviderConfig(
   }
 
   return {
-    authMode: row.authMode === "oauth" ? "oauth" : "apiKey",
+    authMode: row.authMode === "chatgpt-oauth" ? "chatgpt-oauth" : "apiKey",
     ...(row.baseURL ? { baseURL: row.baseURL } : {}),
     enabled: row.enabled,
     fallbackOrder: row.fallbackOrder,

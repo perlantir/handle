@@ -13,15 +13,13 @@ export const OPENAI_COMPATIBLE_ENDPOINTS: Record<
 > = {
   kimi: "https://api.moonshot.cn/v1",
   local: "http://127.0.0.1:11434/v1",
-  qwen: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  xai: "https://api.x.ai/v1",
+  openrouter: "https://openrouter.ai/api/v1",
 };
 
 const DESCRIPTIONS: Record<OpenAICompatibleProviderId, string> = {
   kimi: "Moonshot KIMI",
   local: "Local LLM",
-  qwen: "Alibaba QWEN",
-  xai: "xAI",
+  openrouter: "OpenRouter (100+ models from many providers)",
 };
 
 interface OpenAICompatibleProviderDependencies {
@@ -38,6 +36,18 @@ function isOpenAICompatibleProviderId(
 
 function modelListURL(baseURL: string) {
   return `${baseURL.replace(/\/$/, "")}/models`;
+}
+
+function getOpenRouterHeaders() {
+  const appURL =
+    process.env.NEXT_PUBLIC_HANDLE_WEB_BASE_URL ?? "http://127.0.0.1:3000";
+  const appTitle = process.env.HANDLE_OPENROUTER_TITLE ?? "Handle";
+
+  return {
+    "HTTP-Referer": appURL,
+    "X-OpenRouter-Title": appTitle,
+    "X-Title": appTitle,
+  };
 }
 
 export function createOpenAICompatibleProvider(
@@ -68,7 +78,12 @@ export function createOpenAICompatibleProvider(
 
       return createChatModel({
         apiKey,
-        configuration: { baseURL },
+        configuration: {
+          baseURL,
+          ...(id === "openrouter"
+            ? { defaultHeaders: getOpenRouterHeaders() }
+            : {}),
+        },
         model: modelOverride ?? config.primaryModel,
         streaming: true,
         temperature: 0.7,

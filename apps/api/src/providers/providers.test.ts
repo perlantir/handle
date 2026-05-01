@@ -39,9 +39,9 @@ describe("provider implementations", () => {
     });
   });
 
-  it("keeps OpenAI OAuth disabled when API OAuth is unavailable", async () => {
+  it("keeps OpenAI ChatGPT OAuth disabled until Step 8", async () => {
     const provider = createOpenAIProvider(
-      config({ authMode: "oauth", id: "openai" }),
+      config({ authMode: "chatgpt-oauth", id: "openai" }),
       {
         createChatModel: vi.fn(() => fakeModel),
         getCredential: vi.fn().mockResolvedValue("test-token-not-real"),
@@ -50,7 +50,7 @@ describe("provider implementations", () => {
 
     await expect(provider.isAvailable()).resolves.toBe(false);
     await expect(provider.createModel()).rejects.toThrow(
-      "OpenAI OAuth for API access is not publicly available",
+      "OpenAI ChatGPT subscription OAuth is implemented in Phase 2 Step 8",
     );
   });
 
@@ -75,10 +75,10 @@ describe("provider implementations", () => {
     });
   });
 
-  it("creates OpenAI-compatible provider models with provider base URLs", async () => {
+  it("creates KIMI models with provider base URLs", async () => {
     const getCredential = vi.fn().mockResolvedValue("test-key-not-real");
     const createChatModel = vi.fn(() => fakeModel);
-    const provider = createOpenAICompatibleProvider(config({ id: "qwen" }), {
+    const provider = createOpenAICompatibleProvider(config({ id: "kimi" }), {
       createChatModel,
       getCredential,
     });
@@ -86,11 +86,41 @@ describe("provider implementations", () => {
     await expect(provider.createModel()).resolves.toBe(fakeModel);
     await expect(provider.isAvailable()).resolves.toBe(true);
 
-    expect(getCredential).toHaveBeenCalledWith("qwen:apiKey");
+    expect(getCredential).toHaveBeenCalledWith("kimi:apiKey");
     expect(createChatModel).toHaveBeenCalledWith({
       apiKey: "test-key-not-real",
       configuration: {
-        baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        baseURL: "https://api.moonshot.cn/v1",
+      },
+      model: "test-model",
+      streaming: true,
+      temperature: 0.7,
+    });
+  });
+
+  it("adds OpenRouter attribution headers", async () => {
+    const getCredential = vi.fn().mockResolvedValue("test-key-not-real");
+    const createChatModel = vi.fn(() => fakeModel);
+    const provider = createOpenAICompatibleProvider(
+      config({ id: "openrouter" }),
+      {
+        createChatModel,
+        getCredential,
+      },
+    );
+
+    await expect(provider.createModel()).resolves.toBe(fakeModel);
+
+    expect(getCredential).toHaveBeenCalledWith("openrouter:apiKey");
+    expect(createChatModel).toHaveBeenCalledWith({
+      apiKey: "test-key-not-real",
+      configuration: {
+        baseURL: "https://openrouter.ai/api/v1",
+        defaultHeaders: {
+          "HTTP-Referer": "http://127.0.0.1:3000",
+          "X-OpenRouter-Title": "Handle",
+          "X-Title": "Handle",
+        },
       },
       model: "test-model",
       streaming: true,

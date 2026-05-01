@@ -171,21 +171,22 @@ describe("ProviderRegistryImpl", () => {
     const openai = provider("openai", {
       config: { fallbackOrder: 1 },
     });
-    const qwen = provider("qwen", {
+    const openrouter = provider("openrouter", {
       config: { fallbackOrder: 2 },
     });
     const registry = new ProviderRegistryImpl({
-      createProvider: (config) => (config.id === "qwen" ? qwen : openai),
-      store: store([row({ id: "openai" }), row({ id: "qwen" })]),
+      createProvider: (config) =>
+        config.id === "openrouter" ? openrouter : openai,
+      store: store([row({ id: "openai" }), row({ id: "openrouter" })]),
     });
 
     await registry.initialize();
     await registry.getActiveModel({
       modelOverride: "override",
-      taskOverride: "qwen",
+      taskOverride: "openrouter",
     });
 
-    expect(qwen.createModel).toHaveBeenCalledWith("override");
+    expect(openrouter.createModel).toHaveBeenCalledWith("override");
     expect(openai.createModel).not.toHaveBeenCalled();
   });
 });

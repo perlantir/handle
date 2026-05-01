@@ -60,7 +60,7 @@ describe("keychain client", () => {
       .mockRejectedValue(notFound);
     const keychain = createKeychainClient({ runSecurity });
 
-    await expect(keychain.deleteCredential("qwen:apiKey")).resolves.toBe(
+    await expect(keychain.deleteCredential("openrouter:apiKey")).resolves.toBe(
       undefined,
     );
   });

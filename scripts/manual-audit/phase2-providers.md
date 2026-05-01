@@ -17,9 +17,8 @@ Run this from a clean checkout of the `phase-2/multi-provider` branch after `.en
 - Provider credentials are configured through Settings and stored in Keychain:
   - OpenAI
   - Anthropic
-  - QWEN
   - KIMI
-  - xAI
+  - OpenRouter
   - Local LLM endpoint
 - Ollama or LM Studio is running for the local provider.
 
@@ -59,7 +58,7 @@ Run:
 pnpm smoke:e2e-providers
 ```
 
-The smoke test should run the canonical Hacker News task against OpenAI, Anthropic, QWEN, KIMI, xAI, and local. Each configured provider must return more than 5 valid entries with `title`, `url`, and `score`, then finish with status `STOPPED`.
+The smoke test should run the canonical Hacker News task against OpenAI, Anthropic, KIMI, OpenRouter, and local. Each configured provider must return more than 5 valid entries with `title`, `url`, and `score`, then finish with status `STOPPED`.
 
 ## Canonical Task
 
@@ -75,16 +74,14 @@ Write a Python script that fetches the top 10 Hacker News stories from https://n
 - [ ] Settings → Providers renders.
 - [ ] OpenAI key saves to Keychain and read-back verification succeeds.
 - [ ] Anthropic key saves to Keychain and read-back verification succeeds.
-- [ ] QWEN key saves to Keychain and read-back verification succeeds.
 - [ ] KIMI key saves to Keychain and read-back verification succeeds.
-- [ ] xAI key saves to Keychain and read-back verification succeeds.
+- [ ] OpenRouter key saves to Keychain and read-back verification succeeds.
 - [ ] Local provider settings save successfully.
 - [ ] Test Connection surfaces provider-specific errors verbatim enough to distinguish invalid key, rate limit, and network unreachable.
 - [ ] OpenAI runs the canonical task and returns more than 5 valid Hacker News entries.
 - [ ] Anthropic runs the canonical task and returns more than 5 valid Hacker News entries.
-- [ ] QWEN runs the canonical task and returns more than 5 valid Hacker News entries.
 - [ ] KIMI runs the canonical task and returns more than 5 valid Hacker News entries.
-- [ ] xAI runs the canonical task and returns more than 5 valid Hacker News entries.
+- [ ] OpenRouter runs the canonical task and returns more than 5 valid Hacker News entries.
 - [ ] Local provider runs the canonical task and returns more than 5 valid Hacker News entries.
 - [ ] Each provider task finishes with status `STOPPED`.
 - [ ] Per-task provider override works.
@@ -120,17 +117,12 @@ Anthropic:
 - Final status:
 - Notes:
 
-QWEN:
-- Task id:
-- Final status:
-- Notes:
-
 KIMI:
 - Task id:
 - Final status:
 - Notes:
 
-xAI:
+OpenRouter:
 - Task id:
 - Final status:
 - Notes:

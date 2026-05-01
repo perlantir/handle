@@ -96,8 +96,8 @@ describe("createAgentRunner", () => {
       getActiveModel: vi.fn().mockResolvedValue({
         model: fakeModel,
         provider: {
-          config: { primaryModel: "qwen-max" },
-          id: "qwen",
+          config: { primaryModel: "openrouter/auto" },
+          id: "openrouter",
         },
       }),
       initialize: vi.fn().mockResolvedValue(undefined),
@@ -124,11 +124,13 @@ describe("createAgentRunner", () => {
       },
     });
 
-    await runner("task-test", "Do the thing", { providerOverride: "qwen" });
+    await runner("task-test", "Do the thing", {
+      providerOverride: "openrouter",
+    });
 
     expect(providerRegistry.getActiveModel).toHaveBeenCalledWith({
       taskId: "task-test",
-      taskOverride: "qwen",
+      taskOverride: "openrouter",
     });
   });
 });

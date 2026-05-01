@@ -3,9 +3,8 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 export const PROVIDER_IDS = [
   "openai",
   "anthropic",
-  "qwen",
   "kimi",
-  "xai",
+  "openrouter",
   "local",
 ] as const;
 
@@ -14,14 +13,13 @@ export type ProviderId = (typeof PROVIDER_IDS)[number];
 export const API_PROVIDER_IDS = [
   "openai",
   "anthropic",
-  "qwen",
   "kimi",
-  "xai",
+  "openrouter",
 ] as const satisfies readonly ProviderId[];
 
 export type ApiProviderId = (typeof API_PROVIDER_IDS)[number];
 
-export type ProviderAuthMode = "apiKey" | "oauth";
+export type ProviderAuthMode = "apiKey" | "chatgpt-oauth";
 
 export interface ProviderConfig {
   authMode?: ProviderAuthMode;

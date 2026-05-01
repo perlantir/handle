@@ -23,9 +23,9 @@ export function createOpenAIProvider(
     id: "openai",
 
     async createModel(modelOverride?: string) {
-      if (config.authMode === "oauth") {
+      if (config.authMode === "chatgpt-oauth") {
         throw new Error(
-          "OpenAI OAuth for API access is not publicly available; use API key authentication.",
+          "OpenAI ChatGPT subscription OAuth is implemented in Phase 2 Step 8; use API key authentication for now.",
         );
       }
 
@@ -40,7 +40,7 @@ export function createOpenAIProvider(
     },
 
     async isAvailable() {
-      if (config.authMode === "oauth") return false;
+      if (config.authMode === "chatgpt-oauth") return false;
 
       try {
         await getCredential("openai:apiKey");
