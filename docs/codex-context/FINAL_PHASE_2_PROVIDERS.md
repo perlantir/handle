@@ -24,7 +24,8 @@ In scope:
 - Provider fallback chain
 - Mac Keychain credential storage
 - Settings → Providers tab matching design system
-- OpenAI OAuth (custom flow; Nango not used here)
+- OpenAI OAuth if publicly available for agentic API usage (custom
+  flow; Nango not used here)
 - Per-task provider override
 
 Out of scope:
@@ -345,6 +346,24 @@ logger.info({ providerId: provider.id, model: provider.config.primaryModel }, 'u
 // rest of agent setup uses `model`
 ```
 
+When the primary provider fails and fallback selects another
+provider, emit an SSE event before continuing:
+
+```typescript
+{
+  type: 'provider_fallback',
+  fromProvider,
+  toProvider,
+  reason,
+  taskId,
+}
+```
+
+The Workspace status bar updates the visible model name when this
+event arrives. A subtle toast notifies the user that fallback
+occurred. The task cost counter splits usage across providers
+instead of merging all usage under the final provider.
+
 ==================================================
 SCHEMA UPDATE
 ==================================================
@@ -385,6 +404,15 @@ DELETE /api/settings/providers/:id/key      Delete credential
 POST   /api/settings/providers/:id/test     Test the model with "Hello"
 ```
 
+Credential write behavior:
+- When the user clicks Save on a key, write to Keychain and then
+  immediately read it back. Surface failure if the read-back does
+  not match.
+- When the user clicks Test Connection, surface the actual provider
+  error verbatim enough to distinguish Invalid API key, Rate
+  limited, and Network unreachable. Do not replace these with a
+  generic failure message.
+
 ==================================================
 OPENAI OAUTH FLOW
 ==================================================
@@ -408,6 +436,11 @@ POST /api/oauth/openai/disconnect   → clears tokens
 If OpenAI's OAuth doesn't yet support agentic API usage when you
 implement this, fall back to API-key-only and document the
 limitation in the SIGNOFF.
+
+Do not build a partial OAuth feature if the required OpenAI OAuth
+offering is not public. Surface the gap to the user, keep OpenAI
+API-key-only for Phase 2, and record the limitation clearly in the
+Phase 2 SIGNOFF.
 
 ==================================================
 SETTINGS UI (PROVIDERS TAB)
@@ -444,6 +477,12 @@ TESTS
 8. Settings POST /test calls the model
 9. OAuth callback exchanges code for tokens (mocked)
 10. OAuth refresh flow (mocked)
+11. `pnpm smoke:e2e-providers` runs the canonical task against
+    OpenAI, Anthropic, QWEN, KIMI, xAI, and local. It skips a
+    provider when the corresponding Keychain credential or local
+    endpoint is not configured. For each configured provider, it
+    asserts status `STOPPED` and verifies more than 5 valid Hacker
+    News entries with title, URL, and score.
 
 ==================================================
 GATE CRITERIA
@@ -451,13 +490,17 @@ GATE CRITERIA
 
 1. All Phase 1 tests still pass
 2. Phase 2 tests pass in CI 3 consecutive runs
-3. User configures each of 5 API providers and runs canonical
-   task with each
-4. User configures local LLM (Ollama or LM Studio) and runs
-   simpler task
-5. Provider fallback works when primary fails
-6. OpenAI OAuth completes end-to-end
-7. SIGNOFF document
+3. User runs `pnpm smoke:e2e-providers` locally with all 6
+   providers configured; OpenAI, Anthropic, QWEN, KIMI, xAI, and
+   local each produce more than 5 valid Hacker News entries and
+   finish with status `STOPPED`
+4. Provider fallback works when primary fails, emits
+   `provider_fallback`, updates the status bar model name, shows a
+   subtle toast, and splits cost by provider
+5. OpenAI OAuth completes end-to-end if public agentic API OAuth is
+   available; otherwise Phase 2 ships OpenAI API-key-only and the
+   limitation is documented in SIGNOFF
+6. SIGNOFF document
 
 ==================================================
 MANUAL AUDIT
@@ -465,8 +508,11 @@ MANUAL AUDIT
 
 scripts/manual-audit/phase2-providers.md:
 
-Section A: Each of 5 API providers
-- Configure key, run canonical task, verify completion
+Section A: Provider smoke
+- Configure OpenAI, Anthropic, QWEN, KIMI, xAI, and local
+- Run `pnpm smoke:e2e-providers`
+- Verify all 6 providers return more than 5 valid Hacker News
+  entries and finish with status `STOPPED`
 
 Section B: Local LLM
 - Configure Ollama at localhost:11434, run simpler task, verify
@@ -475,12 +521,23 @@ Section C: Fallback
 - Configure OpenAI primary + Anthropic secondary
 - Delete OpenAI key
 - Run task, verify falls back to Anthropic
+- Verify `provider_fallback` streams, the status bar model name
+  updates, a subtle toast appears, and cost is split by provider
 
 Section D: OpenAI OAuth
 - Configure client ID + secret
 - Click Connect, authorize
 - Run task, verify uses OAuth
 - Disconnect, verify cleared
+- If OpenAI OAuth for agentic API usage is not publicly available,
+  verify the UI surfaces that limitation and SIGNOFF records
+  OpenAI as API-key-only for Phase 2
+
+Section E: Keychain failure modes
+- Save a provider key and verify the app confirms the Keychain
+  read-back succeeded
+- Test invalid credentials and verify the actual provider error is
+  visible rather than a generic message
 
 ==================================================
 IMPLEMENTATION ORDER
@@ -499,8 +556,9 @@ IMPLEMENTATION ORDER
 11. OAuth routes
 12. OAuth UI in Settings
 13. Tests
-14. Manual audit harness
-15. SIGNOFF
+14. Provider e2e smoke test
+15. Manual audit harness
+16. SIGNOFF
 
 ==================================================
 END OF PHASE 2 SPEC
