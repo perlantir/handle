@@ -68,6 +68,14 @@ export interface PlanUpdateEvent {
   taskId: string;
 }
 
+export interface ProviderFallbackEvent {
+  type: 'provider_fallback';
+  fromProvider: string;
+  toProvider: string;
+  reason: string;
+  taskId: string;
+}
+
 export type SSEEvent =
   | ThoughtEvent
   | ToolCallEvent
@@ -77,7 +85,8 @@ export type SSEEvent =
   | AssistantMessageEvent
   | AgentErrorEvent
   | ApprovalRequestEvent
-  | PlanUpdateEvent;
+  | PlanUpdateEvent
+  | ProviderFallbackEvent;
 
 export interface ApprovalPayload {
   type:

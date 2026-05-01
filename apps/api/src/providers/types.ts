@@ -46,9 +46,17 @@ export interface ActiveProviderModel {
   provider: ProviderInstance;
 }
 
+export interface GetActiveProviderModelOptions {
+  modelOverride?: string;
+  taskId?: string;
+  taskOverride?: ProviderId;
+}
+
 export interface ProviderRegistry {
   get(id: ProviderId): ProviderInstance | undefined;
-  getActiveModel(taskOverride?: ProviderId): Promise<ActiveProviderModel>;
+  getActiveModel(
+    options?: GetActiveProviderModelOptions,
+  ): Promise<ActiveProviderModel>;
   getEnabled(): ProviderInstance[];
   getFallbackChain(): ProviderInstance[];
   list(): ProviderInstance[];
