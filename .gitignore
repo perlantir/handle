@@ -1,1 +1,29 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Build output
+.next/
+dist/
+build/
+coverage/
+.turbo/
+*.tsbuildinfo
+apps/web/next-env.d.ts
+
+# Logs
+*.log
+logs/
+
+# OS / editor
 .DS_Store
+.idea/
+.vscode/
+
+# Prisma
+apps/api/prisma/dev.db

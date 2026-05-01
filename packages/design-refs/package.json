@@ -1,0 +1,16 @@
+{
+  "name": "@handle/design-refs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./icons.jsx",
+  "exports": {
+    "./icons": "./icons.jsx",
+    "./icons.jsx": "./icons.jsx",
+    "./refs/*": "./refs/*",
+    "./README.md": "./README.md",
+    "./component-specs.md": "./component-specs.md",
+    "./screen-specs.md": "./screen-specs.md",
+    "./figma-spec.md": "./figma-spec.md"
+  }
+}

@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+      - phase-*/**
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck, Test, Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: handle_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d handle_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/handle_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @handle/api prisma generate
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Web sign-in smoke
+        run: |
+          if [ -z "$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" ]; then
+            echo "Skipping web sign-in smoke because Clerk CI secrets are not configured."
+            exit 0
+          fi
+          pnpm smoke:web-signin
+        env:
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_HANDLE_API_BASE_URL: http://127.0.0.1:3001
+          NEXT_PUBLIC_HANDLE_WEB_BASE_URL: http://127.0.0.1:3000
+
+      - name: Task E2E smoke
+        run: pnpm smoke:e2e-task
+        env:
+          HANDLE_SMOKE_AGENT: "1"
+          HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_API_BASE_URL: http://127.0.0.1:3001
+          NEXT_PUBLIC_HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_WEB_BASE_URL: http://127.0.0.1:3000
+
+      - name: Canonical task E2E smoke
+        run: |
+          if [ -z "$OPENAI_API_KEY" ] || [ -z "$E2B_API_KEY" ]; then
+            echo "Skipping canonical task smoke because OpenAI/E2B CI secrets are not configured."
+            exit 0
+          fi
+          pnpm smoke:e2e-canonical
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_API_BASE_URL: http://127.0.0.1:3001
+          NEXT_PUBLIC_HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_WEB_BASE_URL: http://127.0.0.1:3000
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Build
+        run: pnpm build

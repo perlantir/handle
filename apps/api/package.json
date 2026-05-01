@@ -1,0 +1,40 @@
+{
+  "name": "@handle/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "dotenv -e ../../.env -- tsx watch src/index.ts",
+    "prisma": "dotenv -e ../../.env -- prisma",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@clerk/backend": "^1.14.1",
+    "@clerk/express": "1.7.79",
+    "@handle/shared": "workspace:*",
+    "@langchain/community": "0.3.59",
+    "@langchain/core": "0.3.80",
+    "@langchain/openai": "0.3.17",
+    "@prisma/client": "5.22.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "e2b": "^2.19.3",
+    "express": "^4.22.1",
+    "langchain": "0.3.37",
+    "pino": "^9.14.0",
+    "pino-pretty": "^11.3.0",
+    "pino-roll": "^4.0.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.25",
+    "@types/supertest": "^7.2.0",
+    "dotenv-cli": "^11.0.0",
+    "prisma": "5.22.0",
+    "supertest": "^7.2.2",
+    "tsx": "^4.21.0"
+  }
+}
