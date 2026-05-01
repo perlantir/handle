@@ -4,6 +4,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createKeychainClient } from "../lib/keychain";
 import type { ChatGptOAuthService } from "../providers/openaiChatgptOAuthFlow";
+import type { ChatGptOAuthProxyManager } from "../providers/openaiChatgptProxy";
 import type {
   ProviderConfig,
   ProviderId,
@@ -70,6 +71,7 @@ function provider(
 }
 
 interface CreateAppOptions {
+  chatgptOAuthProxy?: Pick<ChatGptOAuthProxyManager, "stop">;
   chatgptOAuthService?: ChatGptOAuthService;
   createProvider?: (config: ProviderConfig) => ProviderInstance;
   getUserId?: () => string | null;
@@ -78,6 +80,7 @@ interface CreateAppOptions {
 }
 
 function createApp({
+  chatgptOAuthProxy,
   chatgptOAuthService,
   createProvider,
   getUserId = () => "user-test",
@@ -86,6 +89,7 @@ function createApp({
 }: CreateAppOptions = {}) {
   const app = express();
   const routerOptions: CreateSettingsRouterOptions = {
+    ...(chatgptOAuthProxy ? { chatgptOAuthProxy } : {}),
     ...(chatgptOAuthService ? { chatgptOAuthService } : {}),
     getUserId,
     store: routeStore,
@@ -250,6 +254,41 @@ describe("settings providers route", () => {
       data: { baseURL: "https://api.moonshot.cn/v1" },
       where: { id: "kimi" },
     });
+  });
+
+  it("updates OpenAI auth mode and stops the ChatGPT OAuth proxy when switching back to API key", async () => {
+    const routeStore = store([
+      row({ authMode: "chatgpt-oauth", enabled: true, id: "openai" }),
+    ]);
+    const chatgptOAuthProxy = { stop: vi.fn().mockResolvedValue(undefined) };
+
+    const response = await request(
+      createApp({ chatgptOAuthProxy, store: routeStore }),
+    )
+      .put("/api/settings/providers/openai")
+      .send({ authMode: "apiKey" })
+      .expect(200);
+
+    expect(response.body.provider).toMatchObject({
+      authMode: "apiKey",
+      id: "openai",
+    });
+    expect(routeStore.providerConfig.update).toHaveBeenCalledWith({
+      data: { authMode: "apiKey" },
+      where: { id: "openai" },
+    });
+    expect(chatgptOAuthProxy.stop).toHaveBeenCalledOnce();
+  });
+
+  it("rejects auth mode updates for non-OpenAI providers", async () => {
+    const routeStore = store([row({ id: "anthropic" })]);
+
+    await request(createApp({ store: routeStore }))
+      .put("/api/settings/providers/anthropic")
+      .send({ authMode: "chatgpt-oauth" })
+      .expect(400);
+
+    expect(routeStore.providerConfig.update).not.toHaveBeenCalled();
   });
 
   it("rejects non-local base URL updates", async () => {
@@ -474,8 +513,11 @@ describe("settings providers route", () => {
 
   it("disconnects OpenAI ChatGPT OAuth tokens", async () => {
     const chatgptOAuthService = mockChatGptOAuthService();
+    const chatgptOAuthProxy = { stop: vi.fn().mockResolvedValue(undefined) };
 
-    const response = await request(createApp({ chatgptOAuthService }))
+    const response = await request(
+      createApp({ chatgptOAuthProxy, chatgptOAuthService }),
+    )
       .delete("/api/settings/providers/openai/oauth/disconnect")
       .expect(200);
 
@@ -484,6 +526,7 @@ describe("settings providers route", () => {
       providerId: "openai",
     });
     expect(chatgptOAuthService.disconnect).toHaveBeenCalled();
+    expect(chatgptOAuthProxy.stop).toHaveBeenCalledOnce();
   });
 
   it("returns verbatim OpenAI ChatGPT OAuth start failures", async () => {

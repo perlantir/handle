@@ -14,6 +14,10 @@ import {
   createChatGptOAuthService,
   type ChatGptOAuthService,
 } from "../providers/openaiChatgptOAuthFlow";
+import {
+  chatGptOAuthProxyManager,
+  type ChatGptOAuthProxyManager,
+} from "../providers/openaiChatgptProxy";
 import { createProviderInstance } from "../providers/registry";
 import {
   isProviderId,
@@ -27,6 +31,7 @@ const TEST_PROMPT = "Hello, respond with OK.";
 const updateProviderSchema = z
   .object({
     baseURL: z.string().url().optional(),
+    authMode: z.enum(["apiKey", "chatgpt-oauth"]).optional(),
     enabled: z.boolean().optional(),
     fallbackOrder: z.number().int().min(1).max(100).optional(),
     modelName: z.string().trim().min(1).max(200).optional(),
@@ -99,6 +104,7 @@ export interface KeychainLike {
 }
 
 export interface CreateSettingsRouterOptions {
+  chatgptOAuthProxy?: Pick<ChatGptOAuthProxyManager, "stop">;
   chatgptOAuthService?: ChatGptOAuthService;
   createProvider?: (config: ProviderConfig) => ProviderInstance;
   getUserId?: typeof getAuthenticatedUserId;
@@ -193,7 +199,10 @@ function serializeProvider(row: ProviderConfigRow) {
   };
 }
 
-async function hasProviderApiKey(providerId: ProviderId, keychain: KeychainLike) {
+async function hasProviderApiKey(
+  providerId: ProviderId,
+  keychain: KeychainLike,
+) {
   const value = await keychain
     .getCredential(accountForProvider(providerId))
     .catch(() => "");
@@ -232,6 +241,7 @@ function modelOutputToString(output: unknown) {
 }
 
 export function createSettingsRouter({
+  chatgptOAuthProxy = chatGptOAuthProxyManager,
   chatgptOAuthService,
   createProvider = createProviderInstance,
   getUserId = getAuthenticatedUserId,
@@ -300,6 +310,12 @@ export function createSettingsRouter({
         });
       }
 
+      if (providerId !== "openai" && "authMode" in parsed.data) {
+        return res.status(400).json({
+          error: "authMode can only be updated for OpenAI.",
+        });
+      }
+
       if (providerId !== "local" && "modelName" in parsed.data) {
         return res.status(400).json({
           error: "modelName can only be updated for local.",
@@ -316,6 +332,10 @@ export function createSettingsRouter({
         data: parsed.data,
         where: { id: providerId },
       });
+
+      if (providerId === "openai" && parsed.data.authMode === "apiKey") {
+        await chatgptOAuthProxy.stop();
+      }
 
       return res.json({ provider: serializeProvider(updated) });
     }),
@@ -436,6 +456,7 @@ export function createSettingsRouter({
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       await chatgptOAuth.disconnect();
+      await chatgptOAuthProxy.stop();
 
       return res.json({ disconnected: true, providerId: "openai" });
     }),

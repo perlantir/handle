@@ -1,9 +1,15 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatOpenAI } from "@langchain/openai";
 import { getCredential as defaultGetCredential } from "../lib/keychain";
+import { readChatGptOAuthProfile } from "./openaiChatgptAuth";
+import {
+  chatGptOAuthProxyManager,
+  type ChatGptOAuthProxyManager,
+} from "./openaiChatgptProxy";
 import type { ProviderConfig, ProviderInstance } from "./types";
 
 type ChatOpenAIArgs = ConstructorParameters<typeof ChatOpenAI>[0];
+type ReadChatGptOAuthProfile = typeof readChatGptOAuthProfile;
 
 const omittedSamplingParams = {
   frequency_penalty: undefined,
@@ -14,15 +20,19 @@ const omittedSamplingParams = {
 };
 
 interface OpenAIProviderDependencies {
+  chatgptOAuthProxy?: ChatGptOAuthProxyManager;
   createChatModel?: (args: ChatOpenAIArgs) => BaseChatModel;
   getCredential?: typeof defaultGetCredential;
+  readOAuthProfile?: ReadChatGptOAuthProfile;
 }
 
 export function createOpenAIProvider(
   config: ProviderConfig,
   {
+    chatgptOAuthProxy = chatGptOAuthProxyManager,
     createChatModel = (args) => new ChatOpenAI(args),
     getCredential = defaultGetCredential,
+    readOAuthProfile = readChatGptOAuthProfile,
   }: OpenAIProviderDependencies = {},
 ): ProviderInstance {
   return {
@@ -32,9 +42,18 @@ export function createOpenAIProvider(
 
     async createModel(modelOverride?: string) {
       if (config.authMode === "chatgpt-oauth") {
-        throw new Error(
-          "OpenAI ChatGPT subscription OAuth is implemented in Phase 2 Step 8; use API key authentication for now.",
-        );
+        await readOAuthProfile();
+        const proxy = await chatgptOAuthProxy.ensureStarted();
+
+        return createChatModel({
+          apiKey: "chatgpt-oauth",
+          configuration: {
+            baseURL: proxy.baseURL,
+          },
+          modelKwargs: omittedSamplingParams,
+          model: modelOverride ?? config.primaryModel,
+          streaming: true,
+        });
       }
 
       const apiKey = await getCredential("openai:apiKey");
@@ -48,7 +67,14 @@ export function createOpenAIProvider(
     },
 
     async isAvailable() {
-      if (config.authMode === "chatgpt-oauth") return false;
+      if (config.authMode === "chatgpt-oauth") {
+        try {
+          await readOAuthProfile();
+          return true;
+        } catch {
+          return false;
+        }
+      }
 
       try {
         await getCredential("openai:apiKey");

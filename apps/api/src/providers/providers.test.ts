@@ -140,19 +140,68 @@ describe("provider implementations", () => {
     expect(requestBody).not.toHaveProperty("n");
   });
 
-  it("keeps OpenAI ChatGPT OAuth disabled until Step 8", async () => {
+  it("starts the ChatGPT OAuth proxy lazily and uses its dynamic base URL", async () => {
+    const chatgptOAuthProxy = {
+      ensureStarted: vi.fn().mockResolvedValue({
+        baseURL: "http://127.0.0.1:1458/v1",
+        port: 1458,
+        reused: false,
+        stop: vi.fn(),
+      }),
+      stop: vi.fn(),
+    };
+    const createChatModel = vi.fn(() => fakeModel);
+    const readOAuthProfile = vi.fn().mockResolvedValue({
+      accessToken: "test-access-token-not-real",
+      accountId: "account-123",
+      expires: 1_800_000_000_000,
+      refreshToken: "test-refresh-token-not-real",
+    });
     const provider = createOpenAIProvider(
       config({ authMode: "chatgpt-oauth", id: "openai" }),
       {
+        chatgptOAuthProxy,
+        createChatModel,
+        readOAuthProfile,
+      },
+    );
+
+    expect(chatgptOAuthProxy.ensureStarted).not.toHaveBeenCalled();
+    await expect(provider.isAvailable()).resolves.toBe(true);
+
+    readOAuthProfile.mockClear();
+    await expect(provider.createModel("gpt-5.1")).resolves.toBe(fakeModel);
+
+    expect(readOAuthProfile).toHaveBeenCalledOnce();
+    expect(chatgptOAuthProxy.ensureStarted).toHaveBeenCalledOnce();
+    expect(createChatModel).toHaveBeenCalledWith({
+      apiKey: "chatgpt-oauth",
+      configuration: {
+        baseURL: "http://127.0.0.1:1458/v1",
+      },
+      modelKwargs: {
+        frequency_penalty: undefined,
+        n: undefined,
+        presence_penalty: undefined,
+        temperature: undefined,
+        top_p: undefined,
+      },
+      model: "gpt-5.1",
+      streaming: true,
+    });
+  });
+
+  it("marks OpenAI ChatGPT OAuth unavailable when tokens are missing", async () => {
+    const provider = createOpenAIProvider(
+      config({ authMode: "chatgpt-oauth", id: "openai" }),
+      {
+        chatgptOAuthProxy: { ensureStarted: vi.fn(), stop: vi.fn() },
         createChatModel: vi.fn(() => fakeModel),
-        getCredential: vi.fn().mockResolvedValue("test-token-not-real"),
+        readOAuthProfile: vi.fn().mockRejectedValue(new Error("missing")),
       },
     );
 
     await expect(provider.isAvailable()).resolves.toBe(false);
-    await expect(provider.createModel()).rejects.toThrow(
-      "OpenAI ChatGPT subscription OAuth is implemented in Phase 2 Step 8",
-    );
   });
 
   it("creates Anthropic chat models with mocked credentials", async () => {
