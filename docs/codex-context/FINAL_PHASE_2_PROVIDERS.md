@@ -8,7 +8,7 @@ GOAL
 ==================================================
 
 Replace Phase 1's hardcoded OpenAI provider with a multi-provider
-routing layer that supports five API providers plus local LLM with
+routing layer that supports four API providers plus local LLM with
 automatic fallback.
 
 Phase 2 ships in 2 weeks.
@@ -18,17 +18,19 @@ SCOPE
 ==================================================
 
 In scope:
+
 - Provider abstraction
-- 5 API providers: OpenAI, Anthropic, QWEN, KIMI, xAI
+- 4 API providers: OpenAI, Anthropic, KIMI, OpenRouter
 - Local LLM (OpenAI-compatible endpoint)
 - Provider fallback chain
 - Mac Keychain credential storage
 - Settings → Providers tab matching design system
-- OpenAI OAuth if publicly available for agentic API usage (custom
-  flow; Nango not used here)
+- OpenAI API key mode and ChatGPT subscription OAuth mode (custom
+  Codex OAuth / localhost proxy flow; Nango not used here)
 - Per-task provider override
 
 Out of scope:
+
 - Browser (Phase 3)
 - Local execution (Phase 4)
 - Memory (Phase 5)
@@ -41,17 +43,22 @@ PROVIDER ABSTRACTION
 apps/api/src/providers/types.ts:
 
 ```typescript
-import { BaseChatModel } from '@langchain/core/language_models/chat_models';
+import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 
-export type ProviderId = 'openai' | 'anthropic' | 'qwen' | 'kimi' | 'xai' | 'local';
+export type ProviderId =
+  | "openai"
+  | "anthropic"
+  | "kimi"
+  | "openrouter"
+  | "local";
 
 export interface ProviderConfig {
   id: ProviderId;
   enabled: boolean;
   primaryModel: string;
   fallbackOrder: number;
-  authMode?: 'apiKey' | 'oauth';   // OpenAI only for oauth
-  baseURL?: string;                 // For local LLM
+  authMode?: "apiKey" | "chatgpt-oauth"; // OpenAI only for chatgpt-oauth
+  baseURL?: string; // For OpenAI-compatible providers
 }
 
 export interface ProviderInstance {
@@ -67,7 +74,9 @@ export interface ProviderRegistry {
   get(id: ProviderId): ProviderInstance | undefined;
   getEnabled(): ProviderInstance[];
   getFallbackChain(): ProviderInstance[];
-  getActiveModel(taskOverride?: ProviderId): Promise<{ provider: ProviderInstance; model: BaseChatModel }>;
+  getActiveModel(
+    taskOverride?: ProviderId,
+  ): Promise<{ provider: ProviderInstance; model: BaseChatModel }>;
 }
 ```
 
@@ -78,19 +87,21 @@ KEYCHAIN HELPER
 apps/api/src/lib/keychain.ts:
 
 ```typescript
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
-const SERVICE = 'com.perlantir.handle';
+const SERVICE = "com.perlantir.handle";
 
 export async function getCredential(account: string): Promise<string> {
   try {
-    const { stdout } = await execFileP('security', [
-      'find-generic-password',
-      '-s', SERVICE,
-      '-a', account,
-      '-w',
+    const { stdout } = await execFileP("security", [
+      "find-generic-password",
+      "-s",
+      SERVICE,
+      "-a",
+      account,
+      "-w",
     ]);
     return stdout.trim();
   } catch (err: any) {
@@ -99,31 +110,39 @@ export async function getCredential(account: string): Promise<string> {
   }
 }
 
-export async function setCredential(account: string, value: string): Promise<void> {
-  await execFileP('security', [
-    'add-generic-password',
-    '-s', SERVICE,
-    '-a', account,
-    '-w', value,
-    '-U',
+export async function setCredential(
+  account: string,
+  value: string,
+): Promise<void> {
+  await execFileP("security", [
+    "add-generic-password",
+    "-s",
+    SERVICE,
+    "-a",
+    account,
+    "-w",
+    value,
+    "-U",
   ]);
 }
 
 export async function deleteCredential(account: string): Promise<void> {
-  await execFileP('security', [
-    'delete-generic-password',
-    '-s', SERVICE,
-    '-a', account,
+  await execFileP("security", [
+    "delete-generic-password",
+    "-s",
+    SERVICE,
+    "-a",
+    account,
   ]).catch(() => {});
 }
 ```
 
 Account naming:
-- `openai:apiKey` / `openai:oauth:accessToken` / `openai:oauth:refreshToken` / `openai:oauth:clientId` / `openai:oauth:clientSecret` / `openai:oauth:expiresAt`
+
+- `openai:apiKey` / `openai:chatgpt-oauth:accessToken` / `openai:chatgpt-oauth:refreshToken` / `openai:chatgpt-oauth:expiresAt`
 - `anthropic:apiKey`
-- `qwen:apiKey`
 - `kimi:apiKey`
-- `xai:apiKey`
+- `openrouter:apiKey`
 - `local:apiKey` (optional)
 
 ==================================================
@@ -133,26 +152,29 @@ PROVIDER IMPLEMENTATIONS
 apps/api/src/providers/openai.ts:
 
 ```typescript
-import { ChatOpenAI } from '@langchain/openai';
-import { getCredential } from '../lib/keychain';
-import type { ProviderInstance, ProviderConfig } from './types';
+import { ChatOpenAI } from "@langchain/openai";
+import { getCredential } from "../lib/keychain";
+import type { ProviderInstance, ProviderConfig } from "./types";
 
 export function createOpenAIProvider(config: ProviderConfig): ProviderInstance {
   return {
-    id: 'openai',
+    id: "openai",
     config,
-    description: 'OpenAI (gpt-4o, o1, o3)',
+    description: "OpenAI (gpt-4o, o1, o3)",
     async createModel(modelOverride?: string) {
       let apiKey: string;
-      if (config.authMode === 'oauth') {
+      if (config.authMode === "chatgpt-oauth") {
         // Check expiration; refresh if needed
-        const expiresAt = parseInt(await getCredential('openai:oauth:expiresAt'), 10);
+        const expiresAt = parseInt(
+          await getCredential("openai:chatgpt-oauth:expiresAt"),
+          10,
+        );
         if (Date.now() > expiresAt - 60_000) {
-          await refreshOpenAIToken();
+          await refreshOpenAIChatGPTToken();
         }
-        apiKey = await getCredential('openai:oauth:accessToken');
+        apiKey = await getCredential("openai:chatgpt-oauth:accessToken");
       } else {
-        apiKey = await getCredential('openai:apiKey');
+        apiKey = await getCredential("openai:apiKey");
       }
 
       return new ChatOpenAI({
@@ -164,10 +186,10 @@ export function createOpenAIProvider(config: ProviderConfig): ProviderInstance {
     },
     async isAvailable() {
       try {
-        if (config.authMode === 'oauth') {
-          await getCredential('openai:oauth:accessToken');
+        if (config.authMode === "chatgpt-oauth") {
+          await getCredential("openai:chatgpt-oauth:accessToken");
         } else {
-          await getCredential('openai:apiKey');
+          await getCredential("openai:apiKey");
         }
         return true;
       } catch {
@@ -177,25 +199,27 @@ export function createOpenAIProvider(config: ProviderConfig): ProviderInstance {
   };
 }
 
-async function refreshOpenAIToken() {
-  // Implementation in OAuth section below
+async function refreshOpenAIChatGPTToken() {
+  // Implementation in OpenAI ChatGPT subscription OAuth section below
 }
 ```
 
 apps/api/src/providers/anthropic.ts:
 
 ```typescript
-import { ChatAnthropic } from '@langchain/anthropic';
-import { getCredential } from '../lib/keychain';
-import type { ProviderInstance, ProviderConfig } from './types';
+import { ChatAnthropic } from "@langchain/anthropic";
+import { getCredential } from "../lib/keychain";
+import type { ProviderInstance, ProviderConfig } from "./types";
 
-export function createAnthropicProvider(config: ProviderConfig): ProviderInstance {
+export function createAnthropicProvider(
+  config: ProviderConfig,
+): ProviderInstance {
   return {
-    id: 'anthropic',
+    id: "anthropic",
     config,
-    description: 'Anthropic (Claude Opus, Sonnet, Haiku)',
+    description: "Anthropic (Claude Opus, Sonnet, Haiku)",
     async createModel(modelOverride?: string) {
-      const apiKey = await getCredential('anthropic:apiKey');
+      const apiKey = await getCredential("anthropic:apiKey");
       return new ChatAnthropic({
         model: modelOverride ?? config.primaryModel,
         apiKey,
@@ -204,63 +228,93 @@ export function createAnthropicProvider(config: ProviderConfig): ProviderInstanc
       });
     },
     async isAvailable() {
-      try { await getCredential('anthropic:apiKey'); return true; } catch { return false; }
+      try {
+        await getCredential("anthropic:apiKey");
+        return true;
+      } catch {
+        return false;
+      }
     },
   };
 }
 ```
 
-apps/api/src/providers/openaiCompatible.ts (used for QWEN, KIMI,
-xAI, local):
+apps/api/src/providers/openaiCompatible.ts (used for KIMI,
+OpenRouter, local):
 
 ```typescript
-import { ChatOpenAI } from '@langchain/openai';
-import { getCredential } from '../lib/keychain';
-import type { ProviderInstance, ProviderConfig, ProviderId } from './types';
+import { ChatOpenAI } from "@langchain/openai";
+import { getCredential } from "../lib/keychain";
+import type { ProviderInstance, ProviderConfig, ProviderId } from "./types";
 
-const ENDPOINTS: Record<Exclude<ProviderId, 'openai' | 'anthropic'>, string> = {
-  qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  kimi: 'https://api.moonshot.cn/v1',
-  xai: 'https://api.x.ai/v1',
-  local: 'http://localhost:11434/v1',  // overridable
+const ENDPOINTS: Record<Exclude<ProviderId, "openai" | "anthropic">, string> = {
+  kimi: "https://api.moonshot.cn/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  local: "http://127.0.0.1:11434/v1", // overridable
 };
 
 const DESCRIPTIONS: Record<string, string> = {
-  qwen: 'Alibaba QWEN (qwen-max, qwen-plus, qwen-turbo)',
-  kimi: 'Moonshot KIMI (moonshot-v1)',
-  xai: 'xAI Grok (grok-4, grok-3)',
-  local: 'Local LLM (OpenAI-compatible endpoint)',
+  kimi: "Moonshot KIMI (moonshot-v1)",
+  openrouter: "OpenRouter (100+ models from many providers)",
+  local: "Local LLM (OpenAI-compatible endpoint)",
 };
 
-export function createOpenAICompatibleProvider(config: ProviderConfig): ProviderInstance {
+function defaultHeadersFor(id: ProviderId) {
+  if (id !== "openrouter") return undefined;
+
+  const appURL =
+    process.env.NEXT_PUBLIC_HANDLE_WEB_BASE_URL ?? "http://127.0.0.1:3000";
+  const appTitle = process.env.HANDLE_OPENROUTER_TITLE ?? "Handle";
+  return {
+    "HTTP-Referer": appURL,
+    "X-OpenRouter-Title": appTitle,
+    "X-Title": appTitle,
+  };
+}
+
+export function createOpenAICompatibleProvider(
+  config: ProviderConfig,
+): ProviderInstance {
   const id = config.id;
   return {
     id,
     config,
     description: DESCRIPTIONS[id] ?? id,
     async createModel(modelOverride?: string) {
-      const apiKey = await getCredential(`${id}:apiKey`).catch(() => 'not-needed');
+      const apiKey = await getCredential(`${id}:apiKey`).catch(
+        () => "not-needed",
+      );
       const baseURL = config.baseURL ?? ENDPOINTS[id as keyof typeof ENDPOINTS];
       return new ChatOpenAI({
         model: modelOverride ?? config.primaryModel,
         apiKey,
-        configuration: { baseURL },
+        configuration: {
+          baseURL,
+          defaultHeaders: defaultHeadersFor(id),
+        },
         streaming: true,
         temperature: 0.7,
       });
     },
     async isAvailable() {
-      if (id === 'local') {
+      if (id === "local") {
         // Local doesn't need a key; just check if reachable
         const baseURL = config.baseURL ?? ENDPOINTS.local;
         try {
-          const res = await fetch(`${baseURL}/models`, { signal: AbortSignal.timeout(2000) });
+          const res = await fetch(`${baseURL}/models`, {
+            signal: AbortSignal.timeout(2000),
+          });
           return res.ok;
         } catch {
           return false;
         }
       }
-      try { await getCredential(`${id}:apiKey`); return true; } catch { return false; }
+      try {
+        await getCredential(`${id}:apiKey`);
+        return true;
+      } catch {
+        return false;
+      }
     },
   };
 }
@@ -273,12 +327,17 @@ REGISTRY
 apps/api/src/providers/registry.ts:
 
 ```typescript
-import { logger } from '../lib/logger';
-import { prisma } from '../lib/prisma';
-import { createOpenAIProvider } from './openai';
-import { createAnthropicProvider } from './anthropic';
-import { createOpenAICompatibleProvider } from './openaiCompatible';
-import type { ProviderRegistry, ProviderInstance, ProviderConfig, ProviderId } from './types';
+import { logger } from "../lib/logger";
+import { prisma } from "../lib/prisma";
+import { createOpenAIProvider } from "./openai";
+import { createAnthropicProvider } from "./anthropic";
+import { createOpenAICompatibleProvider } from "./openaiCompatible";
+import type {
+  ProviderRegistry,
+  ProviderInstance,
+  ProviderConfig,
+  ProviderId,
+} from "./types";
 
 export class ProviderRegistryImpl implements ProviderRegistry {
   private providers: Map<ProviderId, ProviderInstance> = new Map();
@@ -292,45 +351,56 @@ export class ProviderRegistryImpl implements ProviderRegistry {
         enabled: dbConfig.enabled,
         primaryModel: dbConfig.primaryModel,
         fallbackOrder: dbConfig.fallbackOrder,
-        authMode: dbConfig.authMode as 'apiKey' | 'oauth' | undefined,
+        authMode: dbConfig.authMode as "apiKey" | "chatgpt-oauth" | undefined,
         baseURL: dbConfig.baseURL ?? undefined,
       };
 
       let provider: ProviderInstance;
-      if (config.id === 'openai') provider = createOpenAIProvider(config);
-      else if (config.id === 'anthropic') provider = createAnthropicProvider(config);
+      if (config.id === "openai") provider = createOpenAIProvider(config);
+      else if (config.id === "anthropic")
+        provider = createAnthropicProvider(config);
       else provider = createOpenAICompatibleProvider(config);
 
       this.providers.set(config.id, provider);
     }
   }
 
-  list() { return Array.from(this.providers.values()); }
-  get(id: ProviderId) { return this.providers.get(id); }
-  getEnabled() { return this.list().filter(p => p.config.enabled); }
+  list() {
+    return Array.from(this.providers.values());
+  }
+  get(id: ProviderId) {
+    return this.providers.get(id);
+  }
+  getEnabled() {
+    return this.list().filter((p) => p.config.enabled);
+  }
   getFallbackChain() {
-    return this.getEnabled().sort((a, b) => a.config.fallbackOrder - b.config.fallbackOrder);
+    return this.getEnabled().sort(
+      (a, b) => a.config.fallbackOrder - b.config.fallbackOrder,
+    );
   }
 
   async getActiveModel(taskOverride?: ProviderId) {
     const chain = taskOverride
-      ? [this.get(taskOverride), ...this.getFallbackChain()].filter(Boolean) as ProviderInstance[]
+      ? ([this.get(taskOverride), ...this.getFallbackChain()].filter(
+          Boolean,
+        ) as ProviderInstance[])
       : this.getFallbackChain();
 
     for (const provider of chain) {
       try {
         if (!(await provider.isAvailable())) {
-          logger.warn({ provider: provider.id }, 'unavailable, skipping');
+          logger.warn({ provider: provider.id }, "unavailable, skipping");
           continue;
         }
         const model = await provider.createModel();
         return { provider, model };
       } catch (err) {
-        logger.warn({ err, provider: provider.id }, 'failed to create model');
+        logger.warn({ err, provider: provider.id }, "failed to create model");
       }
     }
 
-    throw new Error('No providers available');
+    throw new Error("No providers available");
   }
 }
 
@@ -341,8 +411,13 @@ Update agent setup to use the registry:
 
 ```typescript
 // apps/api/src/agent/createAgent.ts
-const { provider, model } = await providerRegistry.getActiveModel(ctx.providerOverride);
-logger.info({ providerId: provider.id, model: provider.config.primaryModel }, 'using provider');
+const { provider, model } = await providerRegistry.getActiveModel(
+  ctx.providerOverride,
+);
+logger.info(
+  { providerId: provider.id, model: provider.config.primaryModel },
+  "using provider",
+);
 // rest of agent setup uses `model`
 ```
 
@@ -376,9 +451,9 @@ model ProviderConfig {
   enabled         Boolean  @default(false)
   primaryModel    String
   fallbackOrder   Int
-  authMode        String   @default("apiKey")  // 'apiKey' | 'oauth'
-  baseURL         String?               // Local LLM
-  modelName       String?               // Local LLM display name
+  authMode        String   @default("apiKey")  // 'apiKey' | 'chatgpt-oauth'
+  baseURL         String?               // OpenAI-compatible providers
+  modelName       String?               // Display name
   updatedAt       DateTime @updatedAt
 }
 
@@ -388,7 +463,7 @@ model Task {
 }
 ```
 
-Migration creates the 6 default rows (all disabled).
+Migration creates the 5 default rows (all disabled).
 
 ==================================================
 SETTINGS API
@@ -405,6 +480,7 @@ POST   /api/settings/providers/:id/test     Test the model with "Hello"
 ```
 
 Credential write behavior:
+
 - When the user clicks Save on a key, write to Keychain and then
   immediately read it back. Surface failure if the read-back does
   not match.
@@ -414,15 +490,15 @@ Credential write behavior:
   generic failure message.
 
 ==================================================
-OPENAI OAUTH FLOW
+OPENAI CHATGPT SUBSCRIPTION OAUTH FLOW
 ==================================================
 
-Manual setup:
-1. User registers Handle as OpenAI OAuth app at OpenAI's developer
-   portal (URL TBD; check https://platform.openai.com when
-   implementing — OAuth offerings change over time)
-2. Redirect URI: http://localhost:3001/api/oauth/openai/callback
-3. User enters client ID + secret in Settings → Providers → OpenAI
+OpenAI supports two auth modes in Phase 2:
+
+- `apiKey`: standard OpenAI Platform API key, billed to the user's
+  Platform account
+- `chatgpt-oauth`: Codex OAuth / ChatGPT subscription routing via a
+  localhost proxy, billed to the user's ChatGPT subscription
 
 In-app flow:
 
@@ -433,14 +509,20 @@ POST /api/oauth/openai/refresh      → refreshes access token
 POST /api/oauth/openai/disconnect   → clears tokens
 ```
 
-If OpenAI's OAuth doesn't yet support agentic API usage when you
-implement this, fall back to API-key-only and document the
-limitation in the SIGNOFF.
+Implementation reference: numman-ali/opencode-openai-codex-auth.
+The flow mirrors Codex CLI login with PKCE, stores tokens in Mac
+Keychain through the Phase 2 keychain helper, and routes OpenAI
+requests through a localhost proxy that translates between standard
+chat-completion calls and the Codex CLI request shape.
 
-Do not build a partial OAuth feature if the required OpenAI OAuth
-offering is not public. Surface the gap to the user, keep OpenAI
-API-key-only for Phase 2, and record the limitation clearly in the
-Phase 2 SIGNOFF.
+Risks accepted for Phase 2:
+
+- The pattern depends on mimicking Codex CLI request shape.
+- OpenAI could change auth checks or policy.
+- When ChatGPT subscription rate limits, fall back to `apiKey` mode
+  if configured.
+
+Document these risks in Phase 2 SIGNOFF.
 
 ==================================================
 SETTINGS UI (PROVIDERS TAB)
@@ -453,10 +535,12 @@ Match Screen 11 layout: 2-column with settings nav (220) + content
 (max-width 760).
 
 For each provider:
+
 - Avatar (letter avatar in colored circle)
 - Provider name + description
 - Enabled toggle
-- Auth mode dropdown (API Key | OAuth — only OpenAI shows OAuth)
+- Auth mode control. OpenAI shows API Key, ChatGPT Subscription
+  (recommended), and Both (fallback). Other providers show API Key.
 - Credential fields (per auth mode)
 - Model selection dropdown
 - Fallback order (drag handles or arrows)
@@ -475,10 +559,11 @@ TESTS
 6. Settings PUT updates DB
 7. Settings POST /key writes Keychain
 8. Settings POST /test calls the model
-9. OAuth callback exchanges code for tokens (mocked)
-10. OAuth refresh flow (mocked)
+9. ChatGPT OAuth callback exchanges code for tokens (mocked)
+10. ChatGPT OAuth refresh flow (mocked)
 11. `pnpm smoke:e2e-providers` runs the canonical task against
-    OpenAI, Anthropic, QWEN, KIMI, xAI, and local. It skips a
+    OpenAI API key, OpenAI ChatGPT OAuth, Anthropic, KIMI,
+    OpenRouter, and local. It skips a
     provider when the corresponding Keychain credential or local
     endpoint is not configured. For each configured provider, it
     asserts status `STOPPED` and verifies more than 5 valid Hacker
@@ -490,16 +575,16 @@ GATE CRITERIA
 
 1. All Phase 1 tests still pass
 2. Phase 2 tests pass in CI 3 consecutive runs
-3. User runs `pnpm smoke:e2e-providers` locally with all 6
-   providers configured; OpenAI, Anthropic, QWEN, KIMI, xAI, and
-   local each produce more than 5 valid Hacker News entries and
-   finish with status `STOPPED`
+3. User runs `pnpm smoke:e2e-providers` locally with all configured
+   auth modes/providers; OpenAI API key, OpenAI ChatGPT OAuth,
+   Anthropic, KIMI, OpenRouter, and local each produce more than 5
+   valid Hacker News entries and finish with status `STOPPED`
 4. Provider fallback works when primary fails, emits
    `provider_fallback`, updates the status bar model name, shows a
    subtle toast, and splits cost by provider
-5. OpenAI OAuth completes end-to-end if public agentic API OAuth is
-   available; otherwise Phase 2 ships OpenAI API-key-only and the
-   limitation is documented in SIGNOFF
+5. OpenAI API key mode and ChatGPT subscription OAuth mode complete
+   end-to-end, including fallback from ChatGPT subscription rate
+   limits to API key mode when both are configured
 6. SIGNOFF document
 
 ==================================================
@@ -509,31 +594,35 @@ MANUAL AUDIT
 scripts/manual-audit/phase2-providers.md:
 
 Section A: Provider smoke
-- Configure OpenAI, Anthropic, QWEN, KIMI, xAI, and local
+
+- Configure OpenAI API key, OpenAI ChatGPT OAuth, Anthropic, KIMI,
+  OpenRouter, and local
 - Run `pnpm smoke:e2e-providers`
-- Verify all 6 providers return more than 5 valid Hacker News
-  entries and finish with status `STOPPED`
+- Verify all configured auth modes/providers return more than 5
+  valid Hacker News entries and finish with status `STOPPED`
 
 Section B: Local LLM
+
 - Configure Ollama at localhost:11434, run simpler task, verify
 
 Section C: Fallback
+
 - Configure OpenAI primary + Anthropic secondary
 - Delete OpenAI key
 - Run task, verify falls back to Anthropic
 - Verify `provider_fallback` streams, the status bar model name
   updates, a subtle toast appears, and cost is split by provider
 
-Section D: OpenAI OAuth
-- Configure client ID + secret
-- Click Connect, authorize
-- Run task, verify uses OAuth
+Section D: OpenAI ChatGPT Subscription OAuth
+
+- Click Sign in with ChatGPT, authorize
+- Run task, verify uses ChatGPT subscription OAuth
+- Configure API key fallback, force subscription rate limit, verify
+  fallback uses API key
 - Disconnect, verify cleared
-- If OpenAI OAuth for agentic API usage is not publicly available,
-  verify the UI surfaces that limitation and SIGNOFF records
-  OpenAI as API-key-only for Phase 2
 
 Section E: Keychain failure modes
+
 - Save a provider key and verify the app confirms the Keychain
   read-back succeeded
 - Test invalid credentials and verify the actual provider error is
@@ -547,7 +636,7 @@ IMPLEMENTATION ORDER
 2. Keychain helper
 3. OpenAI provider
 4. Anthropic provider
-5. OpenAI-compatible provider (QWEN/KIMI/xAI/local)
+5. OpenAI-compatible provider (KIMI/OpenRouter/local)
 6. ProviderRegistry
 7. ProviderConfig schema migration
 8. Update agent setup to use registry
