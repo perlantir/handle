@@ -12,6 +12,11 @@ import { parseAgentFinalResult } from "./finalResult";
 import { emitInitialPlan } from "./plan";
 import { isSmokeAgentEnabled, runSmokeAgent } from "./smokeAgent";
 
+const PLAN_GENERATION_TIMEOUT_MS = Number.parseInt(
+  process.env.HANDLE_PLAN_GENERATION_TIMEOUT_MS ?? "60000",
+  10,
+);
+
 function eventContentToString(content: unknown) {
   if (typeof content === "string") return content;
 
@@ -111,6 +116,32 @@ function normalizeProviderOverride(value: string | null | undefined) {
   return isProviderId(value) ? value : undefined;
 }
 
+function timeoutError(label: string, timeoutMs: number) {
+  return new Error(`${label} timed out after ${timeoutMs}ms`);
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeout: NodeJS.Timeout | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(timeoutError(label, timeoutMs)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 export function createAgentRunner({
   createAgent = createPhase1Agent,
   createSandbox = createE2BSandbox,
@@ -144,7 +175,6 @@ export function createAgentRunner({
         options.providerOverride ??
         normalizeProviderOverride(task?.providerOverride);
 
-      await emitPlan(taskId, goal);
       await providerRegistry.initialize();
       const activeModelOptions = taskOverride
         ? { taskId, taskOverride }
@@ -155,6 +185,32 @@ export function createAgentRunner({
         { providerId: provider.id, model: provider.config.primaryModel },
         "Using provider for task",
       );
+
+      try {
+        await withTimeout(
+          emitPlan(taskId, goal, {
+            llm: model,
+            provider: {
+              id: provider.id,
+              model: provider.config.primaryModel,
+            },
+          }),
+          PLAN_GENERATION_TIMEOUT_MS,
+          "Plan generation",
+        );
+      } catch (err) {
+        logger.error(
+          {
+            err,
+            model: provider.config.primaryModel,
+            providerId: provider.id,
+            taskId,
+            timeoutMs: PLAN_GENERATION_TIMEOUT_MS,
+          },
+          "Plan generation failed before agent execution",
+        );
+        throw err;
+      }
 
       sandbox = await createSandbox();
       await store.task.update({

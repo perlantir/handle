@@ -57,11 +57,12 @@ describe("createAgentRunner", () => {
       },
     };
     const emitEvent = vi.fn();
+    const emitPlan = vi.fn().mockResolvedValue(undefined);
     const runner = createAgentRunner({
       createAgent,
       createSandbox,
       emitEvent,
-      emitPlan: vi.fn().mockResolvedValue(undefined),
+      emitPlan,
       isSmokeEnabled: () => false,
       providerRegistry,
       store,
@@ -73,6 +74,13 @@ describe("createAgentRunner", () => {
     expect(providerRegistry.getActiveModel).toHaveBeenCalledWith({
       taskId: "task-test",
       taskOverride: "anthropic",
+    });
+    expect(emitPlan).toHaveBeenCalledWith("task-test", "Do the thing", {
+      llm: fakeModel,
+      provider: {
+        id: "anthropic",
+        model: "claude-sonnet-4-5",
+      },
     });
     expect(createAgent).toHaveBeenCalledWith(
       { sandbox: testSandbox, taskId: "task-test" },
@@ -131,6 +139,57 @@ describe("createAgentRunner", () => {
     expect(providerRegistry.getActiveModel).toHaveBeenCalledWith({
       taskId: "task-test",
       taskOverride: "openrouter",
+    });
+  });
+
+  it("marks the task errored when plan generation fails before sandbox creation", async () => {
+    const createSandbox = vi.fn();
+    const providerRegistry = {
+      getActiveModel: vi.fn().mockResolvedValue({
+        model: fakeModel,
+        provider: {
+          config: { primaryModel: "gpt-4o" },
+          id: "openai",
+        },
+      }),
+      initialize: vi.fn().mockResolvedValue(undefined),
+    };
+    const store = {
+      message: {
+        create: vi.fn().mockResolvedValue({}),
+      },
+      task: {
+        findUnique: vi.fn().mockResolvedValue({ providerOverride: "openai" }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const emitEvent = vi.fn();
+    const runner = createAgentRunner({
+      createAgent: vi.fn(),
+      createSandbox,
+      emitEvent,
+      emitPlan: vi.fn().mockRejectedValue(new Error("planner unavailable")),
+      isSmokeEnabled: () => false,
+      providerRegistry,
+      store,
+    });
+
+    await runner("task-test", "Do the thing");
+
+    expect(createSandbox).not.toHaveBeenCalled();
+    expect(store.task.update).toHaveBeenCalledWith({
+      data: { status: "ERROR" },
+      where: { id: "task-test" },
+    });
+    expect(emitEvent).toHaveBeenCalledWith({
+      type: "error",
+      message: "planner unavailable",
+      taskId: "task-test",
+    });
+    expect(emitEvent).toHaveBeenCalledWith({
+      type: "status_update",
+      status: "ERROR",
+      taskId: "task-test",
     });
   });
 });

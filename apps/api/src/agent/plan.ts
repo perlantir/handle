@@ -156,7 +156,6 @@ export async function emitInitialPlan(
       },
       "Plan generation failed",
     );
+    throw err;
   }
-
-  return [];
 }
