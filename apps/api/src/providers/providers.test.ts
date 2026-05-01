@@ -11,6 +11,15 @@ import type { ProviderConfig } from "./types";
 const fakeModel = {} as BaseChatModel;
 type ChatAnthropicArgs = ConstructorParameters<typeof ChatAnthropic>[0];
 type ChatOpenAIArgs = ConstructorParameters<typeof ChatOpenAI>[0];
+type OpenAICompatibleProviderId = "kimi" | "local" | "openrouter";
+
+const omittedOpenAICompatibleSamplingParams = {
+  frequency_penalty: undefined,
+  n: undefined,
+  presence_penalty: undefined,
+  temperature: undefined,
+  top_p: undefined,
+};
 
 function config(overrides: Partial<ProviderConfig>): ProviderConfig {
   return {
@@ -21,6 +30,50 @@ function config(overrides: Partial<ProviderConfig>): ProviderConfig {
     primaryModel: "test-model",
     ...overrides,
   };
+}
+
+async function captureOpenAICompatibleRequestBody(
+  providerId: OpenAICompatibleProviderId,
+) {
+  let requestBody: Record<string, unknown> | null = null;
+  const fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response(
+      JSON.stringify({ error: { message: "capture", type: "capture" } }),
+      { headers: { "content-type": "application/json" }, status: 400 },
+    );
+  });
+  const getCredential = vi.fn(async (account: string) => {
+    if (account === "local:apiKey") throw new Error("missing");
+    return "test-key-not-real";
+  });
+  const provider = createOpenAICompatibleProvider(
+    config({ id: providerId, primaryModel: "test-compatible-model" }),
+    {
+      createChatModel: (args: ChatOpenAIArgs) => {
+        const baseArgs = args ?? {};
+
+        return new ChatOpenAI({
+          ...baseArgs,
+          configuration: {
+            ...baseArgs.configuration,
+            fetch,
+          },
+          maxRetries: 0,
+          streaming: false,
+        });
+      },
+      getCredential,
+    },
+  );
+
+  const model = await provider.createModel();
+  await expect(model.invoke([new HumanMessage("hi")])).rejects.toThrow(
+    "capture",
+  );
+
+  expect(fetch).toHaveBeenCalledOnce();
+  return requestBody;
 }
 
 describe("provider implementations", () => {
@@ -181,9 +234,9 @@ describe("provider implementations", () => {
       configuration: {
         baseURL: "https://api.moonshot.ai/v1",
       },
+      modelKwargs: omittedOpenAICompatibleSamplingParams,
       model: "test-model",
       streaming: true,
-      temperature: 0.7,
     });
   });
 
@@ -208,11 +261,24 @@ describe("provider implementations", () => {
       configuration: {
         baseURL: "https://api.moonshot.cn/v1",
       },
+      modelKwargs: omittedOpenAICompatibleSamplingParams,
       model: "test-model",
       streaming: true,
-      temperature: 0.7,
     });
   });
+
+  it.each(["kimi", "openrouter", "local"] as const)(
+    "omits OpenAI-compatible sampling defaults for %s request bodies",
+    async (providerId) => {
+      const requestBody = await captureOpenAICompatibleRequestBody(providerId);
+
+      expect(requestBody).not.toHaveProperty("temperature");
+      expect(requestBody).not.toHaveProperty("top_p");
+      expect(requestBody).not.toHaveProperty("n");
+      expect(requestBody).not.toHaveProperty("presence_penalty");
+      expect(requestBody).not.toHaveProperty("frequency_penalty");
+    },
+  );
 
   it("adds OpenRouter attribution headers", async () => {
     const getCredential = vi.fn().mockResolvedValue("test-key-not-real");
@@ -238,9 +304,9 @@ describe("provider implementations", () => {
           "X-Title": "Handle",
         },
       },
+      modelKwargs: omittedOpenAICompatibleSamplingParams,
       model: "test-model",
       streaming: true,
-      temperature: 0.7,
     });
   });
 

@@ -7,6 +7,14 @@ type ChatOpenAIArgs = ConstructorParameters<typeof ChatOpenAI>[0];
 
 type OpenAICompatibleProviderId = Exclude<ProviderId, "openai" | "anthropic">;
 
+const omittedSamplingParams = {
+  frequency_penalty: undefined,
+  n: undefined,
+  presence_penalty: undefined,
+  temperature: undefined,
+  top_p: undefined,
+};
+
 export const OPENAI_COMPATIBLE_ENDPOINTS: Record<
   OpenAICompatibleProviderId,
   string
@@ -84,9 +92,12 @@ export function createOpenAICompatibleProvider(
             ? { defaultHeaders: getOpenRouterHeaders() }
             : {}),
         },
+        // Kimi K2.6/K2.5 can report sampler mismatches as "401 Invalid
+        // Authentication"; suppress LangChain's defaults for all compatible
+        // providers unless a future settings field explicitly opts in.
+        modelKwargs: omittedSamplingParams,
         model: modelOverride ?? config.primaryModel,
         streaming: true,
-        temperature: 0.7,
       });
     },
 
