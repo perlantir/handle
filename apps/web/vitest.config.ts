@@ -1,19 +1,20 @@
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
-import { defineConfig } from 'vitest/config';
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import { defineConfig } from "vitest/config";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   esbuild: {
-    jsx: 'automatic',
+    jsx: "automatic",
   },
   resolve: {
     alias: {
-      '@': resolve(rootDir),
+      "@": resolve(rootDir),
     },
   },
   test: {
-    environment: 'node',
+    environment: "node",
+    exclude: ["**/node_modules/**", "playwright/**"],
   },
 });
