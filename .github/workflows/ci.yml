@@ -85,5 +85,20 @@ jobs:
           NEXT_PUBLIC_HANDLE_TEST_AUTH_BYPASS: "1"
           NEXT_PUBLIC_HANDLE_WEB_BASE_URL: http://127.0.0.1:3000
 
+      - name: Canonical task E2E smoke
+        run: |
+          if [ -z "$OPENAI_API_KEY" ] || [ -z "$E2B_API_KEY" ]; then
+            echo "Skipping canonical task smoke because OpenAI/E2B CI secrets are not configured."
+            exit 0
+          fi
+          pnpm smoke:e2e-canonical
+        env:
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_API_BASE_URL: http://127.0.0.1:3001
+          NEXT_PUBLIC_HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_WEB_BASE_URL: http://127.0.0.1:3000
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
       - name: Build
         run: pnpm build

@@ -77,12 +77,14 @@ pnpm typecheck
 pnpm test
 pnpm smoke:web-signin
 pnpm smoke:e2e-task
+pnpm smoke:e2e-canonical
 pnpm build
 ```
 
 `pnpm build` runs Turborepo. Next.js may rewrite `apps/web/next-env.d.ts` during local builds; keep the source-controlled version unchanged.
 `pnpm smoke:web-signin` starts the web dev server, checks `/sign-in`, verifies protected-route redirects do not self-proxy through `localhost:3000`, and checks task POST CORS headers when the API is already running.
 `pnpm smoke:e2e-task` starts API and web in smoke test mode, uses a mocked Clerk session and deterministic smoke agent, submits a task through the browser, and requires a `tool_call` SSE event plus a terminal `STOPPED` or `ERROR` status. It requires PostgreSQL to be running and ports 3000/3001 to be free.
+`pnpm smoke:e2e-canonical` uses the same browser path but runs the real OpenAI + E2B agent on the canonical Hacker News task. It requires `OPENAI_API_KEY`, `E2B_API_KEY`, `DATABASE_URL`, PostgreSQL, and free ports 3000/3001; Phase 1 signoff requires it to produce more than 5 `/tmp/hn.json` entries and finish with `STOPPED`.
 
 ## Health And Logs
 

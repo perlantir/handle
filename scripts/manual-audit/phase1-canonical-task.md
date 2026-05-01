@@ -61,6 +61,14 @@ pnpm smoke:e2e-task
 
 This starts API and web in smoke test mode, uses a mocked Clerk session and deterministic smoke agent, submits a task through the browser, and verifies a `tool_call` SSE event followed by a terminal `STOPPED` or `ERROR` status. Ports 3000/3001 must be free.
 
+The real-agent canonical smoke must also pass before Phase 1 signoff:
+
+```bash
+pnpm smoke:e2e-canonical
+```
+
+This uses the real OpenAI + E2B path with mocked Clerk auth, submits the canonical Hacker News task through the browser, and verifies the streamed `/tmp/hn.json` payload contains more than 5 entries with `title`, `score`, and `url` before accepting `STOPPED`.
+
 ## Canonical Task
 
 Submit exactly:

@@ -2,13 +2,24 @@ import { chromium } from "@playwright/test";
 import { spawn, spawnSync } from "node:child_process";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
+import { config as loadDotenv } from "dotenv";
 
 const ROOT = new URL("../..", import.meta.url);
+loadDotenv({ path: new URL(".env", ROOT) });
+
+const canonicalMode =
+  process.argv.includes("--canonical") ||
+  process.env.HANDLE_E2E_CANONICAL === "1";
+const SMOKE_GOAL = "Smoke e2e task: emit one tool call and finish.";
+const CANONICAL_GOAL =
+  "Write a Python script that fetches the top 10 Hacker News stories from https://news.ycombinator.com and saves them as JSON to /tmp/hn.json, then run the script once and show me the contents.";
 const WEB_URL =
   process.env.NEXT_PUBLIC_HANDLE_WEB_BASE_URL ?? "http://127.0.0.1:3000";
 const API_URL =
   process.env.NEXT_PUBLIC_HANDLE_API_BASE_URL ?? "http://127.0.0.1:3001";
-const TIMEOUT_MS = 60_000;
+const TIMEOUT_MS = canonicalMode
+  ? Number.parseInt(process.env.HANDLE_E2E_CANONICAL_TIMEOUT_MS ?? "360000", 10)
+  : 60_000;
 const API_PORT = new URL(API_URL).port || "3001";
 const PROXY_LOOP_TEXT = "Failed to proxy http://localhost:3000";
 
@@ -31,17 +42,35 @@ function outputTail() {
 }
 
 function smokeEnv() {
-  return {
+  const env = {
     ...process.env,
     HANDLE_API_BASE_URL: API_URL,
     HANDLE_API_HOST: "127.0.0.1",
     HANDLE_API_PORT: API_PORT,
-    HANDLE_SMOKE_AGENT: "1",
     HANDLE_TEST_AUTH_BYPASS: "1",
     NEXT_PUBLIC_HANDLE_API_BASE_URL: API_URL,
     NEXT_PUBLIC_HANDLE_TEST_AUTH_BYPASS: "1",
     NEXT_PUBLIC_HANDLE_WEB_BASE_URL: WEB_URL,
   };
+
+  if (canonicalMode) {
+    delete env.HANDLE_SMOKE_AGENT;
+  } else {
+    env.HANDLE_SMOKE_AGENT = "1";
+  }
+
+  return env;
+}
+
+function assertCanonicalEnv(env) {
+  const missing = ["OPENAI_API_KEY", "E2B_API_KEY"].filter(
+    (name) => !env[name],
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `Canonical smoke requires ${missing.join(", ")} in the environment or root .env`,
+    );
+  }
 }
 
 function runChecked(label, args, env) {
@@ -207,12 +236,143 @@ async function waitForTaskEvents(taskId) {
   return { events, finalStatus };
 }
 
+function candidateStringsFromEvents(events) {
+  const candidates = [];
+
+  for (const event of events) {
+    if (event.type === "message" && typeof event.content === "string") {
+      candidates.push(event.content);
+    }
+
+    if (event.type !== "tool_result" || typeof event.result !== "string") {
+      continue;
+    }
+
+    candidates.push(event.result);
+
+    try {
+      const parsed = JSON.parse(event.result);
+      for (const key of ["stdout", "stderr", "result"]) {
+        if (typeof parsed?.[key] === "string") candidates.push(parsed[key]);
+      }
+    } catch {
+      // Tool output is often plain text.
+    }
+  }
+
+  return candidates;
+}
+
+function parseJsonArrays(text) {
+  const arrays = [];
+
+  for (
+    let start = text.indexOf("[");
+    start >= 0;
+    start = text.indexOf("[", start + 1)
+  ) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < text.length; index += 1) {
+      const char = text[index];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+      } else if (char === "[") {
+        depth += 1;
+      } else if (char === "]") {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = text.slice(start, index + 1);
+          try {
+            const parsed = JSON.parse(candidate);
+            if (Array.isArray(parsed)) arrays.push(parsed);
+          } catch {
+            // Keep scanning for the next array-shaped substring.
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  return arrays;
+}
+
+function isValidHnEntry(entry) {
+  return (
+    entry &&
+    typeof entry === "object" &&
+    typeof entry.title === "string" &&
+    entry.title.trim().length > 0 &&
+    typeof entry.url === "string" &&
+    entry.url.trim().length > 0 &&
+    Object.prototype.hasOwnProperty.call(entry, "score") &&
+    String(entry.score ?? "").trim().length > 0
+  );
+}
+
+function findHnEntries(events) {
+  for (const candidate of candidateStringsFromEvents(events)) {
+    for (const array of parseJsonArrays(candidate)) {
+      const validEntries = array.filter(isValidHnEntry);
+      if (validEntries.length > 5) return validEntries;
+    }
+  }
+
+  return [];
+}
+
+function assertCanonicalResult(events, finalStatus) {
+  if (finalStatus !== "STOPPED") {
+    throw new Error(
+      `Canonical task ended with ${finalStatus}, expected STOPPED`,
+    );
+  }
+
+  const assistantMessages = events
+    .filter(
+      (event) => event.type === "message" && typeof event.content === "string",
+    )
+    .map((event) => event.content);
+  if (
+    assistantMessages.some((message) => message.includes("[[HANDLE_RESULT:"))
+  ) {
+    throw new Error(
+      "Final assistant message still contains the Handle result marker",
+    );
+  }
+
+  const entries = findHnEntries(events);
+  if (entries.length <= 5) {
+    throw new Error(
+      `Canonical task did not stream a valid /tmp/hn.json payload with more than 5 entries; saw ${entries.length}`,
+    );
+  }
+
+  return entries;
+}
+
 let api;
 let web;
 let browser;
 
 try {
   const env = smokeEnv();
+  if (canonicalMode) assertCanonicalEnv(env);
 
   await assertPortFree(`${API_URL}/health`, "API port");
   await assertPortFree(`${WEB_URL}/sign-in`, "Web port");
@@ -279,7 +439,7 @@ try {
   await page.waitForURL(`${WEB_URL}/`);
   await page
     .locator('textarea[name="goal"]')
-    .fill("Smoke e2e task: emit one tool call and finish.");
+    .fill(canonicalMode ? CANONICAL_GOAL : SMOKE_GOAL);
   const taskResponsePromise = page.waitForResponse(
     (response) =>
       response.url() === `${API_URL}/api/tasks` &&
@@ -304,12 +464,21 @@ try {
     throw new Error(`Browser errors were reported: ${pageErrors.join(" | ")}`);
   }
 
-  console.log(
-    `[smoke:e2e-task] task ${taskId} emitted ${events.length} SSE events including tool_call and ${finalStatus}`,
-  );
+  if (canonicalMode) {
+    const entries = assertCanonicalResult(events, finalStatus);
+    console.log(
+      `[smoke:e2e-canonical] task ${taskId} emitted ${events.length} SSE events and produced ${entries.length} HN entries with ${finalStatus}`,
+    );
+  } else {
+    console.log(
+      `[smoke:e2e-task] task ${taskId} emitted ${events.length} SSE events including tool_call and ${finalStatus}`,
+    );
+  }
 } catch (error) {
   console.error(
-    `[smoke:e2e-task] ${error instanceof Error ? error.message : "failed"}`,
+    `[${canonicalMode ? "smoke:e2e-canonical" : "smoke:e2e-task"}] ${
+      error instanceof Error ? error.message : "failed"
+    }`,
   );
   console.error(outputTail());
   process.exitCode = 1;

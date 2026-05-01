@@ -13,6 +13,7 @@
     "format": "prettier --check .",
     "format:write": "prettier --write .",
     "lint": "turbo lint",
+    "smoke:e2e-canonical": "node scripts/smoke/e2e-task.mjs --canonical",
     "smoke:e2e-task": "node scripts/smoke/e2e-task.mjs",
     "smoke:web-signin": "node scripts/smoke/web-signin.mjs",
     "test": "pnpm -r --if-present test",
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@types/node": "^20.19.39",
+    "dotenv": "^16.6.1",
     "eslint": "^9.39.4",
     "prettier": "^3.8.3",
     "turbo": "^2.9.6",
