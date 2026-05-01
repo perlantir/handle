@@ -472,6 +472,31 @@ services where reasonable. CI may skip if credentials aren't
 configured. Local must pass.
 
 ==================================================
+RULE 29: BROWSER-FACING WORK NEEDS PLAYWRIGHT TESTS
+==================================================
+
+Any phase work that adds or modifies a user-facing screen
+(Settings, Workspace, Home, Memory, Skills, etc.) requires a
+Playwright test exercising the user flow before that subsystem's
+commit.
+
+Playwright tests must:
+- Launch a real browser (chromium)
+- Sign in via Clerk's test mode (or skip auth via test bypass)
+- Navigate to the new screen
+- Perform the user action (type, click, save)
+- Assert the expected result is visible
+
+Mock providers and external APIs at the network layer (route
+intercepts), not at the application layer. The point is to verify
+the React + Next.js + Clerk + middleware + API stack actually
+works end-to-end.
+
+Per phase, expect 1-3 new Playwright tests covering the new
+screens. Phase 1 added smoke:web-signin and smoke:e2e-task as the
+floor. Each phase adds more.
+
+==================================================
 COORDINATION: WHEN TO STOP AND ASK
 ==================================================
 
