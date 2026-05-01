@@ -1,0 +1,328 @@
+import { Router } from "express";
+import { z } from "zod";
+import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
+import {
+  deleteCredential as defaultDeleteCredential,
+  getCredential as defaultGetCredential,
+  setCredential as defaultSetCredential,
+} from "../lib/keychain";
+import { asyncHandler } from "../lib/http";
+import { prisma } from "../lib/prisma";
+import { redactSecrets } from "../lib/redact";
+import { createProviderInstance } from "../providers/registry";
+import {
+  isProviderId,
+  type ProviderConfig,
+  type ProviderId,
+  type ProviderInstance,
+} from "../providers/types";
+
+const TEST_PROMPT = "Hello, respond with OK.";
+
+const updateProviderSchema = z
+  .object({
+    baseURL: z.string().url().optional(),
+    enabled: z.boolean().optional(),
+    fallbackOrder: z.number().int().min(1).max(100).optional(),
+    modelName: z.string().trim().min(1).max(200).optional(),
+    primaryModel: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one provider setting is required.",
+  });
+
+const setKeySchema = z.object({
+  value: z.string().min(1),
+});
+
+export interface ProviderConfigRow {
+  authMode: string;
+  baseURL: string | null;
+  enabled: boolean;
+  fallbackOrder: number;
+  id: string;
+  modelName: string | null;
+  primaryModel: string;
+  updatedAt?: Date | string;
+}
+
+export interface SettingsRouteStore {
+  providerConfig: {
+    findMany(args: unknown): Promise<ProviderConfigRow[]>;
+    findUnique(args: unknown): Promise<ProviderConfigRow | null>;
+    update(args: unknown): Promise<ProviderConfigRow>;
+  };
+}
+
+export interface KeychainLike {
+  deleteCredential(account: string): Promise<void>;
+  getCredential(account: string): Promise<string>;
+  setCredential(account: string, value: string): Promise<void>;
+}
+
+export interface CreateSettingsRouterOptions {
+  createProvider?: (config: ProviderConfig) => ProviderInstance;
+  getUserId?: typeof getAuthenticatedUserId;
+  keychain?: KeychainLike;
+  store?: SettingsRouteStore;
+}
+
+const DESCRIPTIONS: Record<ProviderId, string> = {
+  anthropic: "Anthropic",
+  kimi: "Moonshot KIMI",
+  local: "Local LLM",
+  openai: "OpenAI",
+  openrouter: "OpenRouter (100+ models from many providers)",
+};
+
+function accountForProvider(id: ProviderId) {
+  return `${id}:apiKey`;
+}
+
+function parseProviderId(value: string | undefined) {
+  return value && isProviderId(value) ? value : null;
+}
+
+function errorMessage(err: unknown) {
+  if (err instanceof Error) return redactSecrets(err.message);
+  if (typeof err === "string") return redactSecrets(err);
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "message" in err &&
+    typeof err.message === "string"
+  ) {
+    return redactSecrets(err.message);
+  }
+
+  return "Unknown provider error";
+}
+
+function normalizeProviderConfig(
+  row: ProviderConfigRow,
+): ProviderConfig | null {
+  if (!isProviderId(row.id)) return null;
+
+  return {
+    authMode: row.authMode === "chatgpt-oauth" ? "chatgpt-oauth" : "apiKey",
+    ...(row.baseURL ? { baseURL: row.baseURL } : {}),
+    enabled: row.enabled,
+    fallbackOrder: row.fallbackOrder,
+    id: row.id,
+    ...(row.modelName ? { modelName: row.modelName } : {}),
+    primaryModel: row.primaryModel,
+  };
+}
+
+function serializeProvider(row: ProviderConfigRow) {
+  const config = normalizeProviderConfig(row);
+  if (!config) return null;
+
+  return {
+    authMode: config.authMode ?? "apiKey",
+    baseURL: config.baseURL ?? null,
+    description: DESCRIPTIONS[config.id],
+    enabled: config.enabled,
+    fallbackOrder: config.fallbackOrder,
+    id: config.id,
+    modelName: config.modelName ?? null,
+    primaryModel: config.primaryModel,
+    updatedAt: row.updatedAt ?? null,
+  };
+}
+
+function contentToString(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (
+          typeof item === "object" &&
+          item !== null &&
+          "text" in item &&
+          typeof item.text === "string"
+        ) {
+          return item.text;
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("");
+  }
+  return "";
+}
+
+function modelOutputToString(output: unknown) {
+  if (typeof output === "string") return output;
+  if (typeof output === "object" && output !== null && "content" in output) {
+    return contentToString(output.content);
+  }
+  return "";
+}
+
+export function createSettingsRouter({
+  createProvider = createProviderInstance,
+  getUserId = getAuthenticatedUserId,
+  keychain = {
+    deleteCredential: defaultDeleteCredential,
+    getCredential: defaultGetCredential,
+    setCredential: defaultSetCredential,
+  },
+  store = prisma,
+}: CreateSettingsRouterOptions = {}) {
+  const router = Router();
+
+  router.get(
+    "/providers",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const rows = await store.providerConfig.findMany({
+        orderBy: { fallbackOrder: "asc" },
+      });
+
+      return res.json({
+        providers: rows
+          .map(serializeProvider)
+          .filter((row): row is NonNullable<typeof row> => row !== null),
+      });
+    }),
+  );
+
+  router.put(
+    "/providers/:id",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const providerId = parseProviderId(req.params.id);
+      if (!providerId) {
+        return res.status(404).json({ error: "Provider not found" });
+      }
+
+      const parsed = updateProviderSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      if (
+        providerId !== "local" &&
+        ("baseURL" in parsed.data || "modelName" in parsed.data)
+      ) {
+        return res.status(400).json({
+          error: "baseURL and modelName can only be updated for local.",
+        });
+      }
+
+      const existing = await store.providerConfig.findUnique({
+        where: { id: providerId },
+      });
+      if (!existing)
+        return res.status(404).json({ error: "Provider not found" });
+
+      const updated = await store.providerConfig.update({
+        data: parsed.data,
+        where: { id: providerId },
+      });
+
+      return res.json({ provider: serializeProvider(updated) });
+    }),
+  );
+
+  router.post(
+    "/providers/:id/key",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const providerId = parseProviderId(req.params.id);
+      if (!providerId) {
+        return res.status(404).json({ error: "Provider not found" });
+      }
+
+      const parsed = setKeySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      const account = accountForProvider(providerId);
+      await keychain.setCredential(account, parsed.data.value);
+      const saved = await keychain.getCredential(account);
+
+      if (saved !== parsed.data.value) {
+        return res.status(500).json({
+          error: `Keychain write verification failed for ${account}.`,
+        });
+      }
+
+      return res.json({ providerId, saved: true });
+    }),
+  );
+
+  router.delete(
+    "/providers/:id/key",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const providerId = parseProviderId(req.params.id);
+      if (!providerId) {
+        return res.status(404).json({ error: "Provider not found" });
+      }
+
+      await keychain.deleteCredential(accountForProvider(providerId));
+
+      return res.json({ deleted: true, providerId });
+    }),
+  );
+
+  router.post(
+    "/providers/:id/test",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const providerId = parseProviderId(req.params.id);
+      if (!providerId) {
+        return res.status(404).json({ error: "Provider not found" });
+      }
+
+      const row = await store.providerConfig.findUnique({
+        where: { id: providerId },
+      });
+      if (!row) return res.status(404).json({ error: "Provider not found" });
+
+      const config = normalizeProviderConfig(row);
+      if (!config) return res.status(404).json({ error: "Provider not found" });
+
+      try {
+        const model = await createProvider(config).createModel();
+        const output = await model.invoke(TEST_PROMPT);
+        const response = modelOutputToString(output).trim();
+
+        if (!/\bOK\b/i.test(response)) {
+          return res.status(502).json({
+            error: `Provider test expected OK response, received: ${response || "<empty response>"}`,
+          });
+        }
+
+        return res.json({ ok: true, providerId, response });
+      } catch (err) {
+        return res
+          .status(502)
+          .json({ error: errorMessage(err), ok: false, providerId });
+      }
+    }),
+  );
+
+  return router;
+}
+
+export const settingsRouter = createSettingsRouter();

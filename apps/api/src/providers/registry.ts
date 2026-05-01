@@ -58,7 +58,9 @@ function normalizeProviderConfig(
   };
 }
 
-function createProvider(config: ProviderConfig): ProviderInstance {
+export function createProviderInstance(
+  config: ProviderConfig,
+): ProviderInstance {
   if (config.id === "openai") return createOpenAIProvider(config);
   if (config.id === "anthropic") return createAnthropicProvider(config);
   return createOpenAICompatibleProvider(config);
@@ -88,7 +90,7 @@ export class ProviderRegistryImpl implements ProviderRegistry {
   private readonly store: ProviderConfigStore;
 
   constructor({
-    createProvider: createProviderDependency = createProvider,
+    createProvider: createProviderDependency = createProviderInstance,
     emitTaskEvent = defaultEmitTaskEvent,
     store = prisma,
   }: ProviderRegistryDependencies = {}) {
