@@ -104,7 +104,7 @@ const validApiKeys: Record<ProviderId, string> = {
 
 const expectedKeyFormats: Record<ProviderId, string> = {
   anthropic: "sk-ant- followed by 20+ letters, numbers, underscores, or dashes",
-  kimi: "sk- or YSK followed by 20+ letters, numbers, underscores, or dashes",
+  kimi: "sk- followed by 20+ letters, numbers, underscores, or dashes",
   local: "any non-empty string",
   openai:
     "sk- or sk-proj- followed by 20+ letters, numbers, underscores, or dashes",
@@ -331,17 +331,19 @@ describe("settings providers route", () => {
     },
   );
 
-  it("accepts KIMI YSK personal-tier keys", async () => {
-    const apiKey = `YSK${"y".repeat(30)}`;
-    const keychain = mockKeychain(apiKey);
+  it("rejects KIMI YSK-prefixed keys", async () => {
+    const keychain = mockKeychain();
 
-    await request(createApp({ keychain }))
+    const response = await request(createApp({ keychain }))
       .post("/api/settings/providers/kimi/key")
-      .send({ apiKey })
-      .expect(200);
+      .send({ apiKey: `YSK${"y".repeat(30)}` })
+      .expect(400);
 
-    expect(keychain.setCredential).toHaveBeenCalledWith("kimi:apiKey", apiKey);
-    expect(keychain.getCredential).toHaveBeenCalledWith("kimi:apiKey");
+    expect(response.body).toEqual({
+      error: "Invalid API key format for kimi",
+      expected: expectedKeyFormats.kimi,
+    });
+    expect(keychain.setCredential).not.toHaveBeenCalled();
   });
 
   it("deletes provider keys from Keychain", async () => {
