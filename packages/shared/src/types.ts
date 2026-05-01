@@ -139,6 +139,7 @@ export interface TaskDetailResponse {
 export interface CreateTaskRequest {
   goal: string;
   backend?: 'e2b' | 'local';
+  providerOverride?: string;
 }
 
 export interface CreateTaskResponse {

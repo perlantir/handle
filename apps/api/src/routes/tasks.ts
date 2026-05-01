@@ -6,9 +6,11 @@ import { runAgent as defaultRunAgent } from "../agent/runAgent";
 import { asyncHandler } from "../lib/http";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
+import { isProviderId, type ProviderId } from "../providers/types";
 
 const createTaskSchema = z.object({
   goal: z.string().min(1).max(10_000),
+  providerOverride: z.string().refine(isProviderId).optional(),
   skipAgent: z.boolean().optional(),
 });
 
@@ -24,7 +26,11 @@ export interface TaskRouteStore {
 
 interface CreateTasksRouterOptions {
   getUserId?: typeof getAuthenticatedUserId;
-  runAgent?: (taskId: string, goal: string) => Promise<void>;
+  runAgent?: (
+    taskId: string,
+    goal: string,
+    options?: { providerOverride?: ProviderId },
+  ) => Promise<void>;
   store?: TaskRouteStore;
 }
 
@@ -64,12 +70,21 @@ export function createTasksRouter({
           messages: {
             create: { content: parsed.data.goal, role: "USER" },
           },
+          ...(parsed.data.providerOverride
+            ? { providerOverride: parsed.data.providerOverride }
+            : {}),
           userId,
         },
       });
 
       if (!parsed.data.skipAgent || process.env.NODE_ENV === "production") {
-        runAgent(task.id, parsed.data.goal).catch((err) => {
+        const runPromise = parsed.data.providerOverride
+          ? runAgent(task.id, parsed.data.goal, {
+              providerOverride: parsed.data.providerOverride,
+            })
+          : runAgent(task.id, parsed.data.goal);
+
+        runPromise.catch((err) => {
           logger.error(
             { err, taskId: task.id },
             "runAgent unhandled rejection",

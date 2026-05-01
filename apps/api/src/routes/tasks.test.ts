@@ -1,11 +1,16 @@
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import type { ProviderId } from "../providers/types";
 import { createTasksRouter, type TaskRouteStore } from "./tasks";
 
 function createApp(
   store: TaskRouteStore,
-  runAgent: (taskId: string, goal: string) => Promise<void>,
+  runAgent: (
+    taskId: string,
+    goal: string,
+    options?: { providerOverride?: ProviderId },
+  ) => Promise<void>,
 ) {
   const app = express();
   app.use(express.json());
@@ -51,6 +56,38 @@ describe("tasks route", () => {
       where: { id: "user-test" },
     });
     expect(runAgent).toHaveBeenCalledWith("task-test", "Write a file");
+  });
+
+  it("persists and forwards a provider override", async () => {
+    const runAgent = vi.fn().mockResolvedValue(undefined);
+    const createTask = vi.fn().mockResolvedValue({ id: "task-provider" });
+    const store: TaskRouteStore = {
+      task: {
+        create: createTask,
+        async findFirst() {
+          return null;
+        },
+      },
+      user: {
+        async upsert() {
+          return {};
+        },
+      },
+    };
+
+    await request(createApp(store, runAgent))
+      .post("/api/tasks")
+      .send({ goal: "Use Anthropic", providerOverride: "anthropic" })
+      .expect(200);
+
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ providerOverride: "anthropic" }),
+      }),
+    );
+    expect(runAgent).toHaveBeenCalledWith("task-provider", "Use Anthropic", {
+      providerOverride: "anthropic",
+    });
   });
 
   it("can skip agent startup for smoke task creation outside production", async () => {
