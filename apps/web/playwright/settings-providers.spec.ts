@@ -3,7 +3,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 type ProviderId = "anthropic" | "kimi" | "local" | "openai" | "openrouter";
 
 interface ProviderFixture {
-  authMode: "apiKey";
+  authMode: "apiKey" | "chatgpt-oauth";
   baseURL: string | null;
   description: string;
   enabled: boolean;
@@ -21,7 +21,44 @@ interface RecordedRequest {
   path: string;
 }
 
+interface OAuthStatusFixture {
+  accountId: string | null;
+  email: string | null;
+  expires: number | null;
+  flowError: string | null;
+  flowState: string | null;
+  planType: string | null;
+  port: number | null;
+  signedIn: boolean;
+}
+
 const validOpenAiKey = `sk-${"o".repeat(30)}`;
+
+function disconnectedOAuthStatus(): OAuthStatusFixture {
+  return {
+    accountId: null,
+    email: null,
+    expires: null,
+    flowError: null,
+    flowState: null,
+    planType: null,
+    port: null,
+    signedIn: false,
+  };
+}
+
+function connectedOAuthStatus(): OAuthStatusFixture {
+  return {
+    accountId: "account-123",
+    email: "perlantir@example.com",
+    expires: 1_800_000_000_000,
+    flowError: null,
+    flowState: null,
+    planType: "plus",
+    port: null,
+    signedIn: true,
+  };
+}
 
 function providerFixtures(): ProviderFixture[] {
   return [
@@ -105,6 +142,8 @@ async function requestBody(route: Route) {
 async function mockSettingsProvidersApi(
   page: Page,
   options: {
+    oauthAfterStart?: OAuthStatusFixture;
+    oauthStatus?: OAuthStatusFixture;
     testFailures?: Partial<
       Record<ProviderId, { error: string; status: number }>
     >;
@@ -112,6 +151,7 @@ async function mockSettingsProvidersApi(
 ) {
   const providers = providerFixtures();
   const requests: RecordedRequest[] = [];
+  let oauthStatus = options.oauthStatus ?? disconnectedOAuthStatus();
 
   await page.route("**/api/settings/providers**", async (route) => {
     const request = route.request();
@@ -124,6 +164,50 @@ async function mockSettingsProvidersApi(
 
     if (method === "GET" && path === "/api/settings/providers") {
       await jsonRoute(route, 200, { providers });
+      return;
+    }
+
+    if (path === "/api/settings/providers/openai/oauth/status") {
+      await jsonRoute(route, 200, {
+        providerId: "openai",
+        status: oauthStatus,
+      });
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      path === "/api/settings/providers/openai/oauth/start"
+    ) {
+      oauthStatus = options.oauthAfterStart ?? connectedOAuthStatus();
+      await jsonRoute(route, 200, {
+        authUrl: "https://auth.openai.com/oauth/authorize?state=test-state",
+        expiresInMs: 2_000,
+        port: 1455,
+        providerId: "openai",
+        redirectUri: "http://localhost:1455/auth/callback",
+        state: "test-state",
+      });
+      return;
+    }
+
+    if (
+      method === "DELETE" &&
+      path === "/api/settings/providers/openai/oauth/disconnect"
+    ) {
+      oauthStatus = disconnectedOAuthStatus();
+      await jsonRoute(route, 200, { disconnected: true, providerId: "openai" });
+      return;
+    }
+
+    if (
+      method === "POST" &&
+      path === "/api/settings/providers/openai/oauth/refresh"
+    ) {
+      await jsonRoute(route, 200, {
+        providerId: "openai",
+        status: oauthStatus,
+      });
       return;
     }
 
@@ -217,10 +301,16 @@ test.describe("Settings Providers", () => {
     const openai = providerCard(page, "OpenAI");
     await expect(openai.getByText("API Key", { exact: true })).toBeVisible();
     await expect(
-      openai.getByText("ChatGPT Subscription (OAuth)"),
+      openai.getByText("ChatGPT Subscription", { exact: true }),
     ).toBeVisible();
-    await expect(openai.getByText("Coming in step 8")).toBeVisible();
-    await expect(openai.locator('input[type="radio"]').nth(1)).toBeDisabled();
+    await expect(openai.getByText("Both (fallback)")).toBeVisible();
+    await expect(
+      openai.getByText("ChatGPT subscription not connected"),
+    ).toBeVisible();
+    await expect(
+      openai.getByRole("button", { name: "Sign in with ChatGPT" }),
+    ).toBeVisible();
+    await expect(openai.locator('input[type="radio"]').nth(1)).toBeEnabled();
   });
 
   test("saves enabled state, model, and a valid API key", async ({ page }) => {
@@ -241,6 +331,7 @@ test.describe("Settings Providers", () => {
           request.path === "/api/settings/providers/openai",
       )?.body,
     ).toEqual({
+      authMode: "apiKey",
       enabled: true,
       fallbackOrder: 1,
       primaryModel: "gpt-4o",
@@ -252,6 +343,78 @@ test.describe("Settings Providers", () => {
           request.path === "/api/settings/providers/openai/key",
       )?.body,
     ).toEqual({ apiKey: validOpenAiKey });
+  });
+
+  test("starts and disconnects the mocked ChatGPT Subscription OAuth flow", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      window.open = ((url: string | URL | undefined) => {
+        window.sessionStorage.setItem("opened-oauth-url", String(url));
+        return null;
+      }) as typeof window.open;
+    });
+    const { requests } = await mockSettingsProvidersApi(page);
+    await openSettings(page);
+
+    const openai = providerCard(page, "OpenAI");
+    await openai.getByLabel("ChatGPT Subscription").check();
+    await openai.getByRole("button", { name: "Sign in with ChatGPT" }).click();
+
+    await expect(
+      openai.getByText("Signed in as perlantir@example.com"),
+    ).toBeVisible();
+    await expect(
+      openai.getByText("ChatGPT subscription connected"),
+    ).toBeVisible();
+    await expect(
+      page.evaluate(() => window.sessionStorage.getItem("opened-oauth-url")),
+    ).resolves.toContain("https://auth.openai.com/oauth/authorize");
+    expect(
+      requests.some(
+        (request) =>
+          request.method === "POST" &&
+          request.path === "/api/settings/providers/openai/oauth/start",
+      ),
+    ).toBe(true);
+
+    await openai.getByRole("button", { name: "Disconnect" }).click();
+
+    await expect(
+      openai.getByText("ChatGPT subscription not connected"),
+    ).toBeVisible();
+    expect(
+      requests.some(
+        (request) =>
+          request.method === "DELETE" &&
+          request.path === "/api/settings/providers/openai/oauth/disconnect",
+      ),
+    ).toBe(true);
+  });
+
+  test("focuses the OpenAI API key field from an OAuth-only failure", async ({
+    page,
+  }) => {
+    await mockSettingsProvidersApi(page, {
+      oauthStatus: {
+        ...disconnectedOAuthStatus(),
+        flowError:
+          "OpenAI ChatGPT Subscription auth failed: rate limited. To enable fallback, also configure your OpenAI API key, Anthropic, OpenRouter, or another provider.",
+      },
+    });
+    await openSettings(page);
+
+    const openai = providerCard(page, "OpenAI");
+    await expect(
+      openai.getByText("OpenAI ChatGPT Subscription auth failed: rate limited"),
+    ).toBeVisible();
+
+    await openai
+      .getByRole("button", { name: "Add API Key as fallback" })
+      .click();
+
+    await expect(openai.getByLabel("OpenAI API key")).toBeFocused();
+    await expect(openai.getByLabel("Both (fallback)")).toBeChecked();
   });
 
   test("shows a mocked successful provider test response inline", async ({
