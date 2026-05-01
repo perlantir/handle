@@ -131,8 +131,16 @@ describe("settings providers route", () => {
         primaryModel: "llama3.2",
       }),
     ]);
+    const keychain = {
+      deleteCredential: vi.fn(),
+      getCredential: vi.fn(async (account: string) => {
+        if (account === "openai:apiKey") return "test-key-not-real";
+        throw new Error("not found");
+      }),
+      setCredential: vi.fn(),
+    };
 
-    const response = await request(createApp({ store: routeStore }))
+    const response = await request(createApp({ keychain, store: routeStore }))
       .get("/api/settings/providers")
       .expect(200);
 
@@ -141,12 +149,14 @@ describe("settings providers route", () => {
         authMode: "apiKey",
         description: "OpenAI",
         enabled: true,
+        hasApiKey: true,
         id: "openai",
         primaryModel: "gpt-5.2",
       }),
       expect.objectContaining({
         baseURL: "http://127.0.0.1:11434/v1",
         description: "Local LLM",
+        hasApiKey: false,
         id: "local",
         modelName: "Local Llama",
       }),

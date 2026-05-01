@@ -188,6 +188,14 @@ function serializeProvider(row: ProviderConfigRow) {
   };
 }
 
+async function hasProviderApiKey(providerId: ProviderId, keychain: KeychainLike) {
+  const value = await keychain
+    .getCredential(accountForProvider(providerId))
+    .catch(() => "");
+
+  return value.length > 0;
+}
+
 function contentToString(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
@@ -240,10 +248,22 @@ export function createSettingsRouter({
         orderBy: { fallbackOrder: "asc" },
       });
 
+      const providers = await Promise.all(
+        rows.map(async (row) => {
+          const provider = serializeProvider(row);
+          if (!provider) return null;
+
+          return {
+            ...provider,
+            hasApiKey: await hasProviderApiKey(provider.id, keychain),
+          };
+        }),
+      );
+
       return res.json({
-        providers: rows
-          .map(serializeProvider)
-          .filter((row): row is NonNullable<typeof row> => row !== null),
+        providers: providers.filter(
+          (row): row is NonNullable<typeof row> => row !== null,
+        ),
       });
     }),
   );
