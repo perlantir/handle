@@ -11,7 +11,7 @@ export const OPENAI_COMPATIBLE_ENDPOINTS: Record<
   OpenAICompatibleProviderId,
   string
 > = {
-  kimi: "https://api.moonshot.cn/v1",
+  kimi: "https://api.moonshot.ai/v1",
   local: "http://127.0.0.1:11434/v1",
   openrouter: "https://openrouter.ai/api/v1",
 };

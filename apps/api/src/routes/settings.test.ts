@@ -187,12 +187,41 @@ describe("settings providers route", () => {
     });
   });
 
+  it("updates KIMI base URL for regional overrides", async () => {
+    const routeStore = store([row({ id: "kimi" })]);
+
+    const response = await request(createApp({ store: routeStore }))
+      .put("/api/settings/providers/kimi")
+      .send({ baseURL: "https://api.moonshot.cn/v1" })
+      .expect(200);
+
+    expect(response.body.provider).toMatchObject({
+      baseURL: "https://api.moonshot.cn/v1",
+      id: "kimi",
+    });
+    expect(routeStore.providerConfig.update).toHaveBeenCalledWith({
+      data: { baseURL: "https://api.moonshot.cn/v1" },
+      where: { id: "kimi" },
+    });
+  });
+
   it("rejects non-local base URL updates", async () => {
     const routeStore = store([row({ id: "openrouter" })]);
 
     await request(createApp({ store: routeStore }))
       .put("/api/settings/providers/openrouter")
       .send({ baseURL: "https://openrouter.ai/api/v1" })
+      .expect(400);
+
+    expect(routeStore.providerConfig.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-local model name updates", async () => {
+    const routeStore = store([row({ id: "kimi" })]);
+
+    await request(createApp({ store: routeStore }))
+      .put("/api/settings/providers/kimi")
+      .send({ modelName: "China endpoint" })
       .expect(400);
 
     expect(routeStore.providerConfig.update).not.toHaveBeenCalled();

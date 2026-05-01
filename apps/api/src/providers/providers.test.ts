@@ -179,6 +179,33 @@ describe("provider implementations", () => {
     expect(createChatModel).toHaveBeenCalledWith({
       apiKey: "test-key-not-real",
       configuration: {
+        baseURL: "https://api.moonshot.ai/v1",
+      },
+      model: "test-model",
+      streaming: true,
+      temperature: 0.7,
+    });
+  });
+
+  it("uses custom KIMI base URLs for regional overrides", async () => {
+    const getCredential = vi.fn().mockResolvedValue("test-key-not-real");
+    const createChatModel = vi.fn(() => fakeModel);
+    const provider = createOpenAICompatibleProvider(
+      config({
+        baseURL: "https://api.moonshot.cn/v1",
+        id: "kimi",
+      }),
+      {
+        createChatModel,
+        getCredential,
+      },
+    );
+
+    await expect(provider.createModel()).resolves.toBe(fakeModel);
+
+    expect(createChatModel).toHaveBeenCalledWith({
+      apiKey: "test-key-not-real",
+      configuration: {
         baseURL: "https://api.moonshot.cn/v1",
       },
       model: "test-model",

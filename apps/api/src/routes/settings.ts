@@ -116,6 +116,10 @@ function parseProviderId(value: string | undefined) {
   return value && isProviderId(value) ? value : null;
 }
 
+function canUpdateProviderBaseURL(providerId: ProviderId) {
+  return providerId === "kimi" || providerId === "local";
+}
+
 function errorMessage(err: unknown) {
   if (err instanceof Error) return redactSecrets(err.message);
   if (typeof err === "string") return redactSecrets(err);
@@ -248,12 +252,15 @@ export function createSettingsRouter({
           .json({ error: "Invalid request", details: parsed.error.flatten() });
       }
 
-      if (
-        providerId !== "local" &&
-        ("baseURL" in parsed.data || "modelName" in parsed.data)
-      ) {
+      if (!canUpdateProviderBaseURL(providerId) && "baseURL" in parsed.data) {
         return res.status(400).json({
-          error: "baseURL and modelName can only be updated for local.",
+          error: "baseURL can only be updated for local or KIMI.",
+        });
+      }
+
+      if (providerId !== "local" && "modelName" in parsed.data) {
+        return res.status(400).json({
+          error: "modelName can only be updated for local.",
         });
       }
 
