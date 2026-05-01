@@ -10,6 +10,10 @@ import { asyncHandler } from "../lib/http";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
+import {
+  createChatGptOAuthService,
+  type ChatGptOAuthService,
+} from "../providers/openaiChatgptOAuthFlow";
 import { createProviderInstance } from "../providers/registry";
 import {
   isProviderId,
@@ -95,6 +99,7 @@ export interface KeychainLike {
 }
 
 export interface CreateSettingsRouterOptions {
+  chatgptOAuthService?: ChatGptOAuthService;
   createProvider?: (config: ProviderConfig) => ProviderInstance;
   getUserId?: typeof getAuthenticatedUserId;
   keychain?: KeychainLike;
@@ -227,6 +232,7 @@ function modelOutputToString(output: unknown) {
 }
 
 export function createSettingsRouter({
+  chatgptOAuthService,
   createProvider = createProviderInstance,
   getUserId = getAuthenticatedUserId,
   keychain = {
@@ -237,6 +243,8 @@ export function createSettingsRouter({
   store = prisma,
 }: CreateSettingsRouterOptions = {}) {
   const router = Router();
+  const chatgptOAuth =
+    chatgptOAuthService ?? createChatGptOAuthService({ keychain });
 
   router.get(
     "/providers",
@@ -366,6 +374,70 @@ export function createSettingsRouter({
       await keychain.deleteCredential(accountForProvider(providerId));
 
       return res.json({ deleted: true, providerId });
+    }),
+  );
+
+  router.post(
+    "/providers/openai/oauth/start",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      try {
+        const flow = await chatgptOAuth.start(userId);
+
+        return res.json({ ...flow, providerId: "openai" });
+      } catch (err) {
+        return res.status(502).json({
+          error: errorMessage(err),
+          providerId: "openai",
+        });
+      }
+    }),
+  );
+
+  router.get(
+    "/providers/openai/oauth/status",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      return res.json({
+        providerId: "openai",
+        status: await chatgptOAuth.status(userId),
+      });
+    }),
+  );
+
+  router.post(
+    "/providers/openai/oauth/refresh",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      try {
+        return res.json({
+          providerId: "openai",
+          status: await chatgptOAuth.refresh(),
+        });
+      } catch (err) {
+        return res.status(502).json({
+          error: errorMessage(err),
+          providerId: "openai",
+        });
+      }
+    }),
+  );
+
+  router.delete(
+    "/providers/openai/oauth/disconnect",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      await chatgptOAuth.disconnect();
+
+      return res.json({ disconnected: true, providerId: "openai" });
     }),
   );
 

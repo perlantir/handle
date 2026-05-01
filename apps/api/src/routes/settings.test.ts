@@ -3,6 +3,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createKeychainClient } from "../lib/keychain";
+import type { ChatGptOAuthService } from "../providers/openaiChatgptOAuthFlow";
 import type {
   ProviderConfig,
   ProviderId,
@@ -69,6 +70,7 @@ function provider(
 }
 
 interface CreateAppOptions {
+  chatgptOAuthService?: ChatGptOAuthService;
   createProvider?: (config: ProviderConfig) => ProviderInstance;
   getUserId?: () => string | null;
   keychain?: KeychainLike;
@@ -76,6 +78,7 @@ interface CreateAppOptions {
 }
 
 function createApp({
+  chatgptOAuthService,
   createProvider,
   getUserId = () => "user-test",
   keychain,
@@ -83,6 +86,7 @@ function createApp({
 }: CreateAppOptions = {}) {
   const app = express();
   const routerOptions: CreateSettingsRouterOptions = {
+    ...(chatgptOAuthService ? { chatgptOAuthService } : {}),
     getUserId,
     store: routeStore,
   };
@@ -116,6 +120,39 @@ function mockKeychain(readBack = "unused-key") {
     deleteCredential: vi.fn().mockResolvedValue(undefined),
     getCredential: vi.fn().mockResolvedValue(readBack),
     setCredential: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function mockChatGptOAuthService(
+  overrides: Partial<ChatGptOAuthService> = {},
+): ChatGptOAuthService {
+  return {
+    disconnect: vi.fn().mockResolvedValue(undefined),
+    refresh: vi.fn().mockResolvedValue({
+      accountId: "account-123",
+      email: "perlantir@example.com",
+      expires: 1_800_000_000_000,
+      planType: "plus",
+      signedIn: true,
+    }),
+    start: vi.fn().mockResolvedValue({
+      authUrl: "https://auth.openai.com/oauth/authorize?state=test-state",
+      expiresInMs: 600_000,
+      port: 1455,
+      redirectUri: "http://localhost:1455/auth/callback",
+      state: "test-state",
+    }),
+    status: vi.fn().mockResolvedValue({
+      accountId: "account-123",
+      email: "perlantir@example.com",
+      expires: 1_800_000_000_000,
+      flowError: null,
+      flowState: null,
+      planType: "plus",
+      port: null,
+      signedIn: true,
+    }),
+    ...overrides,
   };
 }
 
@@ -372,6 +409,98 @@ describe("settings providers route", () => {
       "-a",
       "kimi:apiKey",
     ]);
+  });
+
+  it("starts the OpenAI ChatGPT OAuth flow", async () => {
+    const chatgptOAuthService = mockChatGptOAuthService();
+
+    const response = await request(createApp({ chatgptOAuthService }))
+      .post("/api/settings/providers/openai/oauth/start")
+      .expect(200);
+
+    expect(response.body).toEqual({
+      authUrl: "https://auth.openai.com/oauth/authorize?state=test-state",
+      expiresInMs: 600_000,
+      port: 1455,
+      providerId: "openai",
+      redirectUri: "http://localhost:1455/auth/callback",
+      state: "test-state",
+    });
+    expect(chatgptOAuthService.start).toHaveBeenCalledWith("user-test");
+  });
+
+  it("returns the OpenAI ChatGPT OAuth status", async () => {
+    const chatgptOAuthService = mockChatGptOAuthService();
+
+    const response = await request(createApp({ chatgptOAuthService }))
+      .get("/api/settings/providers/openai/oauth/status")
+      .expect(200);
+
+    expect(response.body).toEqual({
+      providerId: "openai",
+      status: {
+        accountId: "account-123",
+        email: "perlantir@example.com",
+        expires: 1_800_000_000_000,
+        flowError: null,
+        flowState: null,
+        planType: "plus",
+        port: null,
+        signedIn: true,
+      },
+    });
+    expect(chatgptOAuthService.status).toHaveBeenCalledWith("user-test");
+  });
+
+  it("refreshes OpenAI ChatGPT OAuth tokens", async () => {
+    const chatgptOAuthService = mockChatGptOAuthService();
+
+    const response = await request(createApp({ chatgptOAuthService }))
+      .post("/api/settings/providers/openai/oauth/refresh")
+      .expect(200);
+
+    expect(response.body).toEqual({
+      providerId: "openai",
+      status: {
+        accountId: "account-123",
+        email: "perlantir@example.com",
+        expires: 1_800_000_000_000,
+        planType: "plus",
+        signedIn: true,
+      },
+    });
+    expect(chatgptOAuthService.refresh).toHaveBeenCalled();
+  });
+
+  it("disconnects OpenAI ChatGPT OAuth tokens", async () => {
+    const chatgptOAuthService = mockChatGptOAuthService();
+
+    const response = await request(createApp({ chatgptOAuthService }))
+      .delete("/api/settings/providers/openai/oauth/disconnect")
+      .expect(200);
+
+    expect(response.body).toEqual({
+      disconnected: true,
+      providerId: "openai",
+    });
+    expect(chatgptOAuthService.disconnect).toHaveBeenCalled();
+  });
+
+  it("returns verbatim OpenAI ChatGPT OAuth start failures", async () => {
+    const chatgptOAuthService = mockChatGptOAuthService({
+      start: vi
+        .fn()
+        .mockRejectedValue(new Error("Port 1455 is already in use")),
+    });
+
+    const response = await request(createApp({ chatgptOAuthService }))
+      .post("/api/settings/providers/openai/oauth/start")
+      .expect(502);
+
+    expect(response.body).toEqual({
+      error: "Port 1455 is already in use",
+      providerId: "openai",
+    });
   });
 
   it("tests provider models with the OK prompt", async () => {
