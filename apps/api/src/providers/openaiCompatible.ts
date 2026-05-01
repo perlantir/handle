@@ -226,7 +226,7 @@ export function createOpenAICompatibleProvider(
         // providers unless a future settings field explicitly opts in.
         modelKwargs: omittedSamplingParams,
         model,
-        streaming: true,
+        streaming: options?.streaming ?? true,
       });
     },
 

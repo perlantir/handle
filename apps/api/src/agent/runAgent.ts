@@ -6,7 +6,11 @@ import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
 import { providerRegistry as defaultProviderRegistry } from "../providers/registry";
-import { isProviderId, type ProviderId } from "../providers/types";
+import {
+  isProviderId,
+  type ProviderId,
+  type ProviderInstance,
+} from "../providers/types";
 import { createPhase1Agent } from "./createAgent";
 import { parseAgentFinalResult } from "./finalResult";
 import { emitInitialPlan } from "./plan";
@@ -88,7 +92,7 @@ interface ProviderRegistryLike {
     taskOverride?: ProviderId;
   }): Promise<{
     model: BaseChatModel;
-    provider: { config: { primaryModel: string }; id: ProviderId };
+    provider: ProviderInstance;
   }>;
   initialize(): Promise<void>;
 }
@@ -188,13 +192,35 @@ export function createAgentRunner({
 
       try {
         await withTimeout(
-          emitPlan(taskId, goal, {
-            llm: model,
-            provider: {
-              id: provider.id,
-              model: provider.config.primaryModel,
-            },
-          }),
+          (async () => {
+            logger.info(
+              {
+                model: provider.config.primaryModel,
+                providerId: provider.id,
+                taskId,
+              },
+              "Creating active provider model for plan generation",
+            );
+            const planModel = await provider.createModel(undefined, {
+              streaming: false,
+            });
+            logger.info(
+              {
+                model: provider.config.primaryModel,
+                providerId: provider.id,
+                taskId,
+              },
+              "Created active provider model for plan generation",
+            );
+
+            await emitPlan(taskId, goal, {
+              llm: planModel,
+              provider: {
+                id: provider.id,
+                model: provider.config.primaryModel,
+              },
+            });
+          })(),
           PLAN_GENERATION_TIMEOUT_MS,
           "Plan generation",
         );

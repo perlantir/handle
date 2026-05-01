@@ -43,7 +43,9 @@ export function createOpenAIProvider(
     description: "OpenAI",
     id: "openai",
 
-    async createModel(modelOverride?: string) {
+    async createModel(modelOverride, options) {
+      const streaming = options?.streaming ?? true;
+
       if (config.authMode === "chatgpt-oauth") {
         let proxy: Awaited<
           ReturnType<ChatGptOAuthProxyManager["ensureStarted"]>
@@ -66,7 +68,7 @@ export function createOpenAIProvider(
           },
           modelKwargs: omittedSamplingParams,
           model: modelOverride ?? config.primaryModel,
-          streaming: true,
+          streaming,
         });
       }
 
@@ -76,7 +78,7 @@ export function createOpenAIProvider(
         apiKey,
         modelKwargs: omittedSamplingParams,
         model: modelOverride ?? config.primaryModel,
-        streaming: true,
+        streaming,
       });
     },
 

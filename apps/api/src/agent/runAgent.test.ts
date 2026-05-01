@@ -1,9 +1,27 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { describe, expect, it, vi } from "vitest";
 import type { E2BSandboxLike } from "../execution/types";
+import type { ProviderId, ProviderInstance } from "../providers/types";
 import { createAgentRunner } from "./runAgent";
 
 const fakeModel = {} as BaseChatModel;
+const fakePlanModel = { name: "plan-model" } as unknown as BaseChatModel;
+
+function provider(id: ProviderId, primaryModel: string): ProviderInstance {
+  return {
+    config: {
+      authMode: "apiKey",
+      enabled: true,
+      fallbackOrder: 1,
+      id,
+      primaryModel,
+    },
+    createModel: vi.fn().mockResolvedValue(fakePlanModel),
+    description: id,
+    id,
+    isAvailable: vi.fn().mockResolvedValue(true),
+  };
+}
 
 function sandbox(): E2BSandboxLike {
   return {
@@ -35,13 +53,11 @@ describe("createAgentRunner", () => {
     const createAgent = vi.fn().mockResolvedValue({
       streamEvents: vi.fn().mockReturnValue(successfulStream()),
     });
+    const selectedProvider = provider("anthropic", "claude-sonnet-4-5");
     const providerRegistry = {
       getActiveModel: vi.fn().mockResolvedValue({
         model: fakeModel,
-        provider: {
-          config: { primaryModel: "claude-sonnet-4-5" },
-          id: "anthropic",
-        },
+        provider: selectedProvider,
       }),
       initialize: vi.fn().mockResolvedValue(undefined),
     };
@@ -75,8 +91,11 @@ describe("createAgentRunner", () => {
       taskId: "task-test",
       taskOverride: "anthropic",
     });
+    expect(selectedProvider.createModel).toHaveBeenCalledWith(undefined, {
+      streaming: false,
+    });
     expect(emitPlan).toHaveBeenCalledWith("task-test", "Do the thing", {
-      llm: fakeModel,
+      llm: fakePlanModel,
       provider: {
         id: "anthropic",
         model: "claude-sonnet-4-5",
@@ -100,13 +119,11 @@ describe("createAgentRunner", () => {
 
   it("uses an explicit provider override before the stored task override", async () => {
     const testSandbox = sandbox();
+    const selectedProvider = provider("openrouter", "openrouter/auto");
     const providerRegistry = {
       getActiveModel: vi.fn().mockResolvedValue({
         model: fakeModel,
-        provider: {
-          config: { primaryModel: "openrouter/auto" },
-          id: "openrouter",
-        },
+        provider: selectedProvider,
       }),
       initialize: vi.fn().mockResolvedValue(undefined),
     };
@@ -144,13 +161,11 @@ describe("createAgentRunner", () => {
 
   it("marks the task errored when plan generation fails before sandbox creation", async () => {
     const createSandbox = vi.fn();
+    const selectedProvider = provider("openai", "gpt-4o");
     const providerRegistry = {
       getActiveModel: vi.fn().mockResolvedValue({
         model: fakeModel,
-        provider: {
-          config: { primaryModel: "gpt-4o" },
-          id: "openai",
-        },
+        provider: selectedProvider,
       }),
       initialize: vi.fn().mockResolvedValue(undefined),
     };

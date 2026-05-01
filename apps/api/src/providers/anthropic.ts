@@ -32,14 +32,14 @@ export function createAnthropicProvider(
     description: "Anthropic",
     id: "anthropic",
 
-    async createModel(modelOverride?: string) {
+    async createModel(modelOverride, options) {
       const apiKey = await getCredential("anthropic:apiKey");
 
       return createChatModel({
         apiKey,
         ...omittedSamplingParams,
         model: modelOverride ?? config.primaryModel,
-        streaming: true,
+        streaming: options?.streaming ?? true,
       });
     },
 

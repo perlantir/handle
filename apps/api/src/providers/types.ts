@@ -37,6 +37,7 @@ export interface CreateModelDiagnostics {
 
 export interface CreateModelOptions {
   diagnostics?: CreateModelDiagnostics;
+  streaming?: boolean;
 }
 
 export interface ProviderInstance {
