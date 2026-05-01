@@ -1,7 +1,14 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatOpenAI } from "@langchain/openai";
 import { getCredential as defaultGetCredential } from "../lib/keychain";
-import type { ProviderConfig, ProviderId, ProviderInstance } from "./types";
+import { logger } from "../lib/logger";
+import { redactSecrets } from "../lib/redact";
+import type {
+  CreateModelDiagnostics,
+  ProviderConfig,
+  ProviderId,
+  ProviderInstance,
+} from "./types";
 
 type ChatOpenAIArgs = ConstructorParameters<typeof ChatOpenAI>[0];
 
@@ -14,6 +21,10 @@ const omittedSamplingParams = {
   temperature: undefined,
   top_p: undefined,
 };
+
+const diagnosticSamplingParams = Object.fromEntries(
+  Object.keys(omittedSamplingParams).map((key) => [key, "[undefined]"]),
+);
 
 export const OPENAI_COMPATIBLE_ENDPOINTS: Record<
   OpenAICompatibleProviderId,
@@ -58,6 +69,99 @@ function getOpenRouterHeaders() {
   };
 }
 
+function redactDiagnosticBody(body: BodyInit | null | undefined) {
+  if (body === undefined || body === null) return null;
+  if (typeof body !== "string") return "[non-string request body]";
+
+  const redacted = redactSecrets(body);
+  try {
+    return JSON.parse(redacted);
+  } catch {
+    return redacted;
+  }
+}
+
+function diagnosticErrorMessage(err: unknown) {
+  if (err instanceof Error) return redactSecrets(err.message);
+  if (typeof err === "string") return redactSecrets(err);
+  return "Unknown upstream fetch error";
+}
+
+function diagnosticErrorCause(err: unknown) {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "cause" in err &&
+    err.cause !== undefined
+  ) {
+    return diagnosticErrorMessage(err.cause);
+  }
+
+  return null;
+}
+
+function createDiagnosticFetch({
+  baseURL,
+  diagnostics,
+  model,
+  providerId,
+}: {
+  baseURL: string;
+  diagnostics: CreateModelDiagnostics;
+  model: string;
+  providerId: OpenAICompatibleProviderId;
+}): typeof fetch {
+  return async (input, init) => {
+    const requestBody = redactDiagnosticBody(init?.body);
+    let response: Response;
+
+    try {
+      response = await fetch(input, init);
+    } catch (err) {
+      logger.error(
+        {
+          baseURL,
+          cause: diagnosticErrorCause(err),
+          label: diagnostics.label,
+          message: diagnosticErrorMessage(err),
+          model,
+          providerId,
+          requestBody,
+          url: String(input),
+        },
+        "OpenAI-compatible provider upstream diagnostic fetch failure",
+      );
+      throw err;
+    }
+
+    const responseBody = await response
+      .clone()
+      .text()
+      .then(redactSecrets)
+      .catch((err: unknown) =>
+        err instanceof Error
+          ? `Unable to read response body: ${err.message}`
+          : "Unable to read response body",
+      );
+
+    logger.info(
+      {
+        baseURL,
+        label: diagnostics.label,
+        model,
+        providerId,
+        requestBody,
+        responseBody,
+        status: response.status,
+        url: String(input),
+      },
+      "OpenAI-compatible provider upstream diagnostic",
+    );
+
+    return response;
+  };
+}
+
 export function createOpenAICompatibleProvider(
   config: ProviderConfig,
   {
@@ -77,17 +181,42 @@ export function createOpenAICompatibleProvider(
     description: DESCRIPTIONS[id],
     id,
 
-    async createModel(modelOverride?: string) {
+    async createModel(modelOverride, options) {
       const apiKey =
         id === "local"
           ? await getCredential("local:apiKey").catch(() => "not-needed")
           : await getCredential(`${id}:apiKey`);
       const baseURL = config.baseURL ?? OPENAI_COMPATIBLE_ENDPOINTS[id];
+      const model = modelOverride ?? config.primaryModel;
+
+      if (options?.diagnostics) {
+        logger.info(
+          {
+            apiKeyLength: apiKey.length,
+            baseURL,
+            label: options.diagnostics.label,
+            model,
+            modelKwargs: diagnosticSamplingParams,
+            providerId: id,
+          },
+          "OpenAI-compatible provider test diagnostic",
+        );
+      }
 
       return createChatModel({
         apiKey,
         configuration: {
           baseURL,
+          ...(options?.diagnostics
+            ? {
+                fetch: createDiagnosticFetch({
+                  baseURL,
+                  diagnostics: options.diagnostics,
+                  model,
+                  providerId: id,
+                }),
+              }
+            : {}),
           ...(id === "openrouter"
             ? { defaultHeaders: getOpenRouterHeaders() }
             : {}),
@@ -96,7 +225,7 @@ export function createOpenAICompatibleProvider(
         // Authentication"; suppress LangChain's defaults for all compatible
         // providers unless a future settings field explicitly opts in.
         modelKwargs: omittedSamplingParams,
-        model: modelOverride ?? config.primaryModel,
+        model,
         streaming: true,
       });
     },

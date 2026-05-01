@@ -7,6 +7,7 @@ import {
   setCredential as defaultSetCredential,
 } from "../lib/keychain";
 import { asyncHandler } from "../lib/http";
+import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
 import { createProviderInstance } from "../providers/registry";
@@ -133,6 +134,19 @@ function errorMessage(err: unknown) {
   }
 
   return "Unknown provider error";
+}
+
+function errorCauseMessage(err: unknown) {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "cause" in err &&
+    err.cause !== undefined
+  ) {
+    return errorMessage(err.cause);
+  }
+
+  return null;
 }
 
 function validateApiKeyFormat(providerId: ProviderId, apiKey: string) {
@@ -355,9 +369,26 @@ export function createSettingsRouter({
       if (!config) return res.status(404).json({ error: "Provider not found" });
 
       try {
-        const model = await createProvider(config).createModel();
+        const diagnostics =
+          providerId === "kimi"
+            ? { diagnostics: { label: "settings-provider-test" } }
+            : undefined;
+        const model = await createProvider(config).createModel(
+          undefined,
+          diagnostics,
+        );
         const output = await model.invoke(TEST_PROMPT);
         const response = modelOutputToString(output).trim();
+
+        if (providerId === "kimi") {
+          logger.info(
+            {
+              providerId,
+              responsePreview: redactSecrets(response.slice(0, 100)),
+            },
+            "Provider test diagnostic success",
+          );
+        }
 
         if (!/\bOK\b/i.test(response)) {
           return res.status(502).json({
@@ -367,6 +398,17 @@ export function createSettingsRouter({
 
         return res.json({ ok: true, providerId, response });
       } catch (err) {
+        if (providerId === "kimi") {
+          logger.error(
+            {
+              cause: errorCauseMessage(err),
+              message: errorMessage(err),
+              providerId,
+            },
+            "Provider test diagnostic failure",
+          );
+        }
+
         return res
           .status(502)
           .json({ error: errorMessage(err), ok: false, providerId });

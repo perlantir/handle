@@ -31,9 +31,20 @@ export interface ProviderConfig {
   primaryModel: string;
 }
 
+export interface CreateModelDiagnostics {
+  label: string;
+}
+
+export interface CreateModelOptions {
+  diagnostics?: CreateModelDiagnostics;
+}
+
 export interface ProviderInstance {
   config: ProviderConfig;
-  createModel(modelOverride?: string): Promise<BaseChatModel>;
+  createModel(
+    modelOverride?: string,
+    options?: CreateModelOptions,
+  ): Promise<BaseChatModel>;
   description: string;
   id: ProviderId;
   isAvailable(): Promise<boolean>;
