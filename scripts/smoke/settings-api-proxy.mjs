@@ -34,7 +34,7 @@ const proxyCalls = [
     path: "/api/settings/providers/local",
   },
   {
-    body: { value: "test-key-not-real" },
+    body: { apiKey: "test-key-not-real" },
     method: "POST",
     path: "/api/settings/providers/openrouter/key",
   },

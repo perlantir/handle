@@ -33,7 +33,7 @@ const updateProviderSchema = z
   });
 
 const setKeySchema = z.object({
-  value: z.string().min(1),
+  apiKey: z.string().min(1),
 });
 
 export interface ProviderConfigRow {
@@ -253,10 +253,10 @@ export function createSettingsRouter({
       }
 
       const account = accountForProvider(providerId);
-      await keychain.setCredential(account, parsed.data.value);
+      await keychain.setCredential(account, parsed.data.apiKey);
       const saved = await keychain.getCredential(account);
 
-      if (saved !== parsed.data.value) {
+      if (saved !== parsed.data.apiKey) {
         return res.status(500).json({
           error: `Keychain write verification failed for ${account}.`,
         });

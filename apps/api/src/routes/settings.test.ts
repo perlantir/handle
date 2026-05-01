@@ -187,7 +187,7 @@ describe("settings providers route", () => {
 
     const response = await request(createApp({ keychain }))
       .post("/api/settings/providers/openrouter/key")
-      .send({ value: "test-key-not-real" })
+      .send({ apiKey: "test-key-not-real" })
       .expect(200);
 
     expect(response.body).toEqual({ providerId: "openrouter", saved: true });
