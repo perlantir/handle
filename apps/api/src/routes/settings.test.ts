@@ -104,7 +104,7 @@ const validApiKeys: Record<ProviderId, string> = {
 
 const expectedKeyFormats: Record<ProviderId, string> = {
   anthropic: "sk-ant- followed by 20+ letters, numbers, underscores, or dashes",
-  kimi: "sk- followed by 20+ letters, numbers, underscores, or dashes",
+  kimi: "sk- or YSK followed by 20+ letters, numbers, underscores, or dashes",
   local: "any non-empty string",
   openai:
     "sk- or sk-proj- followed by 20+ letters, numbers, underscores, or dashes",
@@ -301,6 +301,19 @@ describe("settings providers route", () => {
       );
     },
   );
+
+  it("accepts KIMI YSK personal-tier keys", async () => {
+    const apiKey = `YSK${"y".repeat(30)}`;
+    const keychain = mockKeychain(apiKey);
+
+    await request(createApp({ keychain }))
+      .post("/api/settings/providers/kimi/key")
+      .send({ apiKey })
+      .expect(200);
+
+    expect(keychain.setCredential).toHaveBeenCalledWith("kimi:apiKey", apiKey);
+    expect(keychain.getCredential).toHaveBeenCalledWith("kimi:apiKey");
+  });
 
   it("deletes provider keys from Keychain", async () => {
     const runSecurity = vi.fn().mockResolvedValue({});

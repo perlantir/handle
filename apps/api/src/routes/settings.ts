@@ -38,7 +38,7 @@ const setKeySchema = z.object({
 
 const apiKeyFormatDescriptions: Record<ProviderId, string> = {
   anthropic: "sk-ant- followed by 20+ letters, numbers, underscores, or dashes",
-  kimi: "sk- followed by 20+ letters, numbers, underscores, or dashes",
+  kimi: "sk- or YSK followed by 20+ letters, numbers, underscores, or dashes",
   local: "any non-empty string",
   openai:
     "sk- or sk-proj- followed by 20+ letters, numbers, underscores, or dashes",
@@ -55,7 +55,7 @@ const apiKeyFormatSchema = z.discriminatedUnion("providerId", [
     providerId: z.literal("anthropic"),
   }),
   z.object({
-    apiKey: z.string().regex(/^sk-[A-Za-z0-9_-]{20,}$/),
+    apiKey: z.string().regex(/^(?:sk-|YSK)[A-Za-z0-9_-]{20,}$/),
     providerId: z.literal("kimi"),
   }),
   z.object({
