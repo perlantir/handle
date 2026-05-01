@@ -18,11 +18,13 @@ const profileValues: Record<string, string> = {
   [CHATGPT_OAUTH_KEYCHAIN_ACCOUNTS.refreshToken]: "test-refresh-token-not-real",
 };
 
-function keychain() {
+function keychain(overrides: Record<string, string> = {}) {
+  const values = { ...profileValues, ...overrides };
+
   return {
     deleteCredential: vi.fn().mockResolvedValue(undefined),
     getCredential: vi.fn(async (account: string) => {
-      const value = profileValues[account];
+      const value = values[account];
       if (!value) throw new Error(`Missing ${account}`);
       return value;
     }),
@@ -32,6 +34,23 @@ function keychain() {
 
 async function fetchOrNull(url: string) {
   return fetch(url, { signal: AbortSignal.timeout(500) }).catch(() => null);
+}
+
+function successSse(text = "OK") {
+  return new Response(
+    [
+      ...text.split("").map(
+        (delta) =>
+          `data: ${JSON.stringify({
+            delta,
+            type: "response.output_text.delta",
+          })}`,
+      ),
+      `data: ${JSON.stringify({ type: "response.completed" })}`,
+      "",
+    ].join("\n\n"),
+    { headers: { "Content-Type": "text/event-stream" }, status: 200 },
+  );
 }
 
 describe("OpenAI ChatGPT OAuth proxy", () => {
@@ -163,15 +182,7 @@ describe("OpenAI ChatGPT OAuth proxy", () => {
         upstreamRequestBody = JSON.parse(String(init?.body));
         upstreamHeaders = new Headers(init?.headers);
 
-        return new Response(
-          [
-            `data: ${JSON.stringify({ delta: "O", type: "response.output_text.delta" })}`,
-            `data: ${JSON.stringify({ delta: "K", type: "response.output_text.delta" })}`,
-            `data: ${JSON.stringify({ type: "response.completed" })}`,
-            "",
-          ].join("\n\n"),
-          { headers: { "Content-Type": "text/event-stream" }, status: 200 },
-        );
+        return successSse();
       },
     );
     const manager = createChatGptOAuthProxyManager({
@@ -216,5 +227,115 @@ describe("OpenAI ChatGPT OAuth proxy", () => {
       store: false,
       stream: true,
     });
+  });
+
+  it("refreshes proactively when the ChatGPT OAuth profile is near expiry", async () => {
+    let upstreamHeaders: Headers | null = null;
+    const fetchUpstream = vi.fn(
+      async (_url: RequestInfo | URL, init?: RequestInit) => {
+        upstreamHeaders = new Headers(init?.headers);
+        return successSse();
+      },
+    );
+    const refreshTokens = vi.fn().mockResolvedValue({
+      accessToken: "fresh-access-token-not-real",
+      accountId: "account-123",
+      expires: Date.now() + 60 * 60 * 1000,
+      refreshToken: "fresh-refresh-token-not-real",
+    });
+    const manager = createChatGptOAuthProxyManager({
+      fetchUpstream,
+      getInstructions: vi.fn(async () => "instructions"),
+      keychain: keychain({
+        [CHATGPT_OAUTH_KEYCHAIN_ACCOUNTS.accessToken]:
+          "stale-access-token-not-real",
+        [CHATGPT_OAUTH_KEYCHAIN_ACCOUNTS.expires]: String(Date.now() + 60_000),
+      }),
+      ports: [0],
+      refreshTokens,
+    });
+    managers.push(manager);
+    const proxy = await manager.ensureStarted();
+
+    await fetch(`${proxy.baseURL}/chat/completions`, {
+      body: JSON.stringify({
+        messages: [{ content: "Say OK", role: "user" }],
+        model: "gpt-5.1",
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+
+    expect(refreshTokens).toHaveBeenCalledOnce();
+    const headers = upstreamHeaders as unknown as Headers;
+    expect(headers.get("authorization")).toBe(
+      "Bearer fresh-access-token-not-real",
+    );
+  });
+
+  it("refreshes once and retries when the ChatGPT Codex backend returns 401", async () => {
+    const fetchUpstream = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("expired token", { status: 401 }))
+      .mockResolvedValueOnce(successSse());
+    const refreshTokens = vi.fn().mockResolvedValue({
+      accessToken: "fresh-access-token-not-real",
+      accountId: "account-123",
+      expires: Date.now() + 60 * 60 * 1000,
+      refreshToken: "fresh-refresh-token-not-real",
+    });
+    const manager = createChatGptOAuthProxyManager({
+      fetchUpstream,
+      getInstructions: vi.fn(async () => "instructions"),
+      keychain: keychain(),
+      ports: [0],
+      refreshTokens,
+    });
+    managers.push(manager);
+    const proxy = await manager.ensureStarted();
+
+    const response = await fetch(`${proxy.baseURL}/chat/completions`, {
+      body: JSON.stringify({
+        messages: [{ content: "Say OK", role: "user" }],
+        model: "gpt-5.1",
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchUpstream).toHaveBeenCalledTimes(2);
+    expect(refreshTokens).toHaveBeenCalledOnce();
+  });
+
+  it("returns a helpful OAuth-only fallback message when refresh fails", async () => {
+    const fetchUpstream = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("expired token", { status: 401 }));
+    const manager = createChatGptOAuthProxyManager({
+      fetchUpstream,
+      getInstructions: vi.fn(async () => "instructions"),
+      keychain: keychain(),
+      ports: [0],
+      refreshTokens: vi.fn().mockRejectedValue(new Error("refresh denied")),
+    });
+    managers.push(manager);
+    const proxy = await manager.ensureStarted();
+
+    const response = await fetch(`${proxy.baseURL}/chat/completions`, {
+      body: JSON.stringify({
+        messages: [{ content: "Say OK", role: "user" }],
+        model: "gpt-5.1",
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "OpenAI ChatGPT Subscription auth failed: refresh denied. To enable fallback, also configure your OpenAI API key, Anthropic, OpenRouter, or another provider.",
+      originalError: "expired token",
+    });
+    expect(response.status).toBe(502);
   });
 });

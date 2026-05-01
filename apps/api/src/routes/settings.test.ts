@@ -511,6 +511,22 @@ describe("settings providers route", () => {
     expect(chatgptOAuthService.refresh).toHaveBeenCalled();
   });
 
+  it("returns fallback guidance for OpenAI ChatGPT OAuth refresh failures", async () => {
+    const chatgptOAuthService = mockChatGptOAuthService({
+      refresh: vi.fn().mockRejectedValue(new Error("refresh denied")),
+    });
+
+    const response = await request(createApp({ chatgptOAuthService }))
+      .post("/api/settings/providers/openai/oauth/refresh")
+      .expect(502);
+
+    expect(response.body).toEqual({
+      error:
+        "OpenAI ChatGPT Subscription auth failed: refresh denied. To enable fallback, also configure your OpenAI API key, Anthropic, OpenRouter, or another provider.",
+      providerId: "openai",
+    });
+  });
+
   it("disconnects OpenAI ChatGPT OAuth tokens", async () => {
     const chatgptOAuthService = mockChatGptOAuthService();
     const chatgptOAuthProxy = { stop: vi.fn().mockResolvedValue(undefined) };

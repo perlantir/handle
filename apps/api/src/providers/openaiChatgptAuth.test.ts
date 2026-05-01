@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   CHATGPT_OAUTH_CLIENT_ID,
+  CHATGPT_OAUTH_FALLBACK_HINT,
   CHATGPT_OAUTH_KEYCHAIN_ACCOUNTS,
+  CHATGPT_OAUTH_REFRESH_WINDOW_MS,
+  chatGptOAuthFailureMessage,
   createChatGptOAuthProfile,
   deleteChatGptOAuthProfile,
   getChatGptOAuthStatus,
   parseChatGptJwtClaims,
   readChatGptOAuthProfile,
+  shouldRefreshChatGptOAuthProfile,
   writeChatGptOAuthProfile,
   type ChatGptOAuthKeychain,
 } from "./openaiChatgptAuth";
@@ -44,6 +48,46 @@ function memoryKeychain(initial: Record<string, string> = {}) {
 describe("OpenAI ChatGPT OAuth auth profile", () => {
   it("documents the official Codex OAuth client ID dependency", () => {
     expect(CHATGPT_OAUTH_CLIENT_ID).toBe("app_EMoamEEZ73f0CkXaXp7hrann");
+  });
+
+  it("formats helpful ChatGPT OAuth failure messages with fallback guidance", () => {
+    expect(chatGptOAuthFailureMessage("rate limit")).toBe(
+      `OpenAI ChatGPT Subscription auth failed: rate limit. ${CHATGPT_OAUTH_FALLBACK_HINT}`,
+    );
+    expect(
+      chatGptOAuthFailureMessage(
+        "OpenAI ChatGPT Subscription auth failed: already formatted",
+      ),
+    ).toBe("OpenAI ChatGPT Subscription auth failed: already formatted");
+  });
+
+  it("refreshes ChatGPT OAuth profiles inside the proactive expiry window", () => {
+    const now = 1_800_000_000_000;
+
+    expect(
+      shouldRefreshChatGptOAuthProfile(
+        {
+          expires: now + CHATGPT_OAUTH_REFRESH_WINDOW_MS - 1,
+        },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      shouldRefreshChatGptOAuthProfile(
+        {
+          expires: now + CHATGPT_OAUTH_REFRESH_WINDOW_MS,
+        },
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      shouldRefreshChatGptOAuthProfile(
+        {
+          expires: now + CHATGPT_OAUTH_REFRESH_WINDOW_MS + 1,
+        },
+        now,
+      ),
+    ).toBe(false);
   });
 
   it("parses ChatGPT account, email, plan, and expiry claims", () => {

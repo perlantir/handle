@@ -4,6 +4,7 @@ import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { createAnthropicProvider } from "./anthropic";
 import { createOpenAIProvider } from "./openai";
+import { chatGptOAuthFailureMessage } from "./openaiChatgptAuth";
 import { createOpenAICompatibleProvider } from "./openaiCompatible";
 import type {
   GetActiveProviderModelOptions,
@@ -72,6 +73,17 @@ function failureReason(err: unknown) {
   return "Unknown provider error";
 }
 
+function unavailableReason(provider: ProviderInstance) {
+  if (
+    provider.id === "openai" &&
+    provider.config.authMode === "chatgpt-oauth"
+  ) {
+    return chatGptOAuthFailureMessage("not signed in");
+  }
+
+  return "Provider unavailable";
+}
+
 function uniqueChain(providers: ProviderInstance[]) {
   const seen = new Set<ProviderId>();
 
@@ -129,7 +141,7 @@ export class ProviderRegistryImpl implements ProviderRegistry {
     for (const provider of chain) {
       try {
         if (!(await provider.isAvailable())) {
-          const reason = "Provider unavailable";
+          const reason = unavailableReason(provider);
           failures.push(`${provider.id}: ${reason}`);
           firstFailedProvider ??= provider;
           firstFailureReason ||= reason;

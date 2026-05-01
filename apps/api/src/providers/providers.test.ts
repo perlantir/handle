@@ -202,6 +202,9 @@ describe("provider implementations", () => {
     );
 
     await expect(provider.isAvailable()).resolves.toBe(false);
+    await expect(provider.createModel()).rejects.toThrow(
+      "OpenAI ChatGPT Subscription auth failed: missing. To enable fallback, also configure your OpenAI API key, Anthropic, OpenRouter, or another provider.",
+    );
   });
 
   it("creates Anthropic chat models with mocked credentials", async () => {

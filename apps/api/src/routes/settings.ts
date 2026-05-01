@@ -10,6 +10,7 @@ import { asyncHandler } from "../lib/http";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
+import { chatGptOAuthFailureMessage } from "../providers/openaiChatgptAuth";
 import {
   createChatGptOAuthService,
   type ChatGptOAuthService,
@@ -442,7 +443,7 @@ export function createSettingsRouter({
         });
       } catch (err) {
         return res.status(502).json({
-          error: errorMessage(err),
+          error: chatGptOAuthFailureMessage(errorMessage(err)),
           providerId: "openai",
         });
       }

@@ -1,7 +1,10 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { ChatOpenAI } from "@langchain/openai";
 import { getCredential as defaultGetCredential } from "../lib/keychain";
-import { readChatGptOAuthProfile } from "./openaiChatgptAuth";
+import {
+  chatGptOAuthFailureMessage,
+  readChatGptOAuthProfile,
+} from "./openaiChatgptAuth";
 import {
   chatGptOAuthProxyManager,
   type ChatGptOAuthProxyManager,
@@ -42,8 +45,19 @@ export function createOpenAIProvider(
 
     async createModel(modelOverride?: string) {
       if (config.authMode === "chatgpt-oauth") {
-        await readOAuthProfile();
-        const proxy = await chatgptOAuthProxy.ensureStarted();
+        let proxy: Awaited<
+          ReturnType<ChatGptOAuthProxyManager["ensureStarted"]>
+        >;
+        try {
+          await readOAuthProfile();
+          proxy = await chatgptOAuthProxy.ensureStarted();
+        } catch (err) {
+          throw new Error(
+            chatGptOAuthFailureMessage(
+              err instanceof Error ? err.message : String(err),
+            ),
+          );
+        }
 
         return createChatModel({
           apiKey: "chatgpt-oauth",

@@ -2,12 +2,15 @@ import http, { type Server } from "node:http";
 import { redactSecrets } from "../lib/redact";
 import {
   CHATGPT_BACKEND_BASE_URL,
+  chatGptOAuthFailureMessage,
   defaultChatGptOAuthKeychain,
   readChatGptOAuthProfile,
+  shouldRefreshChatGptOAuthProfile,
   type ChatGptOAuthKeychain,
   type ChatGptOAuthProfile,
 } from "./openaiChatgptAuth";
 import { getCodexInstructions } from "./openaiChatgptInstructions";
+import { refreshChatGptOAuthTokens } from "./openaiChatgptOAuthFlow";
 
 export const CHATGPT_OAUTH_PROXY_HOST = "127.0.0.1";
 export const CHATGPT_OAUTH_PROXY_PORTS = [1456, 1457, 1458, 1459] as const;
@@ -15,6 +18,7 @@ export const CHATGPT_OAUTH_PROXY_HEALTH_PATH =
   "/__handle_chatgpt_oauth_proxy/health";
 
 type FetchLike = typeof fetch;
+type RefreshTokens = typeof refreshChatGptOAuthTokens;
 
 interface ChatCompletionMessage {
   content?: unknown;
@@ -85,6 +89,7 @@ export interface CreateChatGptOAuthProxyManagerOptions {
   getInstructions?: typeof getCodexInstructions;
   keychain?: ChatGptOAuthKeychain;
   ports?: readonly number[];
+  refreshTokens?: RefreshTokens;
 }
 
 function textFromContent(content: unknown) {
@@ -366,29 +371,65 @@ async function handleProxyRequest({
   fetchUpstream,
   getInstructions,
   keychain,
+  refreshTokens,
 }: {
   body: ChatCompletionRequestBody;
   fetchUpstream: FetchLike;
   getInstructions: typeof getCodexInstructions;
   keychain: ChatGptOAuthKeychain;
+  refreshTokens: RefreshTokens;
 }) {
-  const profile = await readChatGptOAuthProfile(keychain);
   const codexRequest = await createCodexResponsesRequest(body, getInstructions);
-  const upstream = await fetchUpstream(
-    `${CHATGPT_BACKEND_BASE_URL}/codex/responses`,
-    {
+
+  async function freshProfile() {
+    const profile = await readChatGptOAuthProfile(keychain);
+    if (!shouldRefreshChatGptOAuthProfile(profile)) return profile;
+
+    try {
+      return await refreshTokens({ keychain });
+    } catch (err) {
+      throw new Error(
+        chatGptOAuthFailureMessage(
+          err instanceof Error ? err.message : String(err),
+        ),
+      );
+    }
+  }
+
+  async function send(profile: ChatGptOAuthProfile) {
+    return fetchUpstream(`${CHATGPT_BACKEND_BASE_URL}/codex/responses`, {
       body: JSON.stringify(codexRequest),
       headers: createUpstreamHeaders(profile),
       method: "POST",
-    },
-  );
+    });
+  }
+
+  const profile = await freshProfile();
+  let upstream = await send(profile);
+
+  if (upstream.status === 401) {
+    const originalBody = await upstream.text().catch(() => "");
+    try {
+      upstream = await send(await refreshTokens({ keychain }));
+    } catch (err) {
+      return Response.json(
+        {
+          error: chatGptOAuthFailureMessage(
+            err instanceof Error ? err.message : String(err),
+          ),
+          originalError: redactSecrets(originalBody),
+        },
+        { status: 502 },
+      );
+    }
+  }
 
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => "");
-    return new Response(redactSecrets(text), {
-      headers: { "Content-Type": "application/json" },
-      status: upstream.status,
-    });
+    return Response.json(
+      { error: chatGptOAuthFailureMessage(redactSecrets(text)) },
+      { status: upstream.status },
+    );
   }
 
   const { output, sse } = await convertUpstreamSseToChatSse(
@@ -476,6 +517,7 @@ export function createChatGptOAuthProxyManager({
   getInstructions = getCodexInstructions,
   keychain = defaultChatGptOAuthKeychain,
   ports = CHATGPT_OAUTH_PROXY_PORTS,
+  refreshTokens = refreshChatGptOAuthTokens,
 }: CreateChatGptOAuthProxyManagerOptions = {}): ChatGptOAuthProxyManager {
   let current: ChatGptOAuthProxyServer | null = null;
 
@@ -529,15 +571,16 @@ export function createChatGptOAuthProxyManager({
               fetchUpstream,
               getInstructions,
               keychain,
+              refreshTokens,
             });
             await writeWebResponse(res, response);
           } catch (err) {
             res.writeHead(502, { "Content-Type": "application/json" });
             res.end(
               JSON.stringify({
-                error: `OpenAI ChatGPT Subscription auth failed: ${redactSecrets(
+                error: chatGptOAuthFailureMessage(
                   err instanceof Error ? err.message : String(err),
-                )}`,
+                ),
               }),
             );
           }

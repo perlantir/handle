@@ -4,6 +4,7 @@ import {
   getCredential as defaultGetCredential,
   setCredential as defaultSetCredential,
 } from "../lib/keychain";
+import { redactSecrets } from "../lib/redact";
 
 export const CHATGPT_OAUTH_KEYCHAIN_ACCOUNTS = {
   accessToken: "openai:chatgpt:accessToken",
@@ -24,6 +25,9 @@ export const CHATGPT_OAUTH_AUTHORIZE_URL =
 export const CHATGPT_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token";
 export const CHATGPT_OAUTH_SCOPE =
   "openid profile email offline_access api.connectors.read api.connectors.invoke";
+export const CHATGPT_OAUTH_REFRESH_WINDOW_MS = 5 * 60 * 1000;
+export const CHATGPT_OAUTH_FALLBACK_HINT =
+  "To enable fallback, also configure your OpenAI API key, Anthropic, OpenRouter, or another provider.";
 
 /*
  * OpenAI's official Codex CLI OAuth client ID. Handle uses this client ID
@@ -76,6 +80,22 @@ export const defaultChatGptOAuthKeychain: ChatGptOAuthKeychain = {
   setCredential: defaultSetCredential,
 };
 
+export function chatGptOAuthFailureMessage(reason: string) {
+  const redacted = redactSecrets(reason);
+  if (redacted.startsWith("OpenAI ChatGPT Subscription auth failed:")) {
+    return redacted;
+  }
+
+  return `OpenAI ChatGPT Subscription auth failed: ${redacted}. ${CHATGPT_OAUTH_FALLBACK_HINT}`;
+}
+
+export function shouldRefreshChatGptOAuthProfile(
+  profile: Pick<ChatGptOAuthProfile, "expires">,
+  now = Date.now(),
+) {
+  return profile.expires - now <= CHATGPT_OAUTH_REFRESH_WINDOW_MS;
+}
+
 function decodeBase64Url(value: string) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized.padEnd(
@@ -103,7 +123,9 @@ function stringClaim(value: unknown) {
 }
 
 function numberClaim(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 export function parseChatGptJwtClaims(jwt: string): ChatGptJwtClaims {
@@ -220,7 +242,10 @@ export async function writeChatGptOAuthProfile(
       parsed.accountId,
     ),
     parsed.email
-      ? keychain.setCredential(CHATGPT_OAUTH_KEYCHAIN_ACCOUNTS.email, parsed.email)
+      ? keychain.setCredential(
+          CHATGPT_OAUTH_KEYCHAIN_ACCOUNTS.email,
+          parsed.email,
+        )
       : keychain.deleteCredential(CHATGPT_OAUTH_KEYCHAIN_ACCOUNTS.email),
     parsed.planType
       ? keychain.setCredential(

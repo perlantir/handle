@@ -167,6 +167,29 @@ describe("ProviderRegistryImpl", () => {
     );
   });
 
+  it("reports a helpful error when ChatGPT OAuth is the only configured provider and is unavailable", async () => {
+    const openai = provider("openai", {
+      config: { authMode: "chatgpt-oauth", fallbackOrder: 1 },
+      isAvailable: vi.fn().mockResolvedValue(false),
+    });
+    const registry = new ProviderRegistryImpl({
+      createProvider: () => openai,
+      store: store([
+        row({
+          authMode: "chatgpt-oauth",
+          id: "openai",
+          primaryModel: "gpt-5.1",
+        }),
+      ]),
+    });
+
+    await registry.initialize();
+
+    await expect(registry.getActiveModel()).rejects.toThrow(
+      "OpenAI ChatGPT Subscription auth failed: not signed in. To enable fallback, also configure your OpenAI API key, Anthropic, OpenRouter, or another provider.",
+    );
+  });
+
   it("puts a task override first without duplicating the fallback chain", async () => {
     const openai = provider("openai", {
       config: { fallbackOrder: 1 },
