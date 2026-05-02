@@ -216,6 +216,87 @@ describe("createAgentRunner", () => {
     });
   });
 
+  it("loads conversation history from AgentRun context without duplicating the current user message", async () => {
+    const testSandbox = sandbox();
+    const createBackend = vi.fn().mockReturnValue(backendForSandbox(testSandbox));
+    const streamEvents = vi.fn().mockReturnValue(successfulStream());
+    const createAgent = vi.fn().mockResolvedValue({ streamEvents });
+    const selectedProvider = provider("anthropic", "claude-opus-4-7");
+    const store = {
+      agentRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          backend: "LOCAL",
+          conversationId: "conversation-test",
+          conversation: {
+            messages: [
+              { content: "Write a script", role: "USER" },
+              { content: "I wrote script.py.", role: "ASSISTANT" },
+              { content: "Now run it", role: "USER" },
+            ],
+            project: {
+              browserMode: "SEPARATE_PROFILE",
+              customScopePath: null,
+              defaultBackend: "LOCAL",
+              defaultModel: null,
+              defaultProvider: "anthropic",
+              id: "project-test",
+              workspaceScope: "DEFAULT_WORKSPACE",
+            },
+          },
+          modelName: null,
+          providerId: null,
+        }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      message: {
+        create: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const runner = createAgentRunner({
+      createAgent,
+      createBackend,
+      createLocalBackend: vi.fn().mockReturnValue(localBackend()),
+      emitEvent: vi.fn(),
+      emitPlan: vi.fn().mockResolvedValue(undefined),
+      isSmokeEnabled: () => false,
+      providerRegistry: {
+        getActiveModel: vi.fn().mockResolvedValue({
+          model: fakeModel,
+          provider: selectedProvider,
+        }),
+        initialize: vi.fn().mockResolvedValue(undefined),
+      },
+      store,
+    });
+
+    await runner("run-test", "Now run it");
+
+    expect(streamEvents).toHaveBeenCalledWith(
+      {
+        chat_history: [
+          { content: "Write a script", role: "user" },
+          { content: "I wrote script.py.", role: "assistant" },
+        ],
+        input: "Now run it",
+      },
+      { version: "v2" },
+    );
+    expect(store.agentRun.update).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        backend: "LOCAL",
+        providerId: "anthropic",
+      }),
+      where: { id: "run-test" },
+    });
+    expect(store.message.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        agentRunId: "run-test",
+        conversationId: "conversation-test",
+        role: "ASSISTANT",
+      }),
+    });
+  });
+
   it("routes browser and desktop goals to the E2B Desktop sandbox", async () => {
     const headlessSandbox = sandbox();
     const desktopSandbox = { ...sandbox(), sandboxId: "desktop-sandbox-test" };

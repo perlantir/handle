@@ -281,15 +281,20 @@ async function createAssistantMessage(
   });
 }
 
-function conversationHistory(context: AgentRunContext | null) {
-  return (
-    context?.conversation?.messages
-      ?.filter((message) => message.content.trim().length > 0)
-      .map((message) => ({
-        content: redactSecrets(message.content),
-        role: message.role.toLowerCase(),
-      })) ?? []
-  );
+function conversationHistory(context: AgentRunContext | null, currentGoal: string) {
+  const messages =
+    context?.conversation?.messages?.filter(
+      (message) => message.content.trim().length > 0,
+    ) ?? [];
+  const history =
+    messages.at(-1)?.role === "USER" && messages.at(-1)?.content === currentGoal
+      ? messages.slice(0, -1)
+      : messages;
+
+  return history.map((message) => ({
+    content: redactSecrets(message.content),
+    role: message.role.toLowerCase(),
+  }));
 }
 
 function localSandboxPlaceholder(taskId: string): E2BSandboxLike {
@@ -564,7 +569,10 @@ export function createAgentRunner({
         { llm: model },
       );
       const stream = await agent.streamEvents(
-        { chat_history: conversationHistory(runContext), input: redactSecrets(goal) },
+        {
+          chat_history: conversationHistory(runContext, goal),
+          input: redactSecrets(goal),
+        },
         { version: "v2" },
       );
       let finalAnswer = "";
