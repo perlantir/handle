@@ -18,6 +18,42 @@ in the Workspace center pane (per Screen 03 design).
 Phase 3 ships in 2-3 weeks.
 
 ==================================================
+PHASE 2 AUDIT LEARNINGS APPLIED TO PHASE 3
+==================================================
+
+Provider choice:
+- Primary computer-use model is Anthropic via the existing Phase 2
+  provider/key path.
+- Default model: `claude-opus-4-7`.
+- Computer-use requests must include the Anthropic beta header
+  `anthropic-beta: computer-use-2025-11-24`.
+- Phase 11 may switch the cost-optimized path to OpenAI
+  `chatgpt-oauth` after the localhost proxy translates
+  `/codex/responses` function calls back into OpenAI-compatible
+  `tool_calls`.
+
+Computer-use enrollment:
+- As of May 2026, no Anthropic console enrollment is required.
+- Computer use is enabled per request with the beta header above.
+- No `console.anthropic.com` setup step is required beyond having an
+  Anthropic API key configured in Phase 2 Settings.
+
+Rules to apply from day 1:
+- Rule 30: suppress sampler defaults for the computer-use provider
+  path unless the user explicitly configures them.
+- Rule 31: when a smoke/live integration failure lacks enough
+  evidence, add diagnostic logging first, then fix.
+- Rule 11: keep Phase 3 commits per subsystem.
+
+References:
+- Anthropic computer use tool docs:
+  https://platform.claude.com/docs/en/docs/build-with-claude/computer-use
+- E2B computer use docs:
+  https://e2b.dev/docs/use-cases/computer-use
+- E2B Desktop SDK docs:
+  https://e2b.dev/docs/sdk-reference/desktop-python-sdk/v2.3.0/desktop
+
+==================================================
 SCOPE
 ==================================================
 
@@ -141,6 +177,38 @@ content, anti-bot sites), use Anthropic's computer-use API.
 
 Install: `@anthropic-ai/sdk@latest`
 
+Use the existing Phase 2 Anthropic credential/config path. Do not add
+a second Anthropic key mechanism.
+
+Current model/tool configuration as of May 2026:
+- Model: `claude-opus-4-7`
+- Beta header: `computer-use-2025-11-24`
+- Computer tool: `computer_20251124`
+- Shell tool: `bash_20250124`
+- Text editor tool: `text_editor_20250728`
+
+The Anthropic computer-use tool specifically provides screen viewing,
+mouse control, and keyboard control. It can be combined with
+Anthropic's `bash_20250124` and `text_editor_20250728` tool types.
+Those overlap with Handle's Phase 1 `shell_exec`, `file_read`, and
+`file_write` tools, so implementation must verify whether to expose
+Anthropic's tool types as separate adapters or unify them with the
+existing E2B-backed tools. Do not duplicate tool behavior unless the
+Anthropic API contract requires it.
+
+Suppress sampler defaults for this provider mode. Add a unit test that
+asserts outgoing computer-use request bodies do not include
+`temperature`, `top_p`, `top_k`, `n`, `presence_penalty`, or
+`frequency_penalty` unless explicitly configured.
+
+Add diagnostic logging from the first implementation commit:
+- provider/model/tool version
+- beta header
+- request body with secrets and screenshots redacted
+- response body with secrets redacted
+- tool-use action names and timings
+- full error stacks
+
 apps/api/src/agent/computerUseTools.ts:
 
 ```typescript
@@ -177,16 +245,22 @@ export function createComputerUseTool(ctx: ToolContext, browser: BrowserSession)
         });
 
         const response = await anthropic.beta.messages.create({
-          model: 'claude-opus-4.5',  // or current latest with computer-use
+          model: 'claude-opus-4-7',
           max_tokens: 1024,
           tools: [{
-            type: 'computer_20250124',  // version current at time of impl
+            type: 'computer_20251124',
             name: 'computer',
             display_width_px: 1280,
             display_height_px: 800,
+          }, {
+            type: 'text_editor_20250728',
+            name: 'str_replace_based_edit_tool',
+          }, {
+            type: 'bash_20250124',
+            name: 'bash',
           }],
           messages,
-          betas: ['computer-use-2025-01-24'],  // current beta header
+          betas: ['computer-use-2025-11-24'],
         });
 
         if (response.stop_reason === 'end_turn') {
@@ -234,9 +308,70 @@ async function executeComputerUseAction(browser: BrowserSession, action: string,
 ```
 
 NOTE: Anthropic's computer-use API evolves. Check current docs at
-https://docs.claude.com/en/docs/build-with-claude/computer-use for
+https://platform.claude.com/docs/en/docs/build-with-claude/computer-use for
 the current beta header, action types, and tool spec when
 implementing.
+
+==================================================
+SANDBOX DESKTOP REQUIREMENTS
+==================================================
+
+Computer use requires a virtual display inside the sandbox. The agent
+must never control the user's host machine.
+
+As of May 2026, E2B documents Desktop sandboxes for computer-use
+agents: Ubuntu 22.04, XFCE desktop, screenshot/control APIs, and VNC
+streaming for visual feedback. E2B's Desktop SDK creates a sandbox
+from the default `desktop` template by default, with default
+resolution 1024x768 and configurable resolution/DPI/display.
+
+Phase 3 implementation should start with E2B Desktop sandboxes. If the
+current TypeScript SDK cannot provide the required screenshot, mouse,
+keyboard, and browser control APIs, stop and ask before considering a
+different sandbox provider.
+
+Implementation must verify:
+- Whether to use E2B's Desktop SDK/package directly or a custom E2B
+  template with Xvfb/XFCE/Chromium.
+- Whether Browser-Use and computer-use can share the same desktop
+  sandbox or require separate sandbox constructors.
+- How screenshots are captured and redacted before logging.
+- How VNC/live-view data maps to the Workspace Browser tab.
+
+==================================================
+COST EXPECTATIONS
+==================================================
+
+Computer use is materially more expensive than DOM browser automation.
+Each screenshot typically adds 1500-2000 input tokens, and a task may
+take 5-30 screenshot/action iterations.
+
+Expected per-task cost: roughly $0.10-$2.00 for typical tasks,
+depending on model, number of screenshots, and recovery loops.
+
+Add a UI warning before launching computer-use tasks. The warning
+should make clear that:
+- DOM browser automation is attempted first when suitable.
+- Vision computer-use is slower and more expensive.
+- The task runs in an isolated virtual desktop, not on the host Mac.
+- The user can stop the task with the kill switch.
+
+==================================================
+COMPUTER-USE RISK MITIGATIONS
+==================================================
+
+Required mitigations:
+- Run all computer-use actions inside a virtual E2B desktop, never on
+  the host machine.
+- Add a URL/application allowlist for Phase 3 computer-use tasks.
+- Add a Workspace kill switch that immediately stops the browser task
+  and kills the sandbox.
+- Redact screenshots before logging or storing any diagnostic payloads.
+- Require approval before risky browser actions, including form
+  submissions, payment flows, auth-sensitive sites, and destructive
+  actions.
+- Stream screenshots to the UI for user visibility, but do not write
+  raw screenshots to long-term logs.
 
 ==================================================
 SAFETY: APPROVAL FOR RISKY ACTIONS
@@ -350,6 +485,11 @@ TESTS
 4. Approval required for risky clicks
 5. BrowserTab renders screenshot and URL
 6. SSE browser_state events update workspace UI
+7. Computer-use request body suppresses sampler defaults
+8. Computer-use diagnostics redact screenshots and secrets
+9. Smoke test for canonical computer-use task:
+   "open Hacker News in browser, click first story, screenshot the
+   result"
 
 ==================================================
 GATE CRITERIA
@@ -363,7 +503,10 @@ GATE CRITERIA
    read-only view)
 5. Approval flow triggers on risky click
 6. Workspace browser tab shows live screenshots
-7. SIGNOFF document
+7. Computer-use canonical smoke passes:
+   "open Hacker News in browser, click first story, screenshot the
+   result"
+8. SIGNOFF document
 
 ==================================================
 MANUAL AUDIT
@@ -377,10 +520,12 @@ Section A: DOM-based browser
 2. Verify navigation, extract_text, response
 
 Section B: Computer use
-1. Submit task: "Open figma.com/community and describe what you
-   see"
+1. Submit task: "Open Hacker News in a browser, click the first
+   story, and screenshot the result"
 2. Verify computer-use kicks in (screenshots in inspector)
-3. Verify response
+3. Verify click action lands on the first story
+4. Verify final screenshot appears in Workspace Browser tab
+5. Verify response summarizes the opened story
 
 Section C: Risky action approval
 1. Submit task: "Go to amazon.com and search for laptops, then
