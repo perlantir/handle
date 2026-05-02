@@ -1,9 +1,10 @@
-'use client';
+"use client";
 
-import { ChevronLeft, ChevronRight, Eye, FileText, Lock, RefreshCw, Terminal, type LucideIcon } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import type { AgentStreamState, ToolCallState } from '@/hooks/useAgentStream';
-import { cn } from '@/lib/utils';
+import { Eye, FileText, RefreshCw, Terminal, type LucideIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import type { AgentStreamState, ToolCallState } from "@/hooks/useAgentStream";
+import { cn } from "@/lib/utils";
+import { BrowserPane } from "./BrowserPane";
 
 type SurfaceTab = 'terminal' | 'browser' | 'preview';
 
@@ -144,35 +145,13 @@ function PreviewSurface({ state }: { state: AgentStreamState }) {
   );
 }
 
-function BrowserSurface({ taskId }: { taskId: string }) {
-  return (
-    <div className="flex h-full flex-col overflow-hidden rounded-[14px] border border-border-subtle bg-bg-surface">
-      <div className="flex h-10 items-center gap-2 border-b border-border-subtle px-[14px]">
-        <IconButton label="Back">
-          <ChevronLeft className="h-[11px] w-[11px]" />
-        </IconButton>
-        <IconButton label="Forward">
-          <ChevronRight className="h-[11px] w-[11px]" />
-        </IconButton>
-        <IconButton label="Refresh">
-          <RefreshCw className="h-[11px] w-[11px]" />
-        </IconButton>
-        <div className="flex h-[26px] min-w-0 flex-1 items-center gap-1.5 rounded-pill bg-bg-canvas px-3 font-mono text-[11px] text-text-tertiary">
-          <Lock className="h-2.5 w-2.5 shrink-0 text-text-muted" />
-          <span className="truncate">sandbox.handle.local/tasks/{taskId}</span>
-        </div>
-        <span className="inline-flex items-center gap-1.5 px-2 text-[11px] font-medium text-accent">
-          <span className="h-1.5 w-1.5 rounded-pill bg-accent" />
-          Ready
-        </span>
-      </div>
-      <div className="min-h-0 flex-1 bg-bg-canvas" />
-    </div>
-  );
-}
-
 export function CenterPane({ state, taskId }: CenterPaneProps) {
   const [tab, setTab] = useState<SurfaceTab>('terminal');
+  const hasBrowserActivity = state.browserScreenshots.length > 0;
+
+  useEffect(() => {
+    if (hasBrowserActivity) setTab("browser");
+  }, [hasBrowserActivity]);
 
   return (
     <section className="flex min-h-0 flex-col bg-bg-canvas">
@@ -196,7 +175,7 @@ export function CenterPane({ state, taskId }: CenterPaneProps) {
       <div className="min-h-0 flex-1 overflow-hidden p-4">
         {tab === 'terminal' && <TerminalSurface state={state} />}
         {tab === 'preview' && <PreviewSurface state={state} />}
-        {tab === 'browser' && <BrowserSurface taskId={taskId} />}
+        {tab === 'browser' && <BrowserPane state={state} taskId={taskId} />}
       </div>
     </section>
   );

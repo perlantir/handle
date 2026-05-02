@@ -1,0 +1,114 @@
+import { expect, test, type Page, type Route } from "@playwright/test";
+
+const pngBase64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAWElEQVR4nO3PQQ0AIBDAMMC/5+ONAvZoFSzZnplZ3gkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC8G2AAAQABJzQnCgAAAABJRU5ErkJggg==";
+
+async function jsonRoute(route: Route, status: number, body: unknown) {
+  await route.fulfill({
+    body: JSON.stringify(body),
+    contentType: "application/json",
+    status,
+  });
+}
+
+function streamBody(taskId: string) {
+  const screenshot = {
+    byteCount: Buffer.from(pngBase64, "base64").byteLength,
+    callId: "call-browser-1",
+    height: 800,
+    imageBase64: pngBase64,
+    source: "browser_tools",
+    taskId,
+    timestamp: new Date().toISOString(),
+    type: "browser_screenshot",
+    width: 1280,
+  };
+  const approval = {
+    approvalId: "approval-browser-1",
+    request: {
+      action: "browser_click",
+      reason: "Click appears to trigger destructive action: Delete Account",
+      target: "#delete",
+      type: "risky_browser_action",
+    },
+    taskId,
+    type: "approval_request",
+  };
+
+  return `data: ${JSON.stringify(screenshot)}\n\ndata: ${JSON.stringify(approval)}\n\n`;
+}
+
+async function mockWorkspaceApis(page: Page, taskId: string) {
+  const responses: unknown[] = [];
+
+  await page.route("**/api/tasks/*", async (route) => {
+    await jsonRoute(route, 200, {
+      goal: "Use browser tools",
+      id: taskId,
+      messages: [{ content: "Use browser tools", id: "message-1", role: "USER" }],
+      status: "RUNNING",
+    });
+  });
+
+  await page.route("**/api/approvals/pending", async (route) => {
+    await jsonRoute(route, 200, { approvals: [] });
+  });
+
+  await page.route("**/api/approvals/respond", async (route) => {
+    const body = route.request().postDataJSON();
+    responses.push(body);
+    await jsonRoute(route, 200, {
+      approvalId: body.approvalId,
+      status: body.decision,
+    });
+  });
+
+  await page.route(`**/api/stream/${taskId}`, async (route) => {
+    await route.fulfill({
+      body: streamBody(taskId),
+      headers: {
+        "Cache-Control": "no-cache",
+        "Content-Type": "text/event-stream",
+      },
+      status: 200,
+    });
+  });
+
+  return { responses };
+}
+
+test.describe("Workspace Browser Pane", () => {
+  test("renders screenshot history and approves risky browser actions", async ({ page }) => {
+    const taskId = "task-browser-ui";
+    const { responses } = await mockWorkspaceApis(page, taskId);
+
+    await page.goto(`/tasks/${taskId}`);
+
+    await expect(page.getByText("Use browser tools").first()).toBeVisible();
+    await expect(page.getByText("Screenshot history")).toBeVisible();
+    await expect(page.getByAltText("Browser screenshot")).toBeVisible();
+    await expect(page.getByAltText("browser_tools thumbnail")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Approve action?" })).toBeVisible();
+    await expect(
+      page.getByText("Click appears to trigger destructive action").first(),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Approve" }).click();
+    await expect
+      .poll(() => responses)
+      .toContainEqual({ approvalId: "approval-browser-1", decision: "approved" });
+  });
+
+  test("sends denial for risky browser action approval", async ({ page }) => {
+    const taskId = "task-browser-deny-ui";
+    const { responses } = await mockWorkspaceApis(page, taskId);
+
+    await page.goto(`/tasks/${taskId}`);
+
+    await expect(page.getByRole("heading", { name: "Approve action?" })).toBeVisible();
+    await page.getByRole("button", { name: "Deny" }).click();
+    await expect
+      .poll(() => responses)
+      .toContainEqual({ approvalId: "approval-browser-1", decision: "denied" });
+  });
+});

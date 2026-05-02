@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { agentStreamReducer, type AgentStreamState } from './useAgentStream';
 
 const initialState: AgentStreamState = {
+  browserScreenshots: [],
   error: null,
   finalMessage: null,
   pendingApproval: null,
@@ -62,5 +63,29 @@ describe('agentStreamReducer', () => {
     });
 
     expect(state.pendingApproval).toBeNull();
+  });
+
+  it('keeps the last 10 browser screenshots', () => {
+    let state = initialState;
+
+    for (let index = 0; index < 12; index += 1) {
+      state = agentStreamReducer(state, {
+        event: {
+          byteCount: 8,
+          height: 800,
+          imageBase64: `image-${index}`,
+          source: 'browser_tools',
+          taskId: 'task-test',
+          timestamp: `2026-05-01T00:00:${String(index).padStart(2, '0')}.000Z`,
+          type: 'browser_screenshot',
+          width: 1280,
+        },
+        type: 'event',
+      });
+    }
+
+    expect(state.browserScreenshots).toHaveLength(10);
+    expect(state.browserScreenshots[0]?.imageBase64).toBe('image-2');
+    expect(state.browserScreenshots.at(-1)?.imageBase64).toBe('image-11');
   });
 });

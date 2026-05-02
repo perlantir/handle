@@ -16,9 +16,9 @@ async function loadTask(taskId: string): Promise<TaskDetailResponse | null> {
   const response = await fetch(`${apiBaseUrl}/api/tasks/${taskId}`, {
     cache: "no-store",
     headers: { Authorization: `Bearer ${token}` },
-  });
+  }).catch(() => null);
 
-  if (!response.ok) return null;
+  if (!response?.ok) return null;
 
   return response.json() as Promise<TaskDetailResponse>;
 }
