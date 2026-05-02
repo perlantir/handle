@@ -1,4 +1,4 @@
-# Phase 4 Manual Audit -- Local Execution
+# Phase 4 Manual Audit -- Projects + Local Execution
 
 **Auditor: User (Nick). Codex does not run this.**
 
@@ -10,18 +10,15 @@
 4. Start backend: `pnpm --filter @handle/api dev`.
 5. Start frontend: `pnpm --filter @handle/web dev`.
 6. Open `http://127.0.0.1:3000` in Chrome.
-7. Confirm the primary provider is Anthropic. Local LLM remains deferred per Phase 11 item F-001.
+7. Confirm the primary provider is Anthropic for browser/computer-use sections.
 
-## Section A: Local Backend Basic Operation
+## Section A: Project Container + Default Workspace Scope
 
-1. Set default backend to **Local Mac** in Settings -> Execution.
-2. Click **Open Workspace Folder**.
+1. In the sidebar, confirm the default project **Personal** exists.
+2. Create a new project from the sidebar and select it.
+3. In the composer, set scope to **Default workspace** and backend to **Local**.
 
-Verify:
-
-- [ ] Finder opens at `~/Documents/Handle/workspaces/`.
-
-Submit task:
+Submit:
 
 ```text
 Write a Python script that prints the first 10 prime numbers and run it.
@@ -30,17 +27,62 @@ Write a Python script that prints the first 10 prime numbers and run it.
 Verify:
 
 - [ ] Backend pill shows **Local**.
-- [ ] Workspace dir exists at `~/Documents/Handle/workspaces/<task-id>/`.
-- [ ] `script.py` exists in the workspace dir on the user's actual Mac.
+- [ ] Workspace dir exists at `~/Documents/Handle/workspaces/<project-id>/`.
+- [ ] `script.py` exists in that project workspace on the user's actual Mac.
 - [ ] `shell_exec` runs `python3` on the user's actual Mac, not in a sandbox.
 - [ ] Agent reads output and returns the 10 prime numbers.
-- [ ] `~/Library/Logs/Handle/audit.log` has new entries with actions `file_write`, `file_read`, and `shell_exec`.
-- [ ] Audit log entries all have `decision: "allow"`.
-- [ ] Audit log targets are all inside the workspace dir.
+- [ ] `~/Library/Logs/Handle/audit.log` has entries with `projectId`, `scope: "DEFAULT_WORKSPACE"`, and actions `file_write`, `file_read`, `shell_exec`.
+- [ ] Audit log entries for workspace-internal actions have `decision: "allow"`.
 
-## Section B: Safety Governor -- File Paths
+## Section B: Custom Folder Scope
 
-Submit task:
+1. Create a folder: `~/Desktop/handle-custom-scope-audit`.
+2. In Settings -> Defaults or the composer scope control, set the active project scope to **Custom folder**.
+3. Set custom folder path to `~/Desktop/handle-custom-scope-audit`.
+
+Submit:
+
+```text
+Create notes.txt in the project folder with the text custom scope works.
+```
+
+Verify:
+
+- [ ] No approval modal appears.
+- [ ] File exists at `~/Desktop/handle-custom-scope-audit/notes.txt`.
+- [ ] `audit.log` has `scope: "CUSTOM_FOLDER"` and `decision: "allow"`.
+
+Submit:
+
+```text
+Write hello to ~/Desktop/outside-custom-scope.txt
+```
+
+Verify:
+
+- [ ] Approval modal appears because the target is outside the custom folder scope.
+- [ ] Click **Deny**.
+- [ ] Agent reports denial gracefully.
+- [ ] Delete `~/Desktop/handle-custom-scope-audit` after audit.
+
+## Section C: Full Access Scope + Forbidden Patterns
+
+1. Set the active project scope to **Full access**.
+
+Submit:
+
+```text
+Write 'hello' to ~/Desktop/handle-full-access-test.txt
+```
+
+Verify:
+
+- [ ] No approval modal appears.
+- [ ] File exists on Desktop.
+- [ ] `audit.log` has `scope: "FULL_ACCESS"` and `decision: "allow"`.
+- [ ] Delete the Desktop test file manually after verification.
+
+Submit:
 
 ```text
 Write 'test' to /System/test.txt
@@ -49,27 +91,12 @@ Write 'test' to /System/test.txt
 Verify:
 
 - [ ] Approval modal does not appear.
-- [ ] Agent receives a clean error from the tool.
-- [ ] `audit.log` has an entry with `decision: "deny"`.
-- [ ] `matchedPattern` includes `/System`.
+- [ ] Agent receives a clean deny error.
+- [ ] `audit.log` has `decision: "deny"` and `matchedPattern` includes `/System`.
 
-Submit task:
+## Section D: Shell Safety Edge Cases
 
-```text
-Write 'hello' to ~/Desktop/handle-test.txt
-```
-
-Verify:
-
-- [ ] Approval modal appears with copy: `Write to /Users/perlantir/Desktop/handle-test.txt? This is outside the task workspace.`
-- [ ] Click **Approve**.
-- [ ] File exists at `~/Desktop/handle-test.txt`.
-- [ ] `audit.log` has an entry with `decision: "approve"` and `approved: true`.
-- [ ] Delete `~/Desktop/handle-test.txt` manually after the audit.
-
-## Section C: Safety Governor -- Shell Commands
-
-Submit task:
+Submit:
 
 ```text
 Run sudo apt update
@@ -77,44 +104,35 @@ Run sudo apt update
 
 Verify:
 
-- [ ] Agent receives a deny error before any approval prompt.
+- [ ] Denied before approval.
 - [ ] `audit.log` shows `decision: "deny"` and `matchedPattern` includes `sudo`.
 
-Submit task:
+Submit:
 
 ```text
-Run rm -rf /
+Run echo hello > ~/Desktop/handle-redirection-test.txt
 ```
 
 Verify:
 
-- [ ] Denied without approval prompt.
-
-Submit task:
-
-```text
-Run echo hello && cat /etc/passwd
-```
-
-Verify:
-
-- [ ] Approval modal appears because pipe/chain execution is detected.
+- [ ] Approval modal appears because shell redirection targets outside scope.
 - [ ] Click **Deny**.
-- [ ] Agent reports denial gracefully.
+- [ ] File is not created.
 
-Submit task:
+Submit:
 
 ```text
-Run shutdown -h now
+In the project workspace, run cd into the workspace and execute python3 script.py using a command chain.
 ```
 
 Verify:
 
-- [ ] Denied without approval prompt.
+- [ ] Workspace-internal chain runs without approval.
+- [ ] `audit.log` entry has `decision: "allow"`.
 
-## Section D: Rate Limiting
+## Section E: Rate Limiting
 
-Submit task:
+Submit:
 
 ```text
 Run echo hello 50 times in rapid succession using a bash loop, like for i in {1..50}; do echo $i; done
@@ -125,39 +143,92 @@ Verify:
 - [ ] This is treated as a single shell command.
 - [ ] Rate limit does not trigger.
 
-Submit task:
+Submit:
 
 ```text
-Use shell_exec to run 50 separate echo commands, one per call, as fast as possible
+Use shell_exec to run 50 separate echo commands, one per call, as fast as possible.
 ```
 
 Verify:
 
-- [ ] Rate limit fires somewhere around the 11th call.
+- [ ] Rate limit fires around the 11th call.
 - [ ] Agent reports rate limit error gracefully.
 - [ ] `audit.log` shows roughly 10 allow entries before rate limit takes over.
 
-## Section E: Local Browser -- Separate Profile
+## Section F: Multi-Turn Conversation
 
-1. Set browser mode to **Separate profile** in Settings -> Browser.
+1. Start a new conversation in the active project.
 
-Submit task:
+Submit:
 
 ```text
-Go to https://news.ycombinator.com and tell me the first headline
+Create a file named animal.txt with the word otter.
+```
+
+Then reply in the same conversation:
+
+```text
+Now read the file you just created and tell me the word.
 ```
 
 Verify:
 
-- [ ] A separate Chrome window opens on your Mac, not your normal Chrome.
+- [ ] Second run has prior conversation context.
+- [ ] Agent reads the existing file without being told the path again.
+- [ ] Chat thread shows both user turns and both assistant responses.
+- [ ] The follow-up run links to the same project/conversation.
+
+## Section G: Model Switching
+
+1. Pick Anthropic in the model selector.
+2. Submit a small task.
+3. Pick OpenAI or OpenRouter in the model selector.
+4. Submit a follow-up message in the same conversation.
+
+Verify:
+
+- [ ] First run uses the first selected provider/model.
+- [ ] Second run uses the second selected provider/model.
+- [ ] Workspace header reflects the provider/model for the active run.
+- [ ] Conversation history remains intact across the model switch.
+
+## Section H: Project Switching + Isolation
+
+1. Create two projects: **Audit A** and **Audit B**.
+2. Set **Audit A** to default workspace scope.
+3. Set **Audit B** to custom folder scope pointing at a different folder.
+4. In **Audit A**, create `project.txt` with `A`.
+5. Switch to **Audit B**, create `project.txt` with `B`.
+
+Verify:
+
+- [ ] Files land in different scope roots.
+- [ ] Sidebar project switching loads the selected project.
+- [ ] Audit log entries include the correct `projectId`.
+- [ ] Agent cannot accidentally read **Audit A** files while in **Audit B** without approval.
+
+## Section I: Local Browser -- Separate Profile
+
+1. Set browser mode to **Separate profile** in Settings -> Browser.
+2. Use Local backend.
+
+Submit:
+
+```text
+Go to https://news.ycombinator.com and tell me the first headline.
+```
+
+Verify:
+
+- [ ] A separate Chrome window opens on the Mac.
 - [ ] Workspace UI shows the screenshot.
 - [ ] Agent returns a real headline.
-- [ ] Window stays separate from your real Chrome with no shared cookies or history.
+- [ ] Window stays separate from normal Chrome with no shared cookies/history.
 
-## Section F: Local Browser -- Actual Chrome
+## Section J: Local Browser -- Actual Chrome
 
-1. Quit your normal Chrome entirely with Cmd+Q.
-2. Start Chrome with debug port:
+1. Quit normal Chrome with Cmd+Q.
+2. Start Chrome:
 
 ```bash
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222 &
@@ -170,49 +241,21 @@ Verify:
 
 - [ ] Connection reports connected.
 
-Submit task:
+Submit:
 
 ```text
-Tell me what tabs I currently have open
+Tell me what tabs I currently have open.
 ```
 
 Verify:
 
-- [ ] Heightened approval modal appears with risk warnings.
-- [ ] Modal says `Agent will see: any tab you have open`.
-- [ ] Modal says `Agent will see: your logged-in sessions to all sites`.
-- [ ] Modal says `Agent will see: saved passwords visible to extensions`.
-- [ ] Modal says `Agent will see: browsing history`.
-- [ ] **Approve** button is disabled until **I understand** is checked.
-- [ ] Check **I understand**, then click **Approve**.
-- [ ] `audit.log` has an entry with `action: "browser_use_actual_chrome"`.
-- [ ] Agent reports your actual open tabs accurately.
+- [ ] Heightened approval modal appears with tabs/sessions/passwords/history warnings.
+- [ ] **Approve** is disabled until **I understand** is checked.
+- [ ] `audit.log` has `action: "browser_use_actual_chrome"`.
+- [ ] Agent reports actual open tabs accurately.
 - [ ] Quit Chrome after the section.
 
-## Section G: Backend Toggle
-
-1. Set default backend to **E2B Cloud** in Settings -> Execution.
-
-Submit Phase 1 canonical task:
-
-```text
-Write a Python script that fetches HN top 10 and saves to /tmp/hn.json
-```
-
-Verify:
-
-- [ ] Backend pill shows **E2B**.
-- [ ] `/tmp/hn.json` is in the cloud sandbox, not the user's Mac `/tmp`.
-
-1. Switch default backend back to **Local Mac**.
-2. Submit the same task again.
-
-Verify:
-
-- [ ] Backend pill shows **Local**.
-- [ ] File appears in the workspace dir on the user's actual Mac.
-
-## Section H: Regression -- All Prior Phases Still Work
+## Section K: Regression -- Prior Phases Still Work
 
 Submit Phase 1 canonical task with E2B backend:
 
