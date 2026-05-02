@@ -1,12 +1,16 @@
 import { Buffer } from 'node:buffer';
-import { existsSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
 import { createDesktopSandbox } from '../../apps/api/src/execution/desktopSandbox.ts';
 
 const ROOT = new URL('../..', import.meta.url);
-const FIRST_SCREENSHOT = '/tmp/desktop-sandbox-test.png';
-const SECOND_SCREENSHOT = '/tmp/desktop-sandbox-test-after-click.png';
+const ROOT_PATH = fileURLToPath(ROOT);
+const ARTIFACT_DIR = join(ROOT_PATH, 'smoke-artifacts', 'desktop-sandbox');
+const FIRST_SCREENSHOT = join(ARTIFACT_DIR, 'desktop-sandbox-test.png');
+const SECOND_SCREENSHOT = join(ARTIFACT_DIR, 'desktop-sandbox-test-after-click.png');
 
 loadDotenv({ path: new URL('.env', ROOT) });
 
@@ -37,6 +41,7 @@ let sandbox;
 
 try {
   console.log('[desktop-sandbox] creating E2B Desktop sandbox');
+  mkdirSync(ARTIFACT_DIR, { recursive: true });
   sandbox = await createDesktopSandbox();
 
   console.log('[desktop-sandbox] taking initial screenshot');
