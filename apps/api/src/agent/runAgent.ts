@@ -281,6 +281,13 @@ export function createAgentRunner({
         { providerId: provider.id, model: provider.config.primaryModel },
         "Using provider for task",
       );
+      await store.task.update({
+        data: {
+          providerId: provider.id,
+          providerModel: provider.config.primaryModel,
+        },
+        where: { id: taskId },
+      });
 
       try {
         await withTimeout(

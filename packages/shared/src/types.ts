@@ -149,6 +149,8 @@ export interface TaskDetailResponse {
   goal: string;
   id: string;
   messages: TaskMessage[];
+  providerId?: string | null;
+  providerModel?: string | null;
   status: TaskStatus;
   updatedAt?: string;
 }

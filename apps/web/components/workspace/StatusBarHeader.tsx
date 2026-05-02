@@ -60,6 +60,20 @@ function backendTooltip(backend: TaskDetailResponse['backend']) {
     : 'This task is using the E2B Cloud execution backend.';
 }
 
+function providerLabel(providerId: string | null | undefined) {
+  if (providerId === 'anthropic') return 'Anthropic';
+  if (providerId === 'kimi') return 'KIMI';
+  if (providerId === 'openrouter') return 'OpenRouter';
+  if (providerId === 'local') return 'Local';
+  if (providerId === 'openai') return 'OpenAI';
+  return 'Selecting';
+}
+
+function modelValue(task: TaskDetailResponse | null) {
+  const provider = providerLabel(task?.providerId);
+  return task?.providerModel ? `${provider} · ${task.providerModel}` : provider;
+}
+
 export function StatusBarHeader({ state, task }: StatusBarHeaderProps) {
   const status = state.status === 'IDLE' && task ? task.status : state.status;
   const hasPendingApproval = state.status === 'WAITING' || Boolean(state.pendingApproval);
@@ -87,7 +101,7 @@ export function StatusBarHeader({ state, task }: StatusBarHeaderProps) {
           {backendLabel(backend)}
         </span>
         <span className="h-[22px] w-px bg-border-subtle" />
-        <Meta label="Model" value="OpenAI" />
+        <Meta label="Model" value={modelValue(task)} />
         <span className="h-[22px] w-px bg-border-subtle" />
         <Meta label="Runtime" mono value="Live" />
         <span className="h-[22px] w-px bg-border-subtle" />

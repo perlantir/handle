@@ -65,6 +65,8 @@ async function mockTaskApis(page: Page) {
           role: "USER",
         },
       ],
+      providerId: taskId === "task-e2b-ui" ? "openai" : "anthropic",
+      providerModel: taskId === "task-e2b-ui" ? "gpt-4o" : "claude-opus-4-7",
       status: "RUNNING",
     });
   });
@@ -109,6 +111,7 @@ test.describe("Workspace backend pill", () => {
 
     await expect(page).toHaveURL(/\/tasks\/task-local-ui$/);
     await expect(page.getByText("Local").first()).toBeVisible();
+    await expect(page.getByText("Anthropic · claude-opus-4-7")).toBeVisible();
     expect(
       requests.find(
         (request) =>
@@ -123,5 +126,6 @@ test.describe("Workspace backend pill", () => {
 
     await expect(page.getByText("Use E2B").first()).toBeVisible();
     await expect(page.getByText("E2B").first()).toBeVisible();
+    await expect(page.getByText("OpenAI · gpt-4o")).toBeVisible();
   });
 });
