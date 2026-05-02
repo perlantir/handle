@@ -93,6 +93,11 @@ const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const DEFAULT_DISPLAY = ":0";
 const NODE_RUNTIME_PATH = "/tmp/handle-browser-runtime";
+const NODE_INSTALL_PATH = `${NODE_RUNTIME_PATH}/node`;
+const NODE_BIN_PATH = `${NODE_INSTALL_PATH}/bin`;
+const NODE_BINARY = `${NODE_BIN_PATH}/node`;
+const NPM_BINARY = `${NODE_BIN_PATH}/npm`;
+const NPX_BINARY = `${NODE_BIN_PATH}/npx`;
 const SERVER_PATH = `${NODE_RUNTIME_PATH}/handle-browser-server.mjs`;
 const SERVER_LOG_PATH = "/tmp/handle-browser-server.log";
 const SERVER_PROFILE_PATH = "/tmp/handle-browser-profile";
@@ -574,23 +579,25 @@ export class E2BBrowserSession implements BrowserSession {
     const command = [
       "set -eu",
       "echo \"Browser runtime PATH=$PATH\"",
-      "if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then",
-      "  echo \"Node.js runtime missing; installing Node.js 20 via apt\"",
-      "  apt-get update",
-      "  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg",
-      "  mkdir -p /etc/apt/keyrings",
-      "  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg",
-      "  echo \"deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main\" > /etc/apt/sources.list.d/nodesource.list",
-      "  apt-get update",
-      "  DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs",
-      "fi",
-      "node --version",
-      "npm --version",
       `mkdir -p ${shellSingleQuote(NODE_RUNTIME_PATH)}`,
       `cd ${shellSingleQuote(NODE_RUNTIME_PATH)}`,
+      `if [ ! -x ${shellSingleQuote(NODE_BINARY)} ]; then`,
+      "  echo \"Node.js runtime missing; installing Node.js 20 tarball under /tmp\"",
+      "  NODE_DIST_URL=https://nodejs.org/dist/latest-v20.x",
+      "  NODE_TARBALL=$(curl -fsSL \"$NODE_DIST_URL/SHASUMS256.txt\" | awk '/linux-x64.tar.xz$/ { print $2; exit }')",
+      "  if [ -z \"$NODE_TARBALL\" ]; then echo \"Could not resolve Node.js linux-x64 tarball\" >&2; exit 1; fi",
+      "  curl -fsSL \"$NODE_DIST_URL/$NODE_TARBALL\" -o node.tar.xz",
+      "  rm -rf node node-download",
+      "  mkdir -p node-download",
+      "  tar -xJf node.tar.xz -C node-download --strip-components=1",
+      "  mv node-download node",
+      "fi",
+      `export PATH=${shellSingleQuote(NODE_BIN_PATH)}:$PATH`,
+      `${shellSingleQuote(NODE_BINARY)} --version`,
+      `${shellSingleQuote(NPM_BINARY)} --version`,
       "[ -f package.json ] || npm init -y >/dev/null 2>&1",
-      "npm install --no-audit --no-fund playwright",
-      "npx playwright install chromium",
+      `${shellSingleQuote(NPM_BINARY)} install --no-audit --no-fund playwright`,
+      `${shellSingleQuote(NPX_BINARY)} playwright install chromium`,
     ].join("\n");
 
     this.options.logger.info(
@@ -685,7 +692,7 @@ export class E2BBrowserSession implements BrowserSession {
       `export HANDLE_BROWSER_VIEWPORT_HEIGHT=${shellSingleQuote(String(height))}`,
       `export HANDLE_BROWSER_USER_AGENT=${shellSingleQuote(this.options.userAgent)}`,
       `cd ${shellSingleQuote(NODE_RUNTIME_PATH)}`,
-      `nohup node ${shellSingleQuote(SERVER_PATH)} > ${shellSingleQuote(SERVER_LOG_PATH)} 2>&1 &`,
+      `nohup ${shellSingleQuote(NODE_BINARY)} ${shellSingleQuote(SERVER_PATH)} > ${shellSingleQuote(SERVER_LOG_PATH)} 2>&1 &`,
       "for i in $(seq 1 100); do",
       this.healthCheckCommand({ allowFailure: true }),
       "  sleep 0.2",
@@ -729,7 +736,7 @@ export class E2BBrowserSession implements BrowserSession {
   private httpCommand(path: "/action" | "/health" | "/shutdown", payload: unknown) {
     const timeout = Math.ceil(ACTION_TIMEOUT_MS / 1000);
     return [
-      "node --input-type=module - <<'NODE'",
+      `${shellSingleQuote(NODE_BINARY)} --input-type=module - <<'NODE'`,
       `const payload = JSON.parse(${jsStringLiteral(JSON.stringify(payload))});`,
       `const path = ${jsStringLiteral(path)};`,
       `const port = ${this.options.port};`,

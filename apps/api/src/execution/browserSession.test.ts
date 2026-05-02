@@ -70,14 +70,15 @@ describe("browserSession", () => {
 
     expect(result.title).toBe("Hacker News");
     expect(result.screenshot.equals(image)).toBe(true);
-    expect(calls[0]).toContain("Node.js runtime missing; installing Node.js 20 via apt");
-    expect(calls[0]).toContain("https://deb.nodesource.com/node_20.x");
+    expect(calls[0]).toContain("Node.js runtime missing; installing Node.js 20 tarball under /tmp");
+    expect(calls[0]).toContain("https://nodejs.org/dist/latest-v20.x");
     expect(calls[0]).toContain("mkdir -p '/tmp/handle-browser-runtime'");
     expect(calls[0]).toContain("cd '/tmp/handle-browser-runtime'");
-    expect(calls[0]).toContain("npm install --no-audit --no-fund playwright");
+    expect(calls[0]).toContain("'/tmp/handle-browser-runtime/node/bin/npm' install --no-audit --no-fund playwright");
     expect(calls[0]).not.toContain("browser-use");
+    expect(calls[0]).not.toContain("apt-get");
     expect(calls[0]).not.toContain("pip install");
-    expect(calls[0]).toContain("npx playwright install chromium");
+    expect(calls[0]).toContain("'/tmp/handle-browser-runtime/node/bin/npx' playwright install chromium");
     expect(sandbox.files?.write).toHaveBeenCalledWith(
       "/tmp/handle-browser-runtime/handle-browser-server.mjs",
       expect.stringContaining("createServer"),
@@ -87,8 +88,9 @@ describe("browserSession", () => {
     expect(calls[1]).toContain("HANDLE_BROWSER_VIEWPORT_HEIGHT='800'");
     expect(calls[1]).toContain("cd '/tmp/handle-browser-runtime'");
     expect(calls[1]).toContain(
-      "nohup node '/tmp/handle-browser-runtime/handle-browser-server.mjs'",
+      "nohup '/tmp/handle-browser-runtime/node/bin/node' '/tmp/handle-browser-runtime/handle-browser-server.mjs'",
     );
+    expect(calls[2]).toContain("'/tmp/handle-browser-runtime/node/bin/node' --input-type=module");
     expect(calls[2]).toContain('const payload = JSON.parse("{\\"action\\":\\"navigate\\"');
     expect(calls[2]).not.toContain('const payload = JSON.parse("\\"');
   });
@@ -99,7 +101,7 @@ describe("browserSession", () => {
     let installCalls = 0;
     let shutdownCalls = 0;
     const { sandbox } = sandboxWithRunner((command) => {
-      if (command.includes("npm install --no-audit --no-fund playwright")) {
+      if (command.includes("node/bin/npm' install --no-audit --no-fund playwright")) {
         installCalls += 1;
         return ok();
       }
