@@ -106,7 +106,7 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
           state={state}
         />
       </div>
-      <BottomComposer />
+      <BottomComposer task={task} />
       {modalApproval && (
         <ApprovalModal
           approval={modalApproval}

@@ -218,6 +218,7 @@ export function createTasksRouter({
       if ("conversation" in (task as Record<string, unknown>)) {
         const run = task as {
           backend?: string;
+          conversationId?: string;
           conversation?: {
             messages?: Array<{
               content: string;
@@ -236,6 +237,8 @@ export function createTasksRouter({
         };
         return res.json({
           backend: backendFromRun(run.backend),
+          conversationId:
+            "conversationId" in run ? (run as { conversationId?: string }).conversationId : undefined,
           createdAt: run.startedAt?.toISOString(),
           goal: run.goal,
           id: run.id,
@@ -248,6 +251,10 @@ export function createTasksRouter({
             })) ?? [],
           providerId: run.providerId ?? null,
           providerModel: run.modelName ?? null,
+          projectId:
+            run.conversation &&
+            "project" in run.conversation &&
+            (run.conversation as { project?: { id?: string } }).project?.id,
           status: taskStatusFromRun(run.status),
           updatedAt: run.updatedAt?.toISOString(),
         });
