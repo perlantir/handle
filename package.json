@@ -32,7 +32,7 @@
     "smoke:settings-api-proxy": "node scripts/smoke/settings-api-proxy.mjs",
     "smoke:settings-browser-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/settings-browser.spec.ts",
     "smoke:settings-execution-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/settings-execution.spec.ts",
-    "smoke:settings-providers-ui": "playwright test --config apps/web/playwright.config.ts",
+    "smoke:settings-providers-ui": "playwright test --config apps/web/playwright.config.ts --workers=1",
     "smoke:workspace-backend-pill": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-backend-pill.spec.ts",
     "smoke:web-signin": "node scripts/smoke/web-signin.mjs",
     "test": "pnpm -r --if-present test",
