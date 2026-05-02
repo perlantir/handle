@@ -65,6 +65,24 @@ describe('agentStreamReducer', () => {
     expect(state.pendingApproval).toBeNull();
   });
 
+  it('clears streamed working text when the final assistant message arrives', () => {
+    let state = agentStreamReducer(initialState, {
+      event: { content: 'Done [[HANDLE_RESULT:SUCCESS]]', taskId: 'task-test', type: 'thought' },
+      type: 'event',
+    });
+
+    expect(state.thought).toContain('HANDLE_RESULT');
+
+    state = agentStreamReducer(state, {
+      event: { content: 'Done', role: 'assistant', taskId: 'task-test', type: 'message' },
+      type: 'event',
+    });
+
+    expect(state.finalMessage).toBe('Done');
+    expect(state.thought).toBe('');
+  });
+
+
   it('keeps the last 10 browser screenshots', () => {
     let state = initialState;
 

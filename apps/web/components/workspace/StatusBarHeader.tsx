@@ -84,9 +84,12 @@ export function StatusBarHeader({ state, task }: StatusBarHeaderProps) {
       <StatusDot status={dotStatus(status)} pulsing={status !== 'STOPPED' && status !== 'ERROR'} size="lg" />
       <div className="flex min-w-0 flex-col gap-px">
         <h1 className="truncate text-[13.5px] font-medium tracking-[-0.01em] text-text-primary">
-          {task?.goal ?? 'Task in progress'}
+          {task?.projectName ?? 'Project'}
         </h1>
         <p className="truncate text-[11px] text-text-tertiary">
+          {task?.conversationTitle ? (
+            <span className="mr-2 text-text-muted">{task.conversationTitle}</span>
+          ) : null}
           <span className={cn(status === 'ERROR' ? 'text-status-error' : 'text-accent', 'font-medium')}>{statusSubtitle(state)}</span>
         </p>
       </div>

@@ -35,6 +35,15 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
   const [resolvedApprovalIds, setResolvedApprovalIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [chatWidth, setChatWidth] = useState(64);
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("handle.workspace.chatWidth");
+    if (saved) {
+      const parsed = Number.parseFloat(saved);
+      if (Number.isFinite(parsed)) setChatWidth(Math.min(78, Math.max(45, parsed)));
+    }
+  }, []);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -97,14 +106,51 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <StatusBarHeader state={state} task={task} />
-      <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)_320px] overflow-hidden">
+      <div
+        className="grid min-h-0 flex-1 overflow-hidden"
+        style={{ gridTemplateColumns: `${chatWidth}% 6px minmax(0, 1fr)` }}
+      >
         <LeftPane state={state} task={task} />
-        <CenterPane state={state} taskId={taskId} />
-        <RightInspector
-          approvals={approvals}
-          onReviewApproval={setSelectedApproval}
-          state={state}
+        <button
+          aria-label="Resize chat pane"
+          className="cursor-col-resize border-x border-border-subtle bg-bg-canvas hover:bg-bg-subtle"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            const startX = event.clientX;
+            const startWidth = chatWidth;
+            const container = event.currentTarget.parentElement;
+            const totalWidth = container?.getBoundingClientRect().width ?? window.innerWidth;
+            let currentWidth = startWidth;
+
+            function onMove(moveEvent: MouseEvent) {
+              const deltaPercent = ((moveEvent.clientX - startX) / totalWidth) * 100;
+              const next = Math.min(78, Math.max(45, startWidth + deltaPercent));
+              currentWidth = next;
+              setChatWidth(next);
+            }
+
+            function onUp() {
+              window.localStorage.setItem(
+                "handle.workspace.chatWidth",
+                String(currentWidth),
+              );
+              document.removeEventListener("mousemove", onMove);
+              document.removeEventListener("mouseup", onUp);
+            }
+
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+          }}
+          type="button"
         />
+        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_300px] overflow-hidden">
+          <CenterPane state={state} taskId={taskId} />
+          <RightInspector
+            approvals={approvals}
+            onReviewApproval={setSelectedApproval}
+            state={state}
+          />
+        </div>
       </div>
       <BottomComposer task={task} />
       {modalApproval && (

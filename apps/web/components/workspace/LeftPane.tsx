@@ -203,7 +203,7 @@ function latestToolCall(toolCalls: ToolCallState[], status?: ToolCallState['stat
 }
 
 export function LeftPane({ state, task }: LeftPaneProps) {
-  const [tab, setTab] = useState<LeftTab>('plan');
+  const [tab, setTab] = useState<LeftTab>('chat');
 
   return (
     <aside className="flex min-h-0 flex-col border-r border-border-subtle">
