@@ -497,6 +497,48 @@ screens. Phase 1 added smoke:web-signin and smoke:e2e-task as the
 floor. Each phase adds more.
 
 ==================================================
+RULE 30: LLM PROVIDER PARAMETER RESTRICTIONS WARRANT EXPLICIT SUPPRESSION
+==================================================
+
+When integrating any new LLM provider, audit LangChain (or
+equivalent) defaults that may be sent in request bodies. Explicitly
+suppress sampler parameters from outgoing requests unless the user
+explicitly configures them.
+
+Sampler parameters include:
+- temperature
+- top_p
+- top_k
+- n
+- presence_penalty
+- frequency_penalty
+
+Add a unit test asserting outgoing request bodies do not include
+these params for new providers. This applies retroactively to all
+providers added in Phases 2-11.
+
+==================================================
+RULE 31: WHEN A REAL-WORLD TEST SURFACES A BUG, ADD DIAGNOSTIC LOGGING FIRST, THEN FIX
+==================================================
+
+If a smoke test or live integration fails with insufficient
+information to diagnose, the next commit must add diagnostic logging,
+not a speculative fix.
+
+Diagnostic logging should capture the useful evidence needed to
+debug the failure:
+- Request bodies with secrets redacted
+- Response bodies with secrets redacted
+- Error stacks
+- Timing
+- Provider/model/runtime identifiers
+
+Only after diagnostic data is available should the fix commit follow.
+This pattern prevents speculation-driven thrashing where each "fix"
+introduces new failure modes. Phase 2 surfaced this discipline through
+the KIMI, OAuth, and plan-generation debug cycles.
+
+==================================================
 COORDINATION: WHEN TO STOP AND ASK
 ==================================================
 
