@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 import type { Browser, BrowserContext, BrowserType, Page } from 'playwright';
 import { logger } from '../lib/logger';
+import type { ApprovalDecision } from '../approvals/approvalWaiter';
 import {
   classifyBrowserAction,
   hostMatchesTrustedDomains,
@@ -21,16 +22,27 @@ import type {
   BrowserSessionLogger,
   BrowserTimeoutOptions,
 } from './browserSession';
+import type { SafetyGovernor } from './safetyGovernor';
 
 export type LocalBrowserMode = 'separate-profile' | 'actual-chrome';
 
+export type ActualChromeApprovalRequester = (
+  taskId: string,
+  request: ApprovalPayload,
+  options?: { timeoutMs?: number },
+) => Promise<ApprovalDecision>;
+
 export interface LocalBrowserSessionOptions {
   approval?: BrowserActionApproval;
+  approvalTimeoutMs?: number;
+  actualChromeEndpoint?: string;
   browserChannel?: string;
-  chromium?: Pick<BrowserType, 'launchPersistentContext'>;
+  chromium?: Pick<BrowserType, 'connectOverCDP' | 'launchPersistentContext'>;
   logger?: BrowserSessionLogger;
-  mode?: Extract<LocalBrowserMode, 'separate-profile'>;
+  mode?: LocalBrowserMode;
   profileDir?: string;
+  requestApproval?: ActualChromeApprovalRequester;
+  safetyGovernor?: SafetyGovernor;
   taskId: string;
   userAgent?: string;
   viewport?: { height: number; width: number };
@@ -44,8 +56,12 @@ interface ActionSummary {
 }
 
 const DEFAULT_VIEWPORT = { height: 800, width: 1280 };
+const DEFAULT_ACTUAL_CHROME_ENDPOINT = 'http://127.0.0.1:9222';
+const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const ACTUAL_CHROME_REASON =
+  'Connect to your actual Chrome? Agent will see your open tabs, logged-in sessions, saved passwords visible to extensions, and browsing history.';
 
 export function defaultLocalBrowserProfileDir() {
   return join(homedir(), '.config', 'handle', 'chrome-profile');
@@ -72,9 +88,11 @@ export class LocalBrowserSession implements BrowserSession {
   private ready = false;
 
   private readonly browserChannel: string;
-  private readonly chromium: Pick<BrowserType, 'launchPersistentContext'>;
+  private readonly actualChromeEndpoint: string;
+  private readonly approvalTimeoutMs: number;
+  private readonly chromium: Pick<BrowserType, 'connectOverCDP' | 'launchPersistentContext'>;
   private readonly logger: BrowserSessionLogger;
-  private readonly mode: Extract<LocalBrowserMode, 'separate-profile'>;
+  private readonly mode: LocalBrowserMode;
   private readonly profileDir: string;
   private readonly taskId: string;
   private readonly userAgent: string;
@@ -82,6 +100,8 @@ export class LocalBrowserSession implements BrowserSession {
 
   constructor(private readonly options: LocalBrowserSessionOptions) {
     this.browserChannel = options.browserChannel ?? 'chrome';
+    this.actualChromeEndpoint = options.actualChromeEndpoint ?? DEFAULT_ACTUAL_CHROME_ENDPOINT;
+    this.approvalTimeoutMs = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
     this.chromium = options.chromium ?? chromium;
     this.logger = options.logger ?? logger;
     this.mode = options.mode ?? 'separate-profile';
@@ -219,7 +239,11 @@ export class LocalBrowserSession implements BrowserSession {
     );
 
     try {
-      await this.context?.close();
+      if (this.mode === 'actual-chrome') {
+        await this.browser?.close({ reason: 'Handle actual Chrome session disconnected' });
+      } else {
+        await this.context?.close();
+      }
       this.browser = null;
       this.context = null;
       this.page = null;
@@ -254,15 +278,24 @@ export class LocalBrowserSession implements BrowserSession {
       'Local browser session creation started',
     );
 
-    await fs.mkdir(this.profileDir, { recursive: true });
-    this.context = await this.chromium.launchPersistentContext(this.profileDir, {
-      args: [`--window-size=${this.viewport.width},${this.viewport.height}`],
-      channel: this.browserChannel,
-      headless: false,
-      userAgent: this.userAgent,
-      viewport: this.viewport,
-    });
-    this.browser = this.context.browser();
+    if (this.mode === 'actual-chrome') {
+      await this.requireActualChromeApproval();
+      this.browser = await this.chromium.connectOverCDP(this.actualChromeEndpoint, { timeout: 10_000 });
+      this.context = this.browser.contexts()[0] ?? null;
+      if (!this.context) {
+        throw new Error('Actual Chrome CDP connection exposed no browser contexts');
+      }
+    } else {
+      await fs.mkdir(this.profileDir, { recursive: true });
+      this.context = await this.chromium.launchPersistentContext(this.profileDir, {
+        args: [`--window-size=${this.viewport.width},${this.viewport.height}`],
+        channel: this.browserChannel,
+        headless: false,
+        userAgent: this.userAgent,
+        viewport: this.viewport,
+      });
+      this.browser = this.context.browser();
+    }
     this.page = this.context.pages()[0] ?? (await this.context.newPage());
     await this.page.bringToFront().catch(() => undefined);
     this.ready = true;
@@ -270,6 +303,7 @@ export class LocalBrowserSession implements BrowserSession {
     this.logger.info(
       {
         browserChannel: this.browserChannel,
+        cdpEndpoint: this.mode === 'actual-chrome' ? this.actualChromeEndpoint : undefined,
         durationMs: durationSince(startedAt),
         mode: this.mode,
         profileDir: this.profileDir,
@@ -391,6 +425,42 @@ export class LocalBrowserSession implements BrowserSession {
         },
         'Local browser action risk classification complete',
       );
+    }
+  }
+
+  private async requireActualChromeApproval() {
+    const requestApproval = this.options.requestApproval;
+    const safetyGovernor = this.options.safetyGovernor;
+    if (!requestApproval || !safetyGovernor) {
+      throw new Error('Actual Chrome mode requires approval and audit-log configuration');
+    }
+
+    const startedAt = Date.now();
+    let decision: ApprovalDecision | undefined;
+    let approved = false;
+
+    try {
+      decision = await requestApproval(
+        this.taskId,
+        {
+          reason: ACTUAL_CHROME_REASON,
+          type: 'browser_use_actual_chrome',
+        },
+        { timeoutMs: this.approvalTimeoutMs },
+      );
+      approved = decision === 'approved';
+    } finally {
+      await safetyGovernor.writeAuditEntry({
+        action: 'browser_use_actual_chrome',
+        approvalDurationMs: durationSince(startedAt),
+        approved,
+        decision: 'approve',
+        target: this.actualChromeEndpoint,
+      });
+    }
+
+    if (!approved) {
+      throw new Error(decision === 'timeout' ? 'Actual Chrome approval timed out' : 'User denied actual Chrome connection');
     }
   }
 

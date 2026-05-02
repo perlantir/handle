@@ -220,12 +220,12 @@ export class LocalBackend implements ExecutionBackend {
 
   async browserSession(options: ExecutionBrowserSessionOptions = {}): Promise<BrowserSession> {
     if (!this.browser) {
-      if (this.browserMode !== 'separate-profile') {
-        throw new Error(`Local browser mode ${this.browserMode} is implemented in a later Phase 4 step`);
-      }
       this.browser = await createLocalBrowserSession({
         ...(options.approval ? { approval: options.approval } : {}),
+        approvalTimeoutMs: this.approvalTimeoutMs,
         mode: this.browserMode,
+        requestApproval: this.requestApproval,
+        safetyGovernor: this.safetyGovernor,
         taskId: this.taskId,
       });
     }

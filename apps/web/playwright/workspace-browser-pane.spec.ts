@@ -142,4 +142,32 @@ test.describe("Workspace Browser Pane", () => {
       .poll(() => responses)
       .toContainEqual({ approvalId: "approval-browser-1", decision: "approved" });
   });
+
+  test("requires explicit understanding before approving actual Chrome access", async ({ page }) => {
+    const taskId = "task-actual-chrome-ui";
+    const { responses } = await mockWorkspaceApis(page, taskId, {
+      reason:
+        "Connect to your actual Chrome? Agent will see your open tabs, logged-in sessions, saved passwords visible to extensions, and browsing history.",
+      type: "browser_use_actual_chrome",
+    });
+
+    await page.goto(`/tasks/${taskId}`);
+
+    await expect(page.getByRole("heading", { name: "Connect to your actual Chrome?" })).toBeVisible();
+    await expect(page.getByText("Agent will see: any tab you have open")).toBeVisible();
+    await expect(page.getByText("Agent will see: your logged-in sessions to all sites")).toBeVisible();
+    await expect(page.getByText("Agent will see: saved passwords visible to extensions")).toBeVisible();
+    await expect(page.getByText("Agent will see: browsing history")).toBeVisible();
+
+    const approve = page.getByRole("button", { name: "Approve" });
+    await expect(approve).toBeDisabled();
+
+    await page.getByRole("switch", { name: "I understand actual Chrome access risks" }).click();
+    await expect(approve).toBeEnabled();
+    await approve.click();
+
+    await expect
+      .poll(() => responses)
+      .toContainEqual({ approvalId: "approval-browser-1", decision: "approved" });
+  });
 });
