@@ -1,5 +1,5 @@
-import { createE2BSandbox } from "../execution/e2bBackend";
-import type { E2BSandboxLike } from "../execution/types";
+import { E2BBackend, type E2BBackendOptions } from "../execution/e2bBackend";
+import type { E2BSandboxLike, ExecutionBackend } from "../execution/types";
 import { createBrowserDesktopSandbox } from "../execution/browserSession";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { emitTaskEvent } from "../lib/eventBus";
@@ -101,18 +101,23 @@ interface ProviderRegistryLike {
   initialize(): Promise<void>;
 }
 
+interface AgentExecutionBackend extends ExecutionBackend {
+  getSandbox(): E2BSandboxLike;
+}
+
 interface RunAgentDependencies {
   createAgent?: (
     context: {
+      backend: ExecutionBackend;
       sandbox: E2BSandboxLike;
       taskId: string;
       trustedDomains?: string[];
     },
     options: { llm: BaseChatModel },
   ) => Promise<AgentLike>;
+  createBackend?: (options?: E2BBackendOptions) => AgentExecutionBackend;
   createDesktopSandbox?: typeof createBrowserDesktopSandbox;
   createComputerUseTools?: typeof createComputerUseToolDefinitions;
-  createSandbox?: typeof createE2BSandbox;
   emitEvent?: typeof emitTaskEvent;
   emitPlan?: typeof emitInitialPlan;
   isSmokeEnabled?: typeof isSmokeAgentEnabled;
@@ -190,9 +195,9 @@ async function withTimeout<T>(
 
 export function createAgentRunner({
   createAgent = createHandleAgent,
+  createBackend = (options) => new E2BBackend(options),
   createComputerUseTools = createComputerUseToolDefinitions,
   createDesktopSandbox = createBrowserDesktopSandbox,
-  createSandbox = createE2BSandbox,
   emitEvent = emitTaskEvent,
   emitPlan = emitInitialPlan,
   isSmokeEnabled = isSmokeAgentEnabled,
@@ -210,6 +215,7 @@ export function createAgentRunner({
       return;
     }
 
+    let backend: AgentExecutionBackend | null = null;
     let sandbox: E2BSandboxLike | null = null;
 
     try {
@@ -287,11 +293,19 @@ export function createAgentRunner({
         { shouldUseDesktopSandbox, taskId },
         "Selecting task sandbox runtime",
       );
-      sandbox = shouldUseDesktopSandbox
-        ? ((await createDesktopSandbox({
-            resolution: [1280, 800],
-          })) as unknown as E2BSandboxLike)
-        : await createSandbox();
+      if (shouldUseDesktopSandbox) {
+        const desktopSandbox = (await createDesktopSandbox({
+          resolution: [1280, 800],
+        })) as unknown as E2BSandboxLike;
+        backend = createBackend({
+          installCommonPackages: false,
+          sandbox: desktopSandbox,
+        });
+      } else {
+        backend = createBackend();
+      }
+      await backend.initialize(taskId);
+      sandbox = backend.getSandbox();
       await store.task.update({
         data: { sandboxId: sandbox.sandboxId },
         where: { id: taskId },
@@ -311,7 +325,7 @@ export function createAgentRunner({
         const finalMessage = redactSecrets(
           await computerUseTool.implementation(
             { goal, maxIterations: 4 },
-            { sandbox, taskId, trustedDomains },
+            { backend, sandbox, taskId, trustedDomains },
           ),
         );
 
@@ -333,7 +347,7 @@ export function createAgentRunner({
       }
 
       const agent = await createAgent(
-        { taskId, sandbox, trustedDomains },
+        { backend, taskId, sandbox, trustedDomains },
         { llm: model },
       );
       const stream = await agent.streamEvents(
@@ -412,9 +426,9 @@ export function createAgentRunner({
       emitEvent({ type: "error", message, taskId });
       emitEvent({ type: "status_update", status: "ERROR", taskId });
     } finally {
-      if (sandbox) {
-        await sandbox.kill().catch((err) => {
-          logger.warn({ err, taskId }, "Failed to kill E2B sandbox");
+      if (backend) {
+        await backend.shutdown(taskId).catch((err) => {
+          logger.warn({ err, taskId }, "Failed to shut down execution backend");
         });
       }
     }

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { subscribeToTask } from '../lib/eventBus';
 import { createPhase1ToolDefinitions } from './tools';
-import type { E2BSandboxLike } from '../execution/types';
+import type { E2BSandboxLike, ExecutionBackend } from '../execution/types';
+import type { ToolExecutionContext } from './toolRegistry';
 
 function createMockSandbox(): E2BSandboxLike {
   return {
@@ -32,6 +33,47 @@ function createMockSandbox(): E2BSandboxLike {
   };
 }
 
+function createMockBackend(sandbox: E2BSandboxLike = createMockSandbox()): ExecutionBackend {
+  return {
+    id: 'e2b',
+    async browserSession() {
+      throw new Error('browser not used in this test');
+    },
+    async fileDelete(path) {
+      await sandbox.files.remove?.(path);
+    },
+    async fileList(path) {
+      return (await sandbox.files.list(path)).map((entry) => ({
+        isDir: false,
+        name: typeof entry === 'object' && entry && 'name' in entry ? String(entry.name) : String(entry),
+        size: 0,
+      }));
+    },
+    async fileRead(path) {
+      return sandbox.files.read(path, { format: 'text' });
+    },
+    async fileWrite(path, content) {
+      await sandbox.files.write(path, content);
+    },
+    getWorkspaceDir() {
+      return '/home/user';
+    },
+    async initialize() {},
+    async shellExec(command, opts) {
+      return sandbox.commands.run(command, opts);
+    },
+    async shutdown() {},
+  };
+}
+
+function context(taskId: string, sandbox = createMockSandbox()): ToolExecutionContext {
+  return {
+    backend: createMockBackend(sandbox),
+    sandbox,
+    taskId,
+  };
+}
+
 describe('phase 1 tools', () => {
   it('exposes registry metadata for all Phase 1 tools', () => {
     const definitions = createPhase1ToolDefinitions();
@@ -56,7 +98,7 @@ describe('phase 1 tools', () => {
 
     const result = await shellExec.implementation(
       { command: 'printf hello' },
-      { taskId: 'task-tools', sandbox: createMockSandbox() },
+      context('task-tools'),
     );
 
     unsubscribe();
@@ -74,17 +116,19 @@ describe('phase 1 tools', () => {
 
   it('reads, writes, and lists files through the sandbox', async () => {
     const definitions = createPhase1ToolDefinitions();
-    const context = { taskId: 'task-files', sandbox: createMockSandbox() };
+    const toolContext = context('task-files');
     const fileWrite = definitions.find((definition) => definition.name === 'file_write');
     const fileRead = definitions.find((definition) => definition.name === 'file_read');
     const fileList = definitions.find((definition) => definition.name === 'file_list');
 
     if (!fileWrite || !fileRead || !fileList) throw new Error('file tool definition missing');
 
-    await expect(fileWrite.implementation({ path: '/tmp/a.txt', content: 'abc' }, context)).resolves.toContain(
+    await expect(fileWrite.implementation({ path: '/tmp/a.txt', content: 'abc' }, toolContext)).resolves.toContain(
       'Wrote 3 bytes',
     );
-    await expect(fileRead.implementation({ path: '/tmp/a.txt' }, context)).resolves.toBe('content from /tmp/a.txt');
-    await expect(fileList.implementation({ path: '/tmp' }, context)).resolves.toContain('example.txt');
+    await expect(fileRead.implementation({ path: '/tmp/a.txt' }, toolContext)).resolves.toBe(
+      'content from /tmp/a.txt',
+    );
+    await expect(fileList.implementation({ path: '/tmp' }, toolContext)).resolves.toContain('example.txt');
   });
 });

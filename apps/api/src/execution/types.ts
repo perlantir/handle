@@ -1,4 +1,4 @@
-import type { BrowserSession } from './browserSession';
+import type { BrowserActionApproval, BrowserSession } from './browserSession';
 
 export type BackendId = 'e2b' | 'local';
 
@@ -21,6 +21,10 @@ export interface ExecutionFileEntry {
   size: number;
 }
 
+export interface ExecutionBrowserSessionOptions {
+  approval?: BrowserActionApproval;
+}
+
 export interface ExecutionBackend {
   id: BackendId;
   initialize(taskId: string): Promise<void>;
@@ -32,7 +36,7 @@ export interface ExecutionBackend {
   fileWrite(path: string, content: string): Promise<void>;
 
   getWorkspaceDir(): string;
-  browserSession(): Promise<BrowserSession>;
+  browserSession(options?: ExecutionBrowserSessionOptions): Promise<BrowserSession>;
   shellExec(command: string, opts: ExecutionCommandOptions): Promise<ExecutionCommandResult>;
 }
 

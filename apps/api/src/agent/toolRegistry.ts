@@ -2,12 +2,13 @@ import { tool } from '@langchain/core/tools';
 import type { SideEffectClass } from '@handle/shared';
 import type { z } from 'zod';
 import type { BrowserSession } from '../execution/browserSession';
-import type { E2BSandboxLike } from '../execution/types';
+import type { E2BSandboxLike, ExecutionBackend } from '../execution/types';
 
 export type ApprovalRequirement = boolean | ((input: unknown, context: ToolExecutionContext) => boolean | Promise<boolean>);
 
 export interface ToolExecutionContext {
   taskId: string;
+  backend: ExecutionBackend;
   browserSession?: BrowserSession;
   sandbox: E2BSandboxLike;
   trustedDomains?: string[];

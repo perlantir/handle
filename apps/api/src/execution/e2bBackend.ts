@@ -3,6 +3,7 @@ import { createBrowserSession, type BrowserSession } from './browserSession';
 import type {
   E2BSandboxLike,
   ExecutionBackend,
+  ExecutionBrowserSessionOptions,
   ExecutionCommandOptions,
   ExecutionCommandResult,
   ExecutionFileEntry,
@@ -112,9 +113,12 @@ export class E2BBackend implements ExecutionBackend {
     await this.getSandbox().files.write(path, content);
   }
 
-  async browserSession() {
+  async browserSession(options: ExecutionBrowserSessionOptions = {}) {
     if (!this.browser) {
-      this.browser = createBrowserSession({ sandbox: this.getSandbox() });
+      this.browser = createBrowserSession({
+        ...(options.approval ? { approval: options.approval } : {}),
+        sandbox: this.getSandbox(),
+      });
     }
 
     return this.browser;

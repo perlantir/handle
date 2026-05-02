@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { awaitApproval } from "../approvals/approvalWaiter";
-import { createBrowserSession, type BrowserSession } from "../execution/browserSession";
+import type { BrowserSession } from "../execution/browserSession";
 import { emitBrowserScreenshotEvent } from "../lib/browserScreenshotEvents";
 import { emitTaskEvent } from "../lib/eventBus";
 import { redactSecrets } from "../lib/redact";
@@ -96,16 +96,15 @@ function redactArgs(args: Record<string, unknown>) {
   return redacted;
 }
 
-function getBrowserSession(context: ToolExecutionContext): BrowserSession {
+async function getBrowserSession(context: ToolExecutionContext): Promise<BrowserSession> {
   if (context.browserSession) return context.browserSession;
 
-  context.browserSession = createBrowserSession({
+  context.browserSession = await context.backend.browserSession({
     approval: {
       requestApproval: ({ request, taskId }) => awaitApproval(taskId, request),
       taskId: context.taskId,
       trustedDomains: context.trustedDomains ?? [],
     },
-    sandbox: context.sandbox,
   });
   return context.browserSession;
 }
@@ -155,7 +154,8 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
         emitBrowserToolStream(context, callId, `Navigating to ${parsed.url}`);
 
         try {
-          const result = await getBrowserSession(context).navigate(parsed.url);
+          const session = await getBrowserSession(context);
+          const result = await session.navigate(parsed.url);
           emitBrowserToolStream(
             context,
             callId,
@@ -184,7 +184,8 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
         emitBrowserToolStream(context, callId, `Clicking selector ${parsed.selector}`);
 
         try {
-          const result = await getBrowserSession(context).click(parsed.selector, {
+          const session = await getBrowserSession(context);
+          const result = await session.click(parsed.selector, {
             includeScreenshot: true,
             ...(parsed.timeoutMs ? { timeoutMs: parsed.timeoutMs } : {}),
           });
@@ -218,7 +219,8 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
         );
 
         try {
-          const result = await getBrowserSession(context).type(parsed.selector, parsed.text, {
+          const session = await getBrowserSession(context);
+          const result = await session.type(parsed.selector, parsed.text, {
             includeScreenshot: true,
             ...(parsed.timeoutMs ? { timeoutMs: parsed.timeoutMs } : {}),
           });
@@ -249,7 +251,8 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
         );
 
         try {
-          const text = await getBrowserSession(context).extractText(parsed.selector);
+          const session = await getBrowserSession(context);
+          const text = await session.extractText(parsed.selector);
           const redacted = redactSecrets(text);
           emitBrowserToolStream(
             context,
@@ -276,7 +279,8 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
         emitBrowserToolStream(context, callId, "Taking browser screenshot");
 
         try {
-          const image = await getBrowserSession(context).screenshot();
+          const session = await getBrowserSession(context);
+          const image = await session.screenshot();
           emitBrowserToolStream(
             context,
             callId,
@@ -305,7 +309,8 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
         emitBrowserToolStream(context, callId, "Going back in browser history");
 
         try {
-          const result = await getBrowserSession(context).goBack({
+          const session = await getBrowserSession(context);
+          const result = await session.goBack({
             ...(parsed.timeoutMs ? { timeoutMs: parsed.timeoutMs } : {}),
           });
           const output = `Went back. Current URL: ${result.url}. Title: "${result.title}".`;
@@ -333,7 +338,8 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
         emitBrowserToolStream(context, callId, `Scrolling ${parsed.direction} by ${amount}px`);
 
         try {
-          const result = await getBrowserSession(context).scroll(parsed.direction, amount);
+          const session = await getBrowserSession(context);
+          const result = await session.scroll(parsed.direction, amount);
           emitBrowserScreenshot(context, callId, result.screenshot);
           const output = `Scrolled ${parsed.direction} by ${amount}px. Current URL: ${result.url}.`;
           emitBrowserToolResult(context, callId, output);
@@ -356,7 +362,8 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
         emitBrowserToolStream(context, callId, `Waiting for selector ${parsed.selector}`);
 
         try {
-          const result = await getBrowserSession(context).waitForSelector(parsed.selector, {
+          const session = await getBrowserSession(context);
+          const result = await session.waitForSelector(parsed.selector, {
             ...(parsed.timeoutMs ? { timeoutMs: parsed.timeoutMs } : {}),
           });
           const output = `Selector ${parsed.selector} is visible. Current URL: ${result.url}.`;

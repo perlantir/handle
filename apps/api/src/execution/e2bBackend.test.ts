@@ -79,8 +79,12 @@ describe('E2B sandbox setup', () => {
     await expect(backend.fileList('/tmp')).resolves.toEqual([{ isDir: false, name: 'example.txt', size: 12 }]);
     await expect(
       backend.shellExec('printf hello', {
-        onStderr: (line) => stderr.push(line),
-        onStdout: (line) => stdout.push(line),
+        onStderr: (line) => {
+          stderr.push(line);
+        },
+        onStdout: (line) => {
+          stdout.push(line);
+        },
       }),
     ).resolves.toEqual({ exitCode: 0, stderr: 'warn', stdout: 'hello' });
 

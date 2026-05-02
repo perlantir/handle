@@ -1,6 +1,6 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { describe, expect, it, vi } from "vitest";
-import type { E2BSandboxLike } from "../execution/types";
+import type { E2BSandboxLike, ExecutionBackend } from "../execution/types";
 import type { ProviderId, ProviderInstance } from "../providers/types";
 import { createAgentRunner } from "./runAgent";
 
@@ -38,6 +38,36 @@ function sandbox(): E2BSandboxLike {
   };
 }
 
+function backendForSandbox(testSandbox: E2BSandboxLike) {
+  return {
+    id: "e2b",
+    async browserSession() {
+      throw new Error("browser not used in this test");
+    },
+    async fileDelete(path: string) {
+      await testSandbox.files.remove?.(path);
+    },
+    async fileList() {
+      return [];
+    },
+    async fileRead() {
+      return "";
+    },
+    async fileWrite() {},
+    getSandbox() {
+      return testSandbox;
+    },
+    getWorkspaceDir() {
+      return "/home/user";
+    },
+    initialize: vi.fn().mockResolvedValue(undefined),
+    async shellExec() {
+      return { exitCode: 0, stderr: "", stdout: "" };
+    },
+    shutdown: vi.fn().mockResolvedValue(undefined),
+  } satisfies ExecutionBackend & { getSandbox(): E2BSandboxLike };
+}
+
 async function* successfulStream() {
   yield {
     data: { output: { output: "Done [[HANDLE_RESULT:SUCCESS]]" } },
@@ -49,7 +79,8 @@ async function* successfulStream() {
 describe("createAgentRunner", () => {
   it("initializes providers and passes the selected model into the agent", async () => {
     const testSandbox = sandbox();
-    const createSandbox = vi.fn().mockResolvedValue(testSandbox);
+    const backend = backendForSandbox(testSandbox);
+    const createBackend = vi.fn().mockReturnValue(backend);
     const createAgent = vi.fn().mockResolvedValue({
       streamEvents: vi.fn().mockReturnValue(successfulStream()),
     });
@@ -76,7 +107,7 @@ describe("createAgentRunner", () => {
     const emitPlan = vi.fn().mockResolvedValue(undefined);
     const runner = createAgentRunner({
       createAgent,
-      createSandbox,
+      createBackend,
       emitEvent,
       emitPlan,
       isSmokeEnabled: () => false,
@@ -102,14 +133,14 @@ describe("createAgentRunner", () => {
       },
     });
     expect(createAgent).toHaveBeenCalledWith(
-      { sandbox: testSandbox, taskId: "task-test", trustedDomains: [] },
+      { backend, sandbox: testSandbox, taskId: "task-test", trustedDomains: [] },
       { llm: fakeModel },
     );
     expect(store.task.update).toHaveBeenCalledWith({
       data: { status: "STOPPED" },
       where: { id: "task-test" },
     });
-    expect(testSandbox.kill).toHaveBeenCalledOnce();
+    expect(backend.shutdown).toHaveBeenCalledWith("task-test");
     expect(emitEvent).toHaveBeenCalledWith({
       type: "status_update",
       status: "STOPPED",
@@ -119,6 +150,7 @@ describe("createAgentRunner", () => {
 
   it("uses an explicit provider override before the stored task override", async () => {
     const testSandbox = sandbox();
+    const createBackend = vi.fn().mockReturnValue(backendForSandbox(testSandbox));
     const selectedProvider = provider("openrouter", "openrouter/auto");
     const providerRegistry = {
       getActiveModel: vi.fn().mockResolvedValue({
@@ -131,7 +163,7 @@ describe("createAgentRunner", () => {
       createAgent: vi.fn().mockResolvedValue({
         streamEvents: vi.fn().mockReturnValue(successfulStream()),
       }),
-      createSandbox: vi.fn().mockResolvedValue(testSandbox),
+      createBackend,
       emitEvent: vi.fn(),
       emitPlan: vi.fn().mockResolvedValue(undefined),
       isSmokeEnabled: () => false,
@@ -162,7 +194,9 @@ describe("createAgentRunner", () => {
   it("routes browser and desktop goals to the E2B Desktop sandbox", async () => {
     const headlessSandbox = sandbox();
     const desktopSandbox = { ...sandbox(), sandboxId: "desktop-sandbox-test" };
-    const createSandbox = vi.fn().mockResolvedValue(headlessSandbox);
+    const createBackend = vi.fn((options) =>
+      backendForSandbox(options?.sandbox ?? headlessSandbox),
+    );
     const createDesktopSandbox = vi.fn().mockResolvedValue(desktopSandbox);
     const createAgent = vi.fn().mockResolvedValue({
       streamEvents: vi.fn().mockReturnValue(successfulStream()),
@@ -170,8 +204,8 @@ describe("createAgentRunner", () => {
     const selectedProvider = provider("openai", "gpt-4o");
     const runner = createAgentRunner({
       createAgent,
+      createBackend,
       createDesktopSandbox,
-      createSandbox,
       emitEvent: vi.fn(),
       emitPlan: vi.fn().mockResolvedValue(undefined),
       isSmokeEnabled: () => false,
@@ -201,9 +235,13 @@ describe("createAgentRunner", () => {
     expect(createDesktopSandbox).toHaveBeenCalledWith({
       resolution: [1280, 800],
     });
-    expect(createSandbox).not.toHaveBeenCalled();
+    expect(createBackend).toHaveBeenCalledWith({
+      installCommonPackages: false,
+      sandbox: desktopSandbox,
+    });
     expect(createAgent).toHaveBeenCalledWith(
       {
+        backend: expect.objectContaining({ id: "e2b" }),
         sandbox: desktopSandbox,
         taskId: "task-desktop-test",
         trustedDomains: [],
@@ -214,6 +252,9 @@ describe("createAgentRunner", () => {
 
   it("runs pure desktop screenshot goals directly through computer_use", async () => {
     const desktopSandbox = { ...sandbox(), sandboxId: "desktop-direct-test" };
+    const createBackend = vi.fn((options) =>
+      backendForSandbox(options?.sandbox ?? desktopSandbox),
+    );
     const createAgent = vi.fn();
     const createComputerUseTools = vi.fn().mockReturnValue([
       {
@@ -237,9 +278,9 @@ describe("createAgentRunner", () => {
     const emitEvent = vi.fn();
     const runner = createAgentRunner({
       createAgent,
+      createBackend,
       createComputerUseTools,
       createDesktopSandbox: vi.fn().mockResolvedValue(desktopSandbox),
-      createSandbox: vi.fn(),
       emitEvent,
       emitPlan: vi.fn().mockResolvedValue(undefined),
       isSmokeEnabled: () => false,
@@ -265,6 +306,7 @@ describe("createAgentRunner", () => {
         maxIterations: 4,
       },
       {
+        backend: expect.objectContaining({ id: "e2b" }),
         sandbox: desktopSandbox,
         taskId: "task-direct-computer-use-test",
         trustedDomains: [],
@@ -293,15 +335,15 @@ describe("createAgentRunner", () => {
 
   it("keeps non-browser goals on the standard E2B sandbox", async () => {
     const headlessSandbox = sandbox();
-    const createSandbox = vi.fn().mockResolvedValue(headlessSandbox);
+    const createBackend = vi.fn().mockReturnValue(backendForSandbox(headlessSandbox));
     const createDesktopSandbox = vi.fn();
     const selectedProvider = provider("openai", "gpt-4o");
     const runner = createAgentRunner({
       createAgent: vi.fn().mockResolvedValue({
         streamEvents: vi.fn().mockReturnValue(successfulStream()),
       }),
+      createBackend,
       createDesktopSandbox,
-      createSandbox,
       emitEvent: vi.fn(),
       emitPlan: vi.fn().mockResolvedValue(undefined),
       isSmokeEnabled: () => false,
@@ -328,12 +370,12 @@ describe("createAgentRunner", () => {
       "Write a Python script that prints hello world.",
     );
 
-    expect(createSandbox).toHaveBeenCalledOnce();
+    expect(createBackend).toHaveBeenCalledWith();
     expect(createDesktopSandbox).not.toHaveBeenCalled();
   });
 
   it("marks the task errored when plan generation fails before sandbox creation", async () => {
-    const createSandbox = vi.fn();
+    const createBackend = vi.fn();
     const selectedProvider = provider("openai", "gpt-4o");
     const providerRegistry = {
       getActiveModel: vi.fn().mockResolvedValue({
@@ -354,7 +396,7 @@ describe("createAgentRunner", () => {
     const emitEvent = vi.fn();
     const runner = createAgentRunner({
       createAgent: vi.fn(),
-      createSandbox,
+      createBackend,
       emitEvent,
       emitPlan: vi.fn().mockRejectedValue(new Error("planner unavailable")),
       isSmokeEnabled: () => false,
@@ -364,7 +406,7 @@ describe("createAgentRunner", () => {
 
     await runner("task-test", "Do the thing");
 
-    expect(createSandbox).not.toHaveBeenCalled();
+    expect(createBackend).not.toHaveBeenCalled();
     expect(store.task.update).toHaveBeenCalledWith({
       data: { status: "ERROR" },
       where: { id: "task-test" },

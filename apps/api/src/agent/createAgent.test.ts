@@ -4,6 +4,7 @@ import type { ChatResult } from "@langchain/core/outputs";
 import { FakeStreamingChatModel } from "@langchain/core/utils/testing";
 import { describe, expect, it } from "vitest";
 import { createHandleAgent, createPhase1Agent } from "./createAgent";
+import { E2BBackend } from "../execution/e2bBackend";
 import type { E2BSandboxLike } from "../execution/types";
 
 function structuredText(text: string) {
@@ -66,14 +67,22 @@ const sandbox: E2BSandboxLike = {
   async kill() {},
 };
 
+function context(taskId: string, taskSandbox: E2BSandboxLike = sandbox) {
+  return {
+    backend: new E2BBackend({
+      installCommonPackages: false,
+      sandbox: taskSandbox,
+    }),
+    sandbox: taskSandbox,
+    taskId,
+  };
+}
+
 describe("createPhase1Agent", () => {
   it("creates an AgentExecutor with the Phase 1 tools", async () => {
     process.env.OPENAI_API_KEY = "test-key-not-real";
 
-    const executor = await createPhase1Agent({
-      taskId: "task-agent-test",
-      sandbox,
-    });
+    const executor = await createPhase1Agent(context("task-agent-test"));
     const toolNames = executor.tools.map((agentTool) => agentTool.name);
 
     expect(toolNames).toEqual([
@@ -93,7 +102,7 @@ describe("createPhase1Agent", () => {
     });
 
     const executor = await createPhase1Agent(
-      { taskId: "task-agent-prompt-test", sandbox },
+      context("task-agent-prompt-test"),
       { llm },
     );
     const result = await executor.invoke({
@@ -133,20 +142,21 @@ describe("createPhase1Agent", () => {
           content: structuredText("Wrote the file.\n[[HANDLE_RESULT:SUCCESS]]"),
         }),
       ]);
-      const executor = await createPhase1Agent(
-        {
-          sandbox: {
-            ...sandbox,
-            files: {
-              ...sandbox.files,
-              async write(path, content) {
-                writes.push({ content, path });
-                return {};
-              },
-            },
+      const taskSandbox: E2BSandboxLike = {
+        ...sandbox,
+        files: {
+          ...sandbox.files,
+          async write(path, content) {
+            writes.push({ content, path });
+            return {};
           },
-          taskId: "task-agent-provider-compat-test",
         },
+      };
+      const executor = await createPhase1Agent(
+        context(
+          "task-agent-provider-compat-test",
+          taskSandbox,
+        ),
         { llm },
       );
 
@@ -172,10 +182,7 @@ describe("createHandleAgent", () => {
   it("creates an AgentExecutor with Phase 1, browser, and computer-use tools", async () => {
     process.env.OPENAI_API_KEY = "test-key-not-real";
 
-    const executor = await createHandleAgent({
-      taskId: "task-agent-phase3-test",
-      sandbox,
-    });
+    const executor = await createHandleAgent(context("task-agent-phase3-test"));
     const toolNames = executor.tools.map((agentTool) => agentTool.name);
 
     expect(toolNames).toEqual([
