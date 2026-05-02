@@ -165,6 +165,70 @@ export interface CreateTaskResponse {
   taskId: string;
 }
 
+export type WorkspaceScope = 'DEFAULT_WORKSPACE' | 'CUSTOM_FOLDER' | 'FULL_ACCESS';
+
+export type BackendType = 'E2B' | 'LOCAL';
+
+export type BrowserMode = 'SEPARATE_PROFILE' | 'ACTUAL_CHROME';
+
+export type AgentRunStatus =
+  | 'RUNNING'
+  | 'WAITING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  workspaceScope: WorkspaceScope;
+  customScopePath?: string | null;
+  defaultBackend: BackendType;
+  defaultProvider?: string | null;
+  defaultModel?: string | null;
+  browserMode: BrowserMode;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ConversationSummary {
+  id: string;
+  projectId: string;
+  title?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  role: 'USER' | 'ASSISTANT';
+  content: string;
+  agentRunId?: string | null;
+  providerId?: string | null;
+  modelName?: string | null;
+  createdAt?: string;
+}
+
+export interface AgentRunSummary {
+  id: string;
+  conversationId: string;
+  status: AgentRunStatus;
+  goal: string;
+  result?: string | null;
+  providerId?: string | null;
+  modelName?: string | null;
+  backend: BackendType;
+  startedAt?: string;
+  completedAt?: string | null;
+}
+
+export interface SendConversationMessageResponse {
+  agentRunId: string;
+  conversationId: string;
+  messageId: string;
+}
+
 export interface HealthResponse {
   service: 'handle-api';
   status: 'ok' | 'starting' | 'degraded';
