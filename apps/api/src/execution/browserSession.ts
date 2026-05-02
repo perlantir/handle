@@ -87,6 +87,13 @@ interface BrowserServerResponse {
   result?: Record<string, unknown>;
 }
 
+interface BrowserCommandResult {
+  error?: string;
+  exitCode?: number;
+  stderr?: string;
+  stdout?: string;
+}
+
 const DEFAULT_PORT = 41231;
 const DEFAULT_VIEWPORT = { height: 800, width: 1280 };
 const DEFAULT_USER_AGENT =
@@ -314,6 +321,15 @@ function commandFailureMessage(label: string, result: { error?: string; stderr?:
   return `${label} failed: ${redactSecrets(body)}`;
 }
 
+function commandResultFromThrownError(err: unknown): BrowserCommandResult | undefined {
+  if (!err || typeof err !== "object" || !("result" in err)) return undefined;
+
+  const result = (err as { result?: unknown }).result;
+  if (!result || typeof result !== "object") return undefined;
+
+  return result as BrowserCommandResult;
+}
+
 function hasHealthyBrowserServerOutput(stdout: string | undefined) {
   if (!stdout) return false;
   return stdout
@@ -451,7 +467,14 @@ export class E2BBrowserSession implements BrowserSession {
     }
 
     const command = this.httpCommand("/shutdown", {});
-    const result = await this.options.sandbox.commands.run(command);
+    let result: BrowserCommandResult;
+    try {
+      result = await this.options.sandbox.commands.run(command);
+    } catch (err) {
+      const thrownResult = commandResultFromThrownError(err);
+      if (!thrownResult) throw err;
+      result = thrownResult;
+    }
 
     if (typeof result.exitCode === "number" && result.exitCode !== 0) {
       this.options.logger.error(
@@ -536,7 +559,14 @@ export class E2BBrowserSession implements BrowserSession {
   private async invokeAction(action: string, args: Record<string, unknown>) {
     await this.ensureReady();
     const command = this.httpCommand("/action", { action, args });
-    const result = await this.options.sandbox.commands.run(command);
+    let result: BrowserCommandResult;
+    try {
+      result = await this.options.sandbox.commands.run(command);
+    } catch (err) {
+      const thrownResult = commandResultFromThrownError(err);
+      if (!thrownResult) throw err;
+      result = thrownResult;
+    }
 
     if (typeof result.exitCode === "number" && result.exitCode !== 0) {
       throw new Error(commandFailureMessage(`Browser action ${action}`, result));
@@ -678,7 +708,14 @@ export class E2BBrowserSession implements BrowserSession {
       `Path(${jsStringLiteral(SERVER_PATH)}).write_bytes(base64.b64decode(${jsStringLiteral(encoded)}))`,
       "PY",
     ].join("\n");
-    const result = await this.options.sandbox.commands.run(command);
+    let result: BrowserCommandResult;
+    try {
+      result = await this.options.sandbox.commands.run(command);
+    } catch (err) {
+      const thrownResult = commandResultFromThrownError(err);
+      if (!thrownResult) throw err;
+      result = thrownResult;
+    }
 
     if (typeof result.exitCode === "number" && result.exitCode !== 0) {
       throw new Error(commandFailureMessage("Browser server script write", result));
@@ -719,7 +756,14 @@ export class E2BBrowserSession implements BrowserSession {
       `tail -100 ${shellSingleQuote(SERVER_LOG_PATH)} >&2 || true`,
       "exit 1",
     ].join("\n");
-    const result = await this.options.sandbox.commands.run(command);
+    let result: BrowserCommandResult;
+    try {
+      result = await this.options.sandbox.commands.run(command);
+    } catch (err) {
+      const thrownResult = commandResultFromThrownError(err);
+      if (!thrownResult) throw err;
+      result = thrownResult;
+    }
 
     if (typeof result.exitCode === "number" && result.exitCode !== 0) {
       if (hasHealthyBrowserServerOutput(result.stdout)) {
