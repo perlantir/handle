@@ -11,6 +11,7 @@ const project = await prisma.project.create({
   data: {
     defaultBackend: "LOCAL",
     name: projectName,
+    permissionMode: "ASK",
     workspaceScope: "DEFAULT_WORKSPACE",
   },
 });
@@ -22,11 +23,11 @@ try {
   if (listed.length !== 1) throw new Error("Created project was not listed");
 
   const updated = await prisma.project.update({
-    data: { name: `${projectName} Updated`, workspaceScope: "FULL_ACCESS" },
+    data: { name: `${projectName} Updated`, permissionMode: "FULL_ACCESS", workspaceScope: "DESKTOP" },
     where: { id: project.id },
   });
-  if (updated.workspaceScope !== "FULL_ACCESS") {
-    throw new Error("Project update did not persist workspaceScope");
+  if (updated.permissionMode !== "FULL_ACCESS" || updated.workspaceScope !== "DESKTOP") {
+    throw new Error("Project update did not persist permissionMode/workspaceScope");
   }
 
   await prisma.project.delete({ where: { id: project.id } });

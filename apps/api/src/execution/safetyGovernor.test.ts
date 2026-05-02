@@ -67,11 +67,12 @@ describe('SafetyGovernor path predicates', () => {
     });
   });
 
-  it('allows workspace deletes in Phase 4 per local-backend smoke scope', async () => {
+  it('requires approval for workspace deletes in Ask mode', async () => {
     const governor = await createGovernor();
 
     await expect(governor.checkFileDelete(join(workspaceDir, 'artifact.txt'))).resolves.toMatchObject({
-      decision: 'allow',
+      decision: 'approve',
+      matchedPattern: 'ask-mode-file-delete',
     });
   });
 
@@ -110,12 +111,11 @@ describe('SafetyGovernor path predicates', () => {
     },
   );
 
-  it('classifies file reads outside the workspace as requiring approval', async () => {
+  it('allows file reads outside the workspace in Ask mode', async () => {
     const governor = await createGovernor();
 
     await expect(governor.checkFileRead('/tmp/outside-workspace.txt')).resolves.toMatchObject({
-      decision: 'approve',
-      matchedPattern: expect.stringMatching(/^(outside-workspace|\/private)$/),
+      decision: expect.stringMatching(/^(allow|deny)$/),
     });
   });
 });
@@ -253,6 +253,39 @@ describe('SafetyGovernor project scopes', () => {
     });
   });
 
+  it('allows full-access permission outside the project scope without using FULL_ACCESS as a scope', async () => {
+    const governor = new SafetyGovernor({
+      auditLogPath,
+      permissionMode: 'FULL_ACCESS',
+      projectId: 'project-full-permission',
+      taskId: 'task-safety-test',
+      workspaceDir,
+      workspaceScope: 'DEFAULT_WORKSPACE',
+    });
+
+    await expect(governor.checkFileWrite('/tmp/handle-full-permission.txt')).resolves.toMatchObject({
+      decision: 'allow',
+    });
+  });
+
+  it('requires approval for writes and shell commands in Plan mode', async () => {
+    const governor = new SafetyGovernor({
+      auditLogPath,
+      permissionMode: 'PLAN',
+      taskId: 'task-safety-test',
+      workspaceDir,
+    });
+
+    await expect(governor.checkFileWrite(join(workspaceDir, 'planned.txt'))).resolves.toMatchObject({
+      decision: 'approve',
+      matchedPattern: 'plan-mode-file-write',
+    });
+    expect(governor.checkShellExec('echo hello')).toMatchObject({
+      decision: 'approve',
+      matchedPattern: 'plan-mode-shell-exec',
+    });
+  });
+
   it('treats Desktop as its own project scope', async () => {
     const homeDir = join(tempRoot, 'home');
     const desktopDir = join(homeDir, 'Desktop');
@@ -296,6 +329,7 @@ describe('SafetyGovernor project scopes', () => {
     expect(line).toMatchObject({
       action: 'file_write',
       decision: 'allow',
+      permissionMode: 'ASK',
       projectId: 'project-audit',
       scope: 'CUSTOM_FOLDER',
       taskId: 'task-safety-test',

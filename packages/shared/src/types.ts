@@ -119,6 +119,12 @@ export interface ApprovalPayload {
 
 export type ApprovalDecision = 'approved' | 'denied';
 
+export interface ApprovalResponseRequest {
+  approvalId: string;
+  alwaysApprove?: boolean;
+  decision: ApprovalDecision;
+}
+
 export type ApprovalStatus = ApprovalDecision | 'pending' | 'timeout';
 
 export interface PendingApproval {
@@ -171,6 +177,8 @@ export interface CreateTaskResponse {
 
 export type WorkspaceScope = 'DEFAULT_WORKSPACE' | 'CUSTOM_FOLDER' | 'DESKTOP' | 'FULL_ACCESS';
 
+export type ProjectPermissionMode = 'FULL_ACCESS' | 'ASK' | 'PLAN';
+
 export type BackendType = 'E2B' | 'LOCAL';
 
 export type BrowserMode = 'SEPARATE_PROFILE' | 'ACTUAL_CHROME';
@@ -187,6 +195,7 @@ export interface ProjectSummary {
   name: string;
   workspaceScope: WorkspaceScope;
   customScopePath?: string | null;
+  permissionMode: ProjectPermissionMode;
   defaultBackend: BackendType;
   defaultProvider?: string | null;
   defaultModel?: string | null;

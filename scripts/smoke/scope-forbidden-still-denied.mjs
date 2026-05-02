@@ -11,9 +11,10 @@ const auditLogPath = join(root, "audit.log");
 try {
   const backend = new LocalBackend(taskId, {
     auditLogPath,
+    permissionMode: "FULL_ACCESS",
     projectId: "project-forbidden-smoke",
     workspaceDir,
-    workspaceScope: "FULL_ACCESS",
+    workspaceScope: "DEFAULT_WORKSPACE",
   });
   await backend.initialize();
   await backend.fileWrite("/System/handle-should-never-write.txt", "nope").then(

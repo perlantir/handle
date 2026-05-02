@@ -128,6 +128,7 @@ describe('LocalBackend file operations', () => {
   it('performs real filesystem operations inside a temp workspace', async () => {
     const backend = new LocalBackend('task-local-real-test', {
       auditLogPath,
+      requestApproval: vi.fn(async () => 'approved' as const),
       workspaceDir,
     });
 
@@ -145,7 +146,12 @@ describe('LocalBackend file operations', () => {
     const auditLines = (await fs.readFile(auditLogPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     expect(auditLines).toEqual([
       expect.objectContaining({ action: 'file_write', decision: 'allow', taskId: 'task-local-real-test' }),
-      expect.objectContaining({ action: 'file_delete', decision: 'allow', taskId: 'task-local-real-test' }),
+      expect.objectContaining({
+        action: 'file_delete',
+        approved: true,
+        decision: 'approve',
+        taskId: 'task-local-real-test',
+      }),
     ]);
   });
 

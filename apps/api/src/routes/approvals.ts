@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { ApprovalPayload } from '@handle/shared';
+import { registerApprovalGrant } from '../approvals/approvalGrants';
 import { getAuthenticatedUserId } from '../auth/clerkMiddleware';
 import { resolveApprovalWaiter } from '../approvals/approvalWaiter';
 import { emitTaskEvent } from '../lib/eventBus';
@@ -9,6 +10,7 @@ import { prisma } from '../lib/prisma';
 
 const respondSchema = z.object({
   approvalId: z.string().min(1),
+  alwaysApprove: z.boolean().optional(),
   decision: z.enum(['approved', 'denied']),
 });
 
@@ -51,6 +53,13 @@ function serializeApproval(row: ApprovalRow) {
     taskId: row.taskId,
     type: row.type,
   };
+}
+
+function projectIdFromRun(run: unknown) {
+  const candidate = run as { conversation?: { projectId?: unknown } } | null;
+  return typeof candidate?.conversation?.projectId === 'string'
+    ? candidate.conversation.projectId
+    : null;
 }
 
 export function createApprovalsRouter({ getUserId = getAuthenticatedUserId, store = prisma }: CreateApprovalsRouterOptions = {}) {
@@ -105,6 +114,9 @@ export function createApprovalsRouter({ getUserId = getAuthenticatedUserId, stor
       if (!runStore) return res.status(404).json({ error: 'Approval not found' });
 
       const task = await runStore.findFirst({
+        ...(store.agentRun
+          ? { include: { conversation: { select: { projectId: true } } } }
+          : {}),
         where: store.agentRun ? { id: approval.taskId } : { id: approval.taskId, userId },
       });
       if (!task) return res.status(404).json({ error: 'Approval not found' });
@@ -121,6 +133,16 @@ export function createApprovalsRouter({ getUserId = getAuthenticatedUserId, stor
         data: { status: 'RUNNING' },
         where: { id: approval.taskId },
       });
+
+      if (parsed.data.decision === 'approved' && parsed.data.alwaysApprove) {
+        registerApprovalGrant(
+          {
+            projectId: store.agentRun ? projectIdFromRun(task) : null,
+            taskId: approval.taskId,
+          },
+          approval.payload as ApprovalPayload,
+        );
+      }
 
       resolveApprovalWaiter(approval.id, parsed.data.decision);
       emitTaskEvent({

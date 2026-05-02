@@ -10,6 +10,7 @@ const project = await prisma.project.create({
     browserMode: "SEPARATE_PROFILE",
     defaultBackend: "LOCAL",
     name: `Smoke Rename ${suffix}`,
+    permissionMode: "ASK",
     workspaceScope: "DEFAULT_WORKSPACE",
   },
 });

@@ -20,7 +20,10 @@ function assertAuditEntry(entry, action, decision) {
 }
 
 try {
-  const backend = new LocalBackend(taskId, { workspaceDir });
+  const backend = new LocalBackend(taskId, {
+    requestApproval: async () => "approved",
+    workspaceDir,
+  });
   await backend.initialize(taskId);
   await backend.fileWrite("audit.txt", "audit smoke\n");
   await backend.shellExec("echo audit-smoke", {
@@ -42,7 +45,8 @@ try {
 
   assertAuditEntry(entries[0], "file_write", "allow");
   assertAuditEntry(entries[1], "shell_exec", "allow");
-  assertAuditEntry(entries[2], "file_delete", "allow");
+  assertAuditEntry(entries[2], "file_delete", "approve");
+  if (entries[2].approved !== true) throw new Error("Expected approved=true for file_delete audit entry");
 
   console.log(`[local-backend-audit-log] PASS wrote 3 entries to ${auditLogPath}`);
 } finally {

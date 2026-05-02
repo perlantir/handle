@@ -97,6 +97,7 @@ interface ProjectContext {
   defaultModel: string | null;
   defaultProvider: string | null;
   id: string;
+  permissionMode: string | null;
   workspaceScope: string | null;
 }
 
@@ -318,6 +319,18 @@ function defaultProjectWorkspaceDir(projectId: string | undefined, taskId: strin
   return join(homedir(), "Documents", "Handle", "workspaces", projectId ?? taskId);
 }
 
+function localWorkspaceDirForProject(project: ProjectContext | null | undefined, taskId: string) {
+  if (project?.workspaceScope === "CUSTOM_FOLDER" && project.customScopePath) {
+    return project.customScopePath;
+  }
+
+  if (project?.workspaceScope === "DESKTOP") {
+    return join(homedir(), "Desktop");
+  }
+
+  return defaultProjectWorkspaceDir(project?.id, taskId);
+}
+
 function timeoutError(label: string, timeoutMs: number) {
   return new Error(`${label} timed out after ${timeoutMs}ms`);
 }
@@ -499,10 +512,11 @@ export function createAgentRunner({
         }
         if (project?.id) {
           localBackendOptions.projectId = project.id;
-          localBackendOptions.workspaceDir = defaultProjectWorkspaceDir(
-            project.id,
-            taskId,
-          );
+          localBackendOptions.workspaceDir = localWorkspaceDirForProject(project, taskId);
+        }
+        if (project?.permissionMode) {
+          localBackendOptions.permissionMode =
+            project.permissionMode as NonNullable<LocalBackendOptions["permissionMode"]>;
         }
         if (project?.workspaceScope) {
           localBackendOptions.workspaceScope =

@@ -8,7 +8,10 @@ const root = await fs.mkdtemp(join(tmpdir(), "handle-local-basic-"));
 const workspaceDir = join(root, "workspace");
 
 try {
-  const backend = new LocalBackend(taskId, { workspaceDir });
+  const backend = new LocalBackend(taskId, {
+    requestApproval: async () => "approved",
+    workspaceDir,
+  });
   console.log(`[local-backend-basic] workspace ${workspaceDir}`);
 
   await backend.initialize(taskId);

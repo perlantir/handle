@@ -4,11 +4,13 @@ import { promises as defaultFs } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { awaitApproval, type ApprovalDecision } from '../approvals/approvalWaiter';
+import { hasApprovalGrant } from '../approvals/approvalGrants';
 import type { BrowserSession } from './browserSession';
 import { createLocalBrowserSession, type LocalBrowserMode } from './localBrowser';
 import {
   SafetyGovernor,
   type AuditLogAction,
+  type ProjectPermissionMode,
   type SafetyCheckResult,
   type SafetyDecision,
   type WorkspaceScope,
@@ -51,6 +53,7 @@ export interface LocalBackendOptions {
   browserMode?: LocalBrowserMode;
   customScopePath?: string | null;
   fileSystem?: LocalBackendFilesystem;
+  permissionMode?: ProjectPermissionMode | 'full-access' | 'ask' | 'plan' | null;
   projectId?: string;
   requestApproval?: LocalApprovalRequester;
   safetyGovernor?: SafetyGovernor;
@@ -94,6 +97,7 @@ export class LocalBackend implements ExecutionBackend {
   private readonly requestApproval: LocalApprovalRequester;
   private readonly safetyGovernor: SafetyGovernor;
   private readonly shellCallTimestamps: number[] = [];
+  private readonly projectId: string | null;
   private readonly taskId: string;
   private readonly workspaceDir: string;
 
@@ -102,6 +106,7 @@ export class LocalBackend implements ExecutionBackend {
     this.workspaceDir = options.workspaceDir ?? defaultWorkspaceDir(taskId);
     this.browserMode = options.browserMode ?? 'separate-profile';
     this.fs = options.fileSystem ?? defaultFs;
+    this.projectId = options.projectId ?? null;
     this.requestApproval = options.requestApproval ?? awaitApproval;
     this.approvalTimeoutMs = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
     this.safetyGovernor =
@@ -110,6 +115,7 @@ export class LocalBackend implements ExecutionBackend {
         ...(options.auditLogPath ? { auditLogPath: options.auditLogPath } : {}),
         ...(options.customScopePath ? { customScopePath: options.customScopePath } : {}),
         ...(options.projectId ? { projectId: options.projectId } : {}),
+        ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
         taskId,
         workspaceDir: this.workspaceDir,
         ...(options.workspaceScope ? { workspaceScope: options.workspaceScope } : {}),
@@ -247,8 +253,17 @@ export class LocalBackend implements ExecutionBackend {
     }
 
     if (result.decision === 'approve') {
+      const approvalRequest = approvalPayloadForAction(action, result);
+      if (hasApprovalGrant({ projectId: this.projectId, taskId: this.taskId }, approvalRequest)) {
+        await this.audit(action, result, 'approve', {
+          approvalDurationMs: 0,
+          approved: true,
+        });
+        return result.resolvedTarget;
+      }
+
       const startedAt = Date.now();
-      const decision = await this.requestApproval(this.taskId, approvalPayloadForAction(action, result), {
+      const decision = await this.requestApproval(this.taskId, approvalRequest, {
         timeoutMs: this.approvalTimeoutMs,
       });
       const approved = decision === 'approved';
@@ -274,14 +289,23 @@ export class LocalBackend implements ExecutionBackend {
     }
 
     if (result.decision === 'approve') {
+      const approvalRequest: ApprovalPayload = {
+        command: result.resolvedTarget,
+        reason: `Run command: ${result.resolvedTarget}?`,
+        type: 'shell_exec',
+      };
+      if (hasApprovalGrant({ projectId: this.projectId, taskId: this.taskId }, approvalRequest)) {
+        await this.audit('shell_exec', result, 'approve', {
+          approvalDurationMs: 0,
+          approved: true,
+        });
+        return;
+      }
+
       const startedAt = Date.now();
       const decision = await this.requestApproval(
         this.taskId,
-        {
-          command: result.resolvedTarget,
-          reason: `Run command: ${result.resolvedTarget}?`,
-          type: 'shell_exec',
-        },
+        approvalRequest,
         { timeoutMs: this.approvalTimeoutMs },
       );
       const approved = decision === 'approved';

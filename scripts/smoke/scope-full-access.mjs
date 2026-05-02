@@ -12,9 +12,10 @@ const auditLogPath = join(root, "audit.log");
 try {
   const backend = new LocalBackend(taskId, {
     auditLogPath,
+    permissionMode: "FULL_ACCESS",
     projectId: "project-full-smoke",
     workspaceDir,
-    workspaceScope: "FULL_ACCESS",
+    workspaceScope: "DEFAULT_WORKSPACE",
   });
   await backend.initialize();
   await backend.fileWrite(outsidePath, "full access ok\n");
@@ -22,7 +23,7 @@ try {
   if (!content.includes("full access ok")) throw new Error("Full access write failed");
 
   const audit = (await fs.readFile(auditLogPath, "utf8")).trim().split("\n").map(JSON.parse);
-  if (!audit.some((entry) => entry.scope === "FULL_ACCESS" && entry.decision === "allow")) {
+  if (!audit.some((entry) => entry.permissionMode === "FULL_ACCESS" && entry.decision === "allow")) {
     throw new Error("Expected full access allow audit entry");
   }
   console.log("[scope-full-access] PASS");

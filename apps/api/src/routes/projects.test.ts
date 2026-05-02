@@ -71,6 +71,7 @@ describe("projects routes", () => {
         customScopePath: process.cwd(),
         defaultBackend: "LOCAL",
         name: "Handle",
+        permissionMode: "ASK",
         workspaceScope: "CUSTOM_FOLDER",
       })
       .expect(201);
@@ -79,19 +80,21 @@ describe("projects routes", () => {
         customScopePath: process.cwd(),
         defaultBackend: "LOCAL",
         name: "Handle",
+        permissionMode: "ASK",
         workspaceScope: "CUSTOM_FOLDER",
       }),
     });
 
     await request(app)
       .put("/api/projects/default-project")
-      .send({ name: "Renamed", workspaceScope: "FULL_ACCESS" })
+      .send({ name: "Renamed", permissionMode: "FULL_ACCESS", workspaceScope: "DESKTOP" })
       .expect(200);
     expect(store.project.update).toHaveBeenCalledWith({
       data: expect.objectContaining({
         customScopePath: null,
         name: "Renamed",
-        workspaceScope: "FULL_ACCESS",
+        permissionMode: "FULL_ACCESS",
+        workspaceScope: "DESKTOP",
       }),
       where: { id: "default-project" },
     });

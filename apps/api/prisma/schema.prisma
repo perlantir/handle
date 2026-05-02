@@ -21,6 +21,7 @@ model Project {
   name            String
   workspaceScope  ScopeType      @default(DEFAULT_WORKSPACE)
   customScopePath String?
+  permissionMode  String         @default("ASK")
   defaultBackend  BackendType    @default(E2B)
   defaultProvider String?
   defaultModel    String?

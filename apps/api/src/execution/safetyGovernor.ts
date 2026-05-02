@@ -17,6 +17,7 @@ export interface AuditLogEntry {
   approved?: boolean;
   approvalDurationMs?: number;
   matchedPattern?: string;
+  permissionMode?: ProjectPermissionMode;
   scope?: WorkspaceScope;
   customScopePath?: string;
   workspaceDir: string;
@@ -35,6 +36,7 @@ export interface SafetyGovernorOptions {
   homeDir?: string;
   now?: () => Date;
   projectId?: string;
+  permissionMode?: ProjectPermissionMode | LowercaseProjectPermissionMode | null;
   taskId: string;
   workspaceDir: string;
   workspaceScope?: WorkspaceScope | LowercaseWorkspaceScope | null;
@@ -42,6 +44,8 @@ export interface SafetyGovernorOptions {
 
 export type WorkspaceScope = 'DEFAULT_WORKSPACE' | 'CUSTOM_FOLDER' | 'DESKTOP' | 'FULL_ACCESS';
 type LowercaseWorkspaceScope = 'default-workspace' | 'custom-folder' | 'desktop' | 'full-access';
+export type ProjectPermissionMode = 'FULL_ACCESS' | 'ASK' | 'PLAN';
+type LowercaseProjectPermissionMode = 'full-access' | 'ask' | 'plan';
 
 interface ForbiddenPathRule {
   label: string;
@@ -201,6 +205,7 @@ export class SafetyGovernor {
   readonly customScopePath: string | undefined;
   readonly homeDir: string;
   readonly projectId: string | undefined;
+  readonly permissionMode: ProjectPermissionMode;
   readonly scopeRoot: string | null;
   readonly taskId: string;
   readonly workspaceScope: WorkspaceScope;
@@ -216,11 +221,12 @@ export class SafetyGovernor {
     this.taskId = options.taskId;
     this.workspaceDir = resolve(expandHome(options.workspaceDir, this.homeDir));
     this.workspaceScope = normalizeWorkspaceScope(options.workspaceScope);
+    this.permissionMode = normalizePermissionMode(options.permissionMode, this.workspaceScope);
     this.customScopePath = options.customScopePath
       ? resolve(expandHome(options.customScopePath, this.homeDir))
       : undefined;
     this.scopeRoot =
-      this.workspaceScope === 'FULL_ACCESS'
+      this.permissionMode === 'FULL_ACCESS' || this.workspaceScope === 'FULL_ACCESS'
         ? null
         : this.workspaceScope === 'DESKTOP'
           ? resolve(this.homeDir, 'Desktop')
@@ -235,11 +241,29 @@ export class SafetyGovernor {
   }
 
   async checkFileDelete(path: string): Promise<SafetyCheckResult> {
-    return this.checkWritablePath(path, 'file_delete');
+    const result = await this.classifyPath(path, 'write');
+    if (result.decision === 'deny') return result;
+    if (this.permissionMode === 'PLAN' || this.permissionMode === 'ASK') {
+      return {
+        ...result,
+        decision: 'approve',
+        matchedPattern:
+          result.matchedPattern ??
+          (this.permissionMode === 'PLAN' ? 'plan-mode-file-delete' : 'ask-mode-file-delete'),
+        reason:
+          this.permissionMode === 'PLAN'
+            ? `Plan mode requires approval before deleting files: ${result.resolvedTarget}`
+            : `Ask mode requires approval before deleting files: ${result.resolvedTarget}`,
+      };
+    }
+    return {
+      ...result,
+      reason: `file_delete allowed inside workspace: ${result.resolvedTarget}`,
+    };
   }
 
   async checkFileRead(path: string): Promise<SafetyCheckResult> {
-    return this.classifyPath(path);
+    return this.classifyPath(path, 'read');
   }
 
   async checkFileList(path: string): Promise<SafetyCheckResult> {
@@ -268,6 +292,15 @@ export class SafetyGovernor {
     }
     if (MKFS_PATTERN.test(normalized)) {
       return this.shellDecision('deny', command, 'mkfs', 'Shell command denied: filesystem formatting is forbidden');
+    }
+
+    if (this.permissionMode === 'PLAN') {
+      return this.shellDecision(
+        'approve',
+        command,
+        'plan-mode-shell-exec',
+        'Plan mode requires approval before running shell commands',
+      );
     }
 
     const redirectDecision = this.classifyShellRedirections(command);
@@ -312,6 +345,7 @@ export class SafetyGovernor {
       ...(this.projectId ? { projectId: this.projectId } : {}),
       ...(this.customScopePath ? { customScopePath: this.customScopePath } : {}),
       scope: this.workspaceScope,
+      permissionMode: this.permissionMode,
       workspaceDir: this.workspaceDir,
       ...entry,
       target: redactSecrets(entry.target),
@@ -322,8 +356,17 @@ export class SafetyGovernor {
   }
 
   private async checkWritablePath(path: string, action: AuditLogAction): Promise<SafetyCheckResult> {
-    const result = await this.classifyPath(path);
+    const result = await this.classifyPath(path, 'write');
     if (result.decision !== 'allow') return result;
+
+    if (this.permissionMode === 'PLAN') {
+      return {
+        ...result,
+        decision: 'approve',
+        matchedPattern: result.matchedPattern ?? 'plan-mode-file-write',
+        reason: `Plan mode requires approval before writing files: ${result.resolvedTarget}`,
+      };
+    }
 
     return {
       ...result,
@@ -331,11 +374,13 @@ export class SafetyGovernor {
     };
   }
 
-  private async classifyPath(path: string): Promise<SafetyCheckResult> {
+  private async classifyPath(path: string, access: 'read' | 'write'): Promise<SafetyCheckResult> {
     const originalTarget = this.resolveLexicalPath(path);
     const resolvedTarget = await realpathForPolicy(originalTarget);
     const scopeReal =
-      this.workspaceScope === 'FULL_ACCESS' ? null : await this.resolveScopeRoot();
+      this.permissionMode === 'FULL_ACCESS' || this.workspaceScope === 'FULL_ACCESS'
+        ? null
+        : await this.resolveScopeRoot();
 
     if (
       scopeReal &&
@@ -367,10 +412,18 @@ export class SafetyGovernor {
       };
     }
 
-    if (this.workspaceScope === 'FULL_ACCESS') {
+    if (access === 'read') {
       return {
         decision: 'allow',
-        reason: `Path allowed by full-access scope: ${resolvedTarget}`,
+        reason: `Path read allowed by ${permissionModeLabel(this.permissionMode)} permission: ${resolvedTarget}`,
+        resolvedTarget,
+      };
+    }
+
+    if (this.permissionMode === 'FULL_ACCESS' || this.workspaceScope === 'FULL_ACCESS') {
+      return {
+        decision: 'allow',
+        reason: `Path allowed by full access permission: ${resolvedTarget}`,
         resolvedTarget,
       };
     }
@@ -475,7 +528,7 @@ export class SafetyGovernor {
   }
 
   private isPathInsideScopeLexically(path: string) {
-    if (this.workspaceScope === 'FULL_ACCESS') return true;
+    if (this.permissionMode === 'FULL_ACCESS' || this.workspaceScope === 'FULL_ACCESS') return true;
     const scopeRoot = this.scopeRoot ?? this.workspaceDir;
     return isInsideOrEqual(lowercasePath(resolve(path)), lowercasePath(resolve(scopeRoot)));
   }
@@ -502,8 +555,24 @@ function normalizeWorkspaceScope(value: SafetyGovernorOptions['workspaceScope'])
   return 'DEFAULT_WORKSPACE';
 }
 
+function normalizePermissionMode(
+  value: SafetyGovernorOptions['permissionMode'],
+  workspaceScope: WorkspaceScope,
+): ProjectPermissionMode {
+  if (value === 'FULL_ACCESS' || value === 'full-access') return 'FULL_ACCESS';
+  if (value === 'PLAN' || value === 'plan') return 'PLAN';
+  if (workspaceScope === 'FULL_ACCESS') return 'FULL_ACCESS';
+  return 'ASK';
+}
+
 function scopeLabel(scope: WorkspaceScope) {
   if (scope === 'CUSTOM_FOLDER') return 'specific folder';
   if (scope === 'DESKTOP') return 'desktop';
   return 'workspace';
+}
+
+function permissionModeLabel(mode: ProjectPermissionMode) {
+  if (mode === 'FULL_ACCESS') return 'full access';
+  if (mode === 'PLAN') return 'plan mode';
+  return 'ask mode';
 }

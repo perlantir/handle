@@ -1,7 +1,9 @@
 import { Router } from "express";
+import { execFile as execFileCallback } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { z } from "zod";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
 import { runAgent as defaultRunAgent } from "../agent/runAgent";
@@ -17,6 +19,7 @@ const projectSchema = z.object({
   defaultModel: z.string().min(1).nullable().optional(),
   defaultProvider: z.string().refine(isProviderId).nullable().optional(),
   name: z.string().min(1).max(120).optional(),
+  permissionMode: z.enum(["FULL_ACCESS", "ASK", "PLAN"]).optional(),
   workspaceScope: z
     .enum(["DEFAULT_WORKSPACE", "CUSTOM_FOLDER", "DESKTOP", "FULL_ACCESS"])
     .optional(),
@@ -36,6 +39,8 @@ const sendMessageSchema = z.object({
   modelName: z.string().min(1).max(200).optional(),
   providerId: z.string().refine(isProviderId).optional(),
 });
+
+const execFile = promisify(execFileCallback);
 
 export interface ProjectRouteStore {
   agentRun: {
@@ -172,6 +177,55 @@ export function createProjectsRouter({
         orderBy: { createdAt: "asc" },
       });
       return res.json({ projects });
+    }),
+  );
+
+  router.post(
+    "/projects/pick-folder",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      if (process.platform !== "darwin") {
+        return res.status(501).json({
+          error: "Folder selection is only available on macOS in Phase 4",
+        });
+      }
+
+      logger.info({ userId }, "Project folder picker requested");
+      try {
+        const startedAt = Date.now();
+        const { stdout } = await execFile("osascript", [
+          "-e",
+          'POSIX path of (choose folder with prompt "Choose a folder Handle can use for this project")',
+        ]);
+        const selectedPath = stdout.trim();
+        if (!selectedPath) {
+          return res.status(400).json({ error: "No folder selected" });
+        }
+
+        const validation = await validateSpecificFolderPath(selectedPath);
+        if (validation.error) {
+          return res.status(400).json({
+            error: validation.error,
+            ...(validation.resolved ? { path: validation.resolved } : {}),
+          });
+        }
+
+        logger.info(
+          { durationMs: Date.now() - startedAt, path: validation.resolved },
+          "Project folder picker completed",
+        );
+        return res.json({ path: validation.resolved });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.info({ err }, "Project folder picker cancelled or failed");
+        return res.status(400).json({
+          error: message.includes("User canceled")
+            ? "Folder selection cancelled"
+            : `Folder selection failed: ${message}`,
+        });
+      }
     }),
   );
 
