@@ -720,16 +720,13 @@ export class E2BBrowserSession implements BrowserSession {
   }
 
   private healthCheckCommand({ allowFailure }: { allowFailure: boolean }) {
-    const body = this.httpCommand("/health", {});
+    const body = `curl -fsS --max-time 2 ${shellSingleQuote(`http://127.0.0.1:${this.options.port}/health`)}`;
     if (!allowFailure) return body;
 
     return [
-      "  set +e",
-      body,
-      "  status=$?",
-      "  set -e",
-      "  if [ \"$status\" -eq 0 ]; then exit 0; fi",
-      "  true",
+      `  if ${body}; then`,
+      "    exit 0",
+      "  fi",
     ].join("\n");
   }
 
