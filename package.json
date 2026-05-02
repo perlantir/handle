@@ -16,6 +16,7 @@
     "smoke:e2e-canonical": "node scripts/smoke/e2e-task.mjs --canonical",
     "smoke:e2e-providers": "node scripts/smoke/e2e-providers.mjs",
     "smoke:e2e-task": "node scripts/smoke/e2e-task.mjs",
+    "smoke:desktop-sandbox": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/desktop-sandbox.mjs",
     "smoke:settings-api-proxy": "node scripts/smoke/settings-api-proxy.mjs",
     "smoke:settings-providers-ui": "playwright test --config apps/web/playwright.config.ts",
     "smoke:web-signin": "node scripts/smoke/web-signin.mjs",
