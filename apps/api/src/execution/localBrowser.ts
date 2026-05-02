@@ -1,0 +1,482 @@
+import type { ApprovalPayload } from '@handle/shared';
+import { promises as fs } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { chromium } from 'playwright';
+import type { Browser, BrowserContext, BrowserType, Page } from 'playwright';
+import { logger } from '../lib/logger';
+import {
+  classifyBrowserAction,
+  hostMatchesTrustedDomains,
+  type BrowserPageContext,
+  type RiskClassification,
+} from './browserRiskClassifier';
+import type {
+  BrowserActionApproval,
+  BrowserActionApprovalRequest,
+  BrowserActionResult,
+  BrowserNavigateResult,
+  BrowserSelectorOptions,
+  BrowserSession,
+  BrowserSessionLogger,
+  BrowserTimeoutOptions,
+} from './browserSession';
+
+export type LocalBrowserMode = 'separate-profile' | 'actual-chrome';
+
+export interface LocalBrowserSessionOptions {
+  approval?: BrowserActionApproval;
+  browserChannel?: string;
+  chromium?: Pick<BrowserType, 'launchPersistentContext'>;
+  logger?: BrowserSessionLogger;
+  mode?: Extract<LocalBrowserMode, 'separate-profile'>;
+  profileDir?: string;
+  taskId: string;
+  userAgent?: string;
+  viewport?: { height: number; width: number };
+}
+
+interface ActionSummary {
+  screenshot?: Buffer;
+  text?: string;
+  title?: string;
+  url?: string;
+}
+
+const DEFAULT_VIEWPORT = { height: 800, width: 1280 };
+const DEFAULT_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+export function defaultLocalBrowserProfileDir() {
+  return join(homedir(), '.config', 'handle', 'chrome-profile');
+}
+
+function durationSince(startedAt: number) {
+  return Date.now() - startedAt;
+}
+
+function classifyOutput(action: string, summary: ActionSummary) {
+  if (summary.screenshot && summary.screenshot.byteLength > 0) return 'visual_state_captured';
+  if (typeof summary.text === 'string') return summary.text.length > 0 ? 'text_extracted' : 'empty_text';
+  if (action === 'click') return 'click_executed';
+  if (action === 'type') return 'type_executed';
+  if (action === 'waitForSelector') return 'selector_found';
+  return 'action_executed';
+}
+
+export class LocalBrowserSession implements BrowserSession {
+  private browser: Browser | null = null;
+  private context: BrowserContext | null = null;
+  private destroyed = false;
+  private page: Page | null = null;
+  private ready = false;
+
+  private readonly browserChannel: string;
+  private readonly chromium: Pick<BrowserType, 'launchPersistentContext'>;
+  private readonly logger: BrowserSessionLogger;
+  private readonly mode: Extract<LocalBrowserMode, 'separate-profile'>;
+  private readonly profileDir: string;
+  private readonly taskId: string;
+  private readonly userAgent: string;
+  private readonly viewport: { height: number; width: number };
+
+  constructor(private readonly options: LocalBrowserSessionOptions) {
+    this.browserChannel = options.browserChannel ?? 'chrome';
+    this.chromium = options.chromium ?? chromium;
+    this.logger = options.logger ?? logger;
+    this.mode = options.mode ?? 'separate-profile';
+    this.profileDir = options.profileDir ?? defaultLocalBrowserProfileDir();
+    this.taskId = options.taskId;
+    this.userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
+    this.viewport = options.viewport ?? DEFAULT_VIEWPORT;
+  }
+
+  async navigate(url: string, options: BrowserTimeoutOptions = {}): Promise<BrowserNavigateResult> {
+    const result = await this.runAction(
+      'navigate',
+      { timeoutMs: options.timeoutMs, url },
+      { idempotent: true, target: url },
+      async (page) => {
+        await page.goto(url, {
+          timeout: options.timeoutMs ?? 30_000,
+          waitUntil: 'domcontentloaded',
+        });
+        return this.pageState(page, { includeScreenshot: true });
+      },
+    );
+
+    return {
+      screenshot: result.screenshot ?? Buffer.alloc(0),
+      title: result.title ?? '',
+      url: result.url ?? '',
+    };
+  }
+
+  async click(selector: string, options: BrowserSelectorOptions = {}): Promise<BrowserActionResult> {
+    const result = await this.runAction(
+      'click',
+      { includeScreenshot: options.includeScreenshot, selector, timeoutMs: options.timeoutMs },
+      { idempotent: false, target: selector },
+      async (page) => {
+        await page.locator(selector).first().click({ timeout: options.timeoutMs ?? 30_000 });
+        return this.pageState(page, { includeScreenshot: Boolean(options.includeScreenshot) });
+      },
+    );
+    return this.browserActionResult(result);
+  }
+
+  async type(selector: string, text: string, options: BrowserSelectorOptions = {}): Promise<BrowserActionResult> {
+    const result = await this.runAction(
+      'type',
+      { includeScreenshot: options.includeScreenshot, selector, text, timeoutMs: options.timeoutMs },
+      { idempotent: false, target: selector },
+      async (page) => {
+        await page.locator(selector).first().click({ timeout: options.timeoutMs ?? 30_000 });
+        await page.keyboard.type(text);
+        return this.pageState(page, { includeScreenshot: Boolean(options.includeScreenshot) });
+      },
+    );
+    return this.browserActionResult(result);
+  }
+
+  async extractText(selector?: string): Promise<string> {
+    const result = await this.runAction(
+      'extractText',
+      { selector },
+      { idempotent: true, target: selector ?? 'body' },
+      async (page) => {
+        const text = await page.locator(selector ?? 'body').first().innerText({ timeout: 30_000 });
+        return { text, ...(await this.pageState(page, { includeScreenshot: false })) };
+      },
+    );
+    return result.text ?? '';
+  }
+
+  async screenshot(): Promise<Buffer> {
+    const result = await this.runAction(
+      'screenshot',
+      {},
+      { idempotent: true, target: 'viewport' },
+      async (page) => {
+        const screenshot = await page.screenshot({ type: 'png' });
+        return { screenshot, ...(await this.pageState(page, { includeScreenshot: false })) };
+      },
+    );
+    return result.screenshot ?? Buffer.alloc(0);
+  }
+
+  async goBack(options: BrowserTimeoutOptions = {}): Promise<BrowserActionResult> {
+    const result = await this.runAction(
+      'goBack',
+      { timeoutMs: options.timeoutMs },
+      { idempotent: true, target: 'history' },
+      async (page) => {
+        await page.goBack({
+          timeout: options.timeoutMs ?? 30_000,
+          waitUntil: 'domcontentloaded',
+        });
+        return this.pageState(page, { includeScreenshot: true });
+      },
+    );
+    return this.browserActionResult(result);
+  }
+
+  async scroll(direction: 'up' | 'down', amount = 600): Promise<BrowserActionResult> {
+    const result = await this.runAction(
+      'scroll',
+      { amount, direction },
+      { idempotent: true, target: direction },
+      async (page) => {
+        const deltaY = direction === 'up' ? -amount : amount;
+        await page.mouse.wheel(0, deltaY);
+        return this.pageState(page, { includeScreenshot: true });
+      },
+    );
+    return this.browserActionResult(result);
+  }
+
+  async waitForSelector(selector: string, options: BrowserSelectorOptions = {}): Promise<BrowserActionResult> {
+    const result = await this.runAction(
+      'waitForSelector',
+      { includeScreenshot: options.includeScreenshot, selector, timeoutMs: options.timeoutMs },
+      { idempotent: true, target: selector },
+      async (page) => {
+        await page.locator(selector).first().waitFor({ timeout: options.timeoutMs ?? 30_000 });
+        return this.pageState(page, { includeScreenshot: Boolean(options.includeScreenshot) });
+      },
+    );
+    return this.browserActionResult(result);
+  }
+
+  async destroy() {
+    if (this.destroyed) return;
+
+    const startedAt = Date.now();
+    this.destroyed = true;
+    this.logger.info(
+      { mode: this.mode, profileDir: this.profileDir, taskId: this.taskId },
+      'Local browser session destroy started',
+    );
+
+    try {
+      await this.context?.close();
+      this.browser = null;
+      this.context = null;
+      this.page = null;
+      this.ready = false;
+      this.logger.info(
+        { durationMs: durationSince(startedAt), mode: this.mode, taskId: this.taskId },
+        'Local browser session destroy complete',
+      );
+    } catch (err) {
+      this.logger.error(
+        { durationMs: durationSince(startedAt), err, mode: this.mode, taskId: this.taskId },
+        'Local browser session destroy failed',
+      );
+      throw err;
+    }
+  }
+
+  private async ensureReady() {
+    if (this.destroyed) {
+      throw new Error('Local browser session has already been destroyed');
+    }
+    if (this.ready && this.page) return this.page;
+
+    const startedAt = Date.now();
+    this.logger.info(
+      {
+        mode: this.mode,
+        profileDir: this.profileDir,
+        taskId: this.taskId,
+        viewport: this.viewport,
+      },
+      'Local browser session creation started',
+    );
+
+    await fs.mkdir(this.profileDir, { recursive: true });
+    this.context = await this.chromium.launchPersistentContext(this.profileDir, {
+      args: [`--window-size=${this.viewport.width},${this.viewport.height}`],
+      channel: this.browserChannel,
+      headless: false,
+      userAgent: this.userAgent,
+      viewport: this.viewport,
+    });
+    this.browser = this.context.browser();
+    this.page = this.context.pages()[0] ?? (await this.context.newPage());
+    await this.page.bringToFront().catch(() => undefined);
+    this.ready = true;
+
+    this.logger.info(
+      {
+        browserChannel: this.browserChannel,
+        durationMs: durationSince(startedAt),
+        mode: this.mode,
+        profileDir: this.profileDir,
+        taskId: this.taskId,
+      },
+      'Local browser session creation complete',
+    );
+    return this.page;
+  }
+
+  private async runAction(
+    action: string,
+    args: Record<string, unknown>,
+    options: { idempotent: boolean; target: string },
+    execute: (page: Page) => Promise<ActionSummary>,
+  ) {
+    const startedAt = Date.now();
+    this.logger.info(
+      {
+        action,
+        mode: this.mode,
+        target: options.target,
+        taskId: this.taskId,
+      },
+      'Local browser action started',
+    );
+
+    try {
+      await this.requireApprovalIfNeeded(action, args, options.target);
+      const page = await this.ensureReady();
+      const result = await execute(page);
+      this.logActionComplete(action, options.target, startedAt, result);
+      return result;
+    } catch (err) {
+      this.logger.error(
+        {
+          action,
+          durationMs: durationSince(startedAt),
+          err,
+          idempotent: options.idempotent,
+          mode: this.mode,
+          target: options.target,
+          taskId: this.taskId,
+        },
+        'Local browser action failed',
+      );
+
+      if (!options.idempotent) throw err;
+
+      this.logger.warn?.(
+        { action, mode: this.mode, target: options.target, taskId: this.taskId },
+        'Retrying idempotent local browser action after session restart',
+      );
+      await this.restart();
+      await this.requireApprovalIfNeeded(action, args, options.target);
+      const page = await this.ensureReady();
+      const result = await execute(page);
+      this.logActionComplete(action, options.target, startedAt, result, true);
+      return result;
+    }
+  }
+
+  private async requireApprovalIfNeeded(action: string, args: Record<string, unknown>, target: string) {
+    const approval = this.options.approval;
+    if (!approval) return;
+
+    const startedAt = Date.now();
+    const pageContext = await this.pageContextForRisk(action, args, target);
+    let classification = classifyBrowserAction(action, target, pageContext);
+    const actionUrl = action === 'navigate' && typeof args.url === 'string' ? args.url : pageContext.url;
+
+    if (
+      classification.level === 'approve' &&
+      hostMatchesTrustedDomains(actionUrl, approval.trustedDomains ?? [])
+    ) {
+      classification = {
+        level: 'safe',
+        reason: `Trusted domain allowed action that would otherwise require approval: ${classification.reason}`,
+        ...(classification.matchedRule ? { matchedRule: classification.matchedRule } : {}),
+      };
+    }
+
+    let approvalDecision: 'approved' | 'denied' | 'timeout' | undefined;
+    let approvalRequested = false;
+
+    try {
+      if (classification.level === 'safe') return;
+
+      if (classification.level === 'deny') {
+        throw new Error(classification.reason);
+      }
+
+      approvalRequested = true;
+      const request = {
+        action: `browser_${action}`,
+        reason: classification.reason,
+        target,
+        type: 'risky_browser_action',
+      } satisfies ApprovalPayload;
+
+      approvalDecision = await approval.requestApproval(
+        this.browserActionApprovalRequest(classification, request, approval.taskId),
+      );
+
+      if (approvalDecision !== 'approved') {
+        throw new Error(`Risky browser action ${approvalDecision}: ${classification.reason}`);
+      }
+    } finally {
+      this.logger.info(
+        {
+          action,
+          approvalDecision,
+          approvalDurationMs: durationSince(startedAt),
+          approvalRequested,
+          classification,
+          mode: this.mode,
+          target,
+          taskId: this.taskId,
+        },
+        'Local browser action risk classification complete',
+      );
+    }
+  }
+
+  private browserActionApprovalRequest(
+    classification: RiskClassification,
+    request: ApprovalPayload,
+    taskId: string,
+  ): BrowserActionApprovalRequest {
+    return {
+      classification,
+      request,
+      taskId,
+    };
+  }
+
+  private async pageContextForRisk(
+    action: string,
+    args: Record<string, unknown>,
+    target: string,
+  ): Promise<BrowserPageContext> {
+    if (action === 'navigate') {
+      return { html: '', url: typeof args.url === 'string' ? args.url : target };
+    }
+
+    const page = await this.ensureReady();
+    return {
+      html: await page.content(),
+      url: page.url(),
+    };
+  }
+
+  private async pageState(page: Page, { includeScreenshot }: { includeScreenshot: boolean }) {
+    const result: ActionSummary = {
+      title: await page.title(),
+      url: page.url(),
+    };
+
+    if (includeScreenshot) {
+      result.screenshot = await page.screenshot({ type: 'png' });
+    }
+
+    return result;
+  }
+
+  private browserActionResult(result: ActionSummary): BrowserActionResult {
+    return {
+      ...(result.screenshot ? { screenshot: result.screenshot } : {}),
+      title: result.title ?? '',
+      url: result.url ?? '',
+    };
+  }
+
+  private logActionComplete(
+    action: string,
+    target: string,
+    startedAt: number,
+    summary: ActionSummary,
+    retried = false,
+  ) {
+    this.logger.info(
+      {
+        action,
+        durationMs: durationSince(startedAt),
+        mode: this.mode,
+        outputClassification: classifyOutput(action, summary),
+        retried,
+        screenshotByteCount: summary.screenshot?.byteLength ?? 0,
+        target,
+        taskId: this.taskId,
+        textByteCount: Buffer.byteLength(summary.text ?? ''),
+      },
+      'Local browser action complete',
+    );
+  }
+
+  private async restart() {
+    this.destroyed = false;
+    if (this.ready) {
+      await this.destroy().catch(() => undefined);
+    }
+    this.destroyed = false;
+    this.ready = false;
+    await this.ensureReady();
+  }
+}
+
+export async function createLocalBrowserSession(options: LocalBrowserSessionOptions): Promise<BrowserSession> {
+  return new LocalBrowserSession(options);
+}

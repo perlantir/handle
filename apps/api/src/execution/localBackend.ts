@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { awaitApproval, type ApprovalDecision } from '../approvals/approvalWaiter';
 import type { BrowserSession } from './browserSession';
+import { createLocalBrowserSession, type LocalBrowserMode } from './localBrowser';
 import {
   SafetyGovernor,
   type AuditLogAction,
@@ -13,6 +14,7 @@ import {
 } from './safetyGovernor';
 import type {
   ExecutionBackend,
+  ExecutionBrowserSessionOptions,
   ExecutionCommandOptions,
   ExecutionCommandResult,
   ExecutionFileEntry,
@@ -45,6 +47,7 @@ export type LocalApprovalRequester = (
 export interface LocalBackendOptions {
   approvalTimeoutMs?: number;
   auditLogPath?: string;
+  browserMode?: LocalBrowserMode;
   fileSystem?: LocalBackendFilesystem;
   requestApproval?: LocalApprovalRequester;
   safetyGovernor?: SafetyGovernor;
@@ -81,6 +84,8 @@ function approvalPayloadForAction(action: AuditLogAction, result: SafetyCheckRes
 export class LocalBackend implements ExecutionBackend {
   readonly id = 'local' as const;
   private readonly approvalTimeoutMs: number;
+  private browser: BrowserSession | null = null;
+  private readonly browserMode: LocalBrowserMode;
   private readonly fs: LocalBackendFilesystem;
   private readonly requestApproval: LocalApprovalRequester;
   private readonly safetyGovernor: SafetyGovernor;
@@ -91,6 +96,7 @@ export class LocalBackend implements ExecutionBackend {
   constructor(taskId: string, options: LocalBackendOptions = {}) {
     this.taskId = taskId;
     this.workspaceDir = options.workspaceDir ?? defaultWorkspaceDir(taskId);
+    this.browserMode = options.browserMode ?? 'separate-profile';
     this.fs = options.fileSystem ?? defaultFs;
     this.requestApproval = options.requestApproval ?? awaitApproval;
     this.approvalTimeoutMs = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
@@ -108,6 +114,8 @@ export class LocalBackend implements ExecutionBackend {
   }
 
   async shutdown(_taskId = this.taskId) {
+    await this.browser?.destroy();
+    this.browser = null;
     // Local workspaces persist for user inspection.
   }
 
@@ -210,8 +218,19 @@ export class LocalBackend implements ExecutionBackend {
     });
   }
 
-  async browserSession(): Promise<BrowserSession> {
-    throw new Error('LocalBackend.browserSession is implemented in a later Phase 4 step');
+  async browserSession(options: ExecutionBrowserSessionOptions = {}): Promise<BrowserSession> {
+    if (!this.browser) {
+      if (this.browserMode !== 'separate-profile') {
+        throw new Error(`Local browser mode ${this.browserMode} is implemented in a later Phase 4 step`);
+      }
+      this.browser = await createLocalBrowserSession({
+        ...(options.approval ? { approval: options.approval } : {}),
+        mode: this.browserMode,
+        taskId: this.taskId,
+      });
+    }
+
+    return this.browser;
   }
 
   private async enforceFileDecision(action: 'file_write' | 'file_delete', result: SafetyCheckResult) {
