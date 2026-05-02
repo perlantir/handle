@@ -41,7 +41,7 @@ async function mockTaskApis(page: Page) {
     });
   });
 
-  await page.route("**/api/tasks", async (route) => {
+  await page.route("**/api/projects", async (route) => {
     const request = route.request();
     const body = await requestBody(route);
     requests.push({
@@ -49,13 +49,81 @@ async function mockTaskApis(page: Page) {
       method: request.method(),
       path: new URL(request.url()).pathname,
     });
-    await jsonRoute(route, 200, { taskId: "task-local-ui" });
+    await jsonRoute(route, 200, {
+      projects: [
+        {
+          browserMode: "SEPARATE_PROFILE",
+          customScopePath: null,
+          defaultBackend: "LOCAL",
+          id: "project-local-ui",
+          name: "Personal",
+          workspaceScope: "DEFAULT_WORKSPACE",
+        },
+      ],
+    });
+  });
+
+  await page.route("**/api/settings/providers", async (route) => {
+    await jsonRoute(route, 200, {
+      providers: [
+        {
+          authMode: "apiKey",
+          baseURL: null,
+          description: "Anthropic",
+          enabled: true,
+          fallbackOrder: 1,
+          hasApiKey: true,
+          id: "anthropic",
+          modelName: null,
+          primaryModel: "claude-opus-4-7",
+          updatedAt: "2026-05-02T12:00:00.000Z",
+        },
+      ],
+    });
+  });
+
+  await page.route("**/api/projects/*/conversations", async (route) => {
+    const request = route.request();
+    const body = await requestBody(route);
+    requests.push({
+      body,
+      method: request.method(),
+      path: new URL(request.url()).pathname,
+    });
+    if (request.method() === "POST") {
+      await jsonRoute(route, 201, {
+        conversation: {
+          id: "conversation-local-ui",
+          projectId: "project-local-ui",
+          title: body?.title ?? "Use local backend",
+        },
+      });
+      return;
+    }
+    await jsonRoute(route, 200, { conversations: [] });
+  });
+
+  await page.route("**/api/conversations/*/messages", async (route) => {
+    const request = route.request();
+    const body = await requestBody(route);
+    requests.push({
+      body,
+      method: request.method(),
+      path: new URL(request.url()).pathname,
+    });
+    await jsonRoute(route, 200, {
+      agentRunId: "task-local-ui",
+      conversationId: "conversation-local-ui",
+      messageId: "message-local-ui",
+    });
   });
 
   await page.route("**/api/tasks/*", async (route) => {
     const taskId = new URL(route.request().url()).pathname.split("/").pop();
     await jsonRoute(route, 200, {
       backend: taskId === "task-e2b-ui" ? "e2b" : "local",
+      conversationId: "conversation-local-ui",
+      conversationTitle: taskId === "task-e2b-ui" ? "Use E2B" : "Use Local",
       goal: taskId === "task-e2b-ui" ? "Use E2B" : "Use Local",
       id: taskId,
       messages: [
@@ -65,6 +133,8 @@ async function mockTaskApis(page: Page) {
           role: "USER",
         },
       ],
+      projectId: "project-local-ui",
+      projectName: "Personal",
       providerId: taskId === "task-e2b-ui" ? "openai" : "anthropic",
       providerModel: taskId === "task-e2b-ui" ? "gpt-4o" : "claude-opus-4-7",
       status: "RUNNING",
@@ -105,19 +175,25 @@ test.describe("Workspace backend pill", () => {
     await expect(page.getByRole("button", { name: "Local" })).toBeVisible();
 
     await page
-      .getByPlaceholder("Describe what you'd like Handle to do...")
+      .getByPlaceholder("What would you like to do?")
       .fill("Use local backend");
     await page.getByRole("button", { name: "Start task" }).click();
 
     await expect(page).toHaveURL(/\/tasks\/task-local-ui$/);
     await expect(page.getByText("Local").first()).toBeVisible();
-    await expect(page.getByText("Anthropic · claude-opus-4-7")).toBeVisible();
+    await expect(page.getByText("Anthropic · claude-opus-4-7").first()).toBeVisible();
     expect(
       requests.find(
         (request) =>
-          request.method === "POST" && request.path === "/api/tasks",
+          request.method === "POST" &&
+          request.path === "/api/conversations/conversation-local-ui/messages",
       )?.body,
-    ).toEqual({ backend: "local", goal: "Use local backend" });
+    ).toEqual({
+      backend: "local",
+      content: "Use local backend",
+      modelName: "claude-opus-4-7",
+      providerId: "anthropic",
+    });
   });
 
   test("workspace shows E2B pill for cloud tasks", async ({ page }) => {
