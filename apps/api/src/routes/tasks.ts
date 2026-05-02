@@ -226,6 +226,8 @@ export function createTasksRouter({
               id: string;
               role: string;
             }>;
+            title?: string | null;
+            project?: { id?: string; name?: string };
           };
           goal: string;
           id: string;
@@ -249,12 +251,19 @@ export function createTasksRouter({
               id: message.id,
               role: message.role,
             })) ?? [],
+          conversationTitle: run.conversation && "title" in run.conversation
+            ? (run.conversation as { title?: string | null }).title
+            : null,
           providerId: run.providerId ?? null,
           providerModel: run.modelName ?? null,
           projectId:
             run.conversation &&
             "project" in run.conversation &&
             (run.conversation as { project?: { id?: string } }).project?.id,
+          projectName:
+            run.conversation &&
+            "project" in run.conversation &&
+            (run.conversation as { project?: { name?: string } }).project?.name,
           status: taskStatusFromRun(run.status),
           updatedAt: run.updatedAt?.toISOString(),
         });

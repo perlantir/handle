@@ -163,4 +163,29 @@ describe("projects routes", () => {
       providerOverride: "anthropic",
     });
   });
+
+  it("lists conversations with latest agent run ids for sidebar history", async () => {
+    const store = createStore();
+    vi.mocked(store.conversation.findMany).mockResolvedValueOnce([
+      {
+        agentRuns: [{ id: "run-latest" }],
+        id: "conversation-test",
+        projectId: "project-test",
+        title: "Follow-up",
+      },
+    ]);
+    const { app } = createApp(store);
+
+    const response = await request(app)
+      .get("/api/projects/project-test/conversations")
+      .expect(200);
+
+    expect(response.body.conversations).toEqual([
+      expect.objectContaining({
+        id: "conversation-test",
+        latestAgentRunId: "run-latest",
+        title: "Follow-up",
+      }),
+    ]);
+  });
 });

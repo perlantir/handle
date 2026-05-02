@@ -150,7 +150,9 @@ export interface TaskDetailResponse {
   goal: string;
   id: string;
   messages: TaskMessage[];
+  conversationTitle?: string | null;
   projectId?: string;
+  projectName?: string;
   providerId?: string | null;
   providerModel?: string | null;
   status: TaskStatus;
@@ -197,6 +199,7 @@ export interface ConversationSummary {
   id: string;
   projectId: string;
   title?: string | null;
+  latestAgentRunId?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

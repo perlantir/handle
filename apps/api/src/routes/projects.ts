@@ -276,10 +276,25 @@ export function createProjectsRouter({
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
       const conversations = await store.conversation.findMany({
+        include: {
+          agentRuns: {
+            orderBy: { startedAt: "desc" },
+            select: { id: true },
+            take: 1,
+          },
+        },
         orderBy: { updatedAt: "desc" },
         where: { projectId: req.params.projectId },
       });
-      return res.json({ conversations });
+      return res.json({
+        conversations: conversations.map((conversation) => ({
+          ...(conversation as Record<string, unknown>),
+          latestAgentRunId: (
+            conversation as { agentRuns?: Array<{ id: string }> }
+          ).agentRuns?.[0]?.id ?? null,
+          agentRuns: undefined,
+        })),
+      });
     }),
   );
 
