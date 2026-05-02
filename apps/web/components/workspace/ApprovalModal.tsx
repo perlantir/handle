@@ -20,10 +20,28 @@ interface ApprovalModalProps {
 const scopeLabels = {
   browser_use_actual_chrome: ["Browser", "operate"],
   destructive_integration_action: ["Integration", "write"],
+  file_delete: ["Files", "delete"],
   file_write_outside_workspace: ["Files", "write"],
   risky_browser_action: ["Browser", "approve"],
   shell_exec: ["Shell", "execute"],
 } satisfies Record<PendingApproval["request"]["type"], [string, string]>;
+
+function approvalTitle(approval: PendingApproval) {
+  const { request } = approval;
+
+  switch (request.type) {
+    case "file_delete":
+      return `Delete ${request.path ?? "selected path"}?`;
+    case "file_write_outside_workspace":
+      return `Write to ${request.path ?? "selected path"}? This is outside the task workspace.`;
+    case "risky_browser_action":
+      return "Approve action?";
+    case "shell_exec":
+      return `Run command: \`${request.command ?? "unknown"}\`?`;
+    default:
+      return request.reason;
+  }
+}
 
 function RiskRow({
   highlighted = false,
@@ -60,6 +78,7 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
   const [trustSimilarRuns, setTrustSimilarRuns] = useState(false);
   const [scope, action] = scopeLabels[approval.request.type];
   const isRiskyBrowserAction = approval.request.type === "risky_browser_action";
+  const title = approvalTitle(approval);
 
   async function decide(decision: "approved" | "denied") {
     setIsSubmitting(true);
@@ -90,9 +109,9 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
           label="Needs approval"
         />
         <h2 className="font-display text-[22px] font-semibold leading-[28px] tracking-[-0.02em] text-text-primary">
-          {isRiskyBrowserAction ? "Approve action?" : approval.request.reason}
+          {title}
         </h2>
-        {isRiskyBrowserAction && (
+        {(isRiskyBrowserAction || title !== approval.request.reason) && (
           <p className="mt-2 text-[13px] leading-[19px] text-text-secondary">
             {approval.request.reason}
           </p>
