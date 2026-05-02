@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { awaitApproval } from "../approvals/approvalWaiter";
 import { createBrowserSession, type BrowserSession } from "../execution/browserSession";
 import { emitTaskEvent } from "../lib/eventBus";
 import { redactSecrets } from "../lib/redact";
@@ -95,7 +96,14 @@ function redactArgs(args: Record<string, unknown>) {
 function getBrowserSession(context: ToolExecutionContext): BrowserSession {
   if (context.browserSession) return context.browserSession;
 
-  context.browserSession = createBrowserSession({ sandbox: context.sandbox });
+  context.browserSession = createBrowserSession({
+    approval: {
+      requestApproval: ({ request, taskId }) => awaitApproval(taskId, request),
+      taskId: context.taskId,
+      trustedDomains: context.trustedDomains ?? [],
+    },
+    sandbox: context.sandbox,
+  });
   return context.browserSession;
 }
 

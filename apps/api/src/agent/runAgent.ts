@@ -81,6 +81,12 @@ interface TaskStore {
   };
 }
 
+interface SafetySettingsStore {
+  safetySettings?: {
+    findUnique(args: unknown): Promise<{ trustedDomains: unknown } | null>;
+  };
+}
+
 interface ProviderRegistryLike {
   getActiveModel(args: {
     modelOverride?: string;
@@ -95,7 +101,7 @@ interface ProviderRegistryLike {
 
 interface RunAgentDependencies {
   createAgent?: (
-    context: { sandbox: E2BSandboxLike; taskId: string },
+    context: { sandbox: E2BSandboxLike; taskId: string; trustedDomains?: string[] },
     options: { llm: BaseChatModel },
   ) => Promise<AgentLike>;
   createSandbox?: typeof createE2BSandbox;
@@ -118,6 +124,19 @@ function normalizeProviderOverride(value: string | null | undefined) {
 
 function timeoutError(label: string, timeoutMs: number) {
   return new Error(`${label} timed out after ${timeoutMs}ms`);
+}
+
+function normalizeTrustedDomains(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+async function loadTrustedDomains(store: TaskStore) {
+  const safetyStore = store as TaskStore & SafetySettingsStore;
+  if (!safetyStore.safetySettings) return [];
+
+  const row = await safetyStore.safetySettings.findUnique({ where: { id: "global" } });
+  return normalizeTrustedDomains(row?.trustedDomains);
 }
 
 async function withTimeout<T>(
@@ -240,7 +259,8 @@ export function createAgentRunner({
         where: { id: taskId },
       });
 
-      const agent = await createAgent({ taskId, sandbox }, { llm: model });
+      const trustedDomains = await loadTrustedDomains(store);
+      const agent = await createAgent({ taskId, sandbox, trustedDomains }, { llm: model });
       const stream = await agent.streamEvents(
         { chat_history: [], input: redactSecrets(goal) },
         { version: "v2" },

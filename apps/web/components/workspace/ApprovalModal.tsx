@@ -21,6 +21,7 @@ const scopeLabels = {
   browser_use_actual_chrome: ["Browser", "operate"],
   destructive_integration_action: ["Integration", "write"],
   file_write_outside_workspace: ["Files", "write"],
+  risky_browser_action: ["Browser", "approve"],
   shell_exec: ["Shell", "execute"],
 } satisfies Record<PendingApproval["request"]["type"], [string, string]>;
 

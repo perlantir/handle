@@ -1,6 +1,13 @@
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
+import type { ApprovalPayload } from "@handle/shared";
 import { Sandbox as E2BDesktopSandbox } from "@e2b/desktop";
+import {
+  classifyBrowserAction,
+  hostMatchesTrustedDomains,
+  type BrowserPageContext,
+  type RiskClassification,
+} from "./browserRiskClassifier";
 import { logger } from "../lib/logger";
 import { redactSecrets } from "../lib/redact";
 
@@ -37,7 +44,22 @@ export interface BrowserSessionLogger {
   warn?(payload: Record<string, unknown>, message: string): void;
 }
 
+export type BrowserApprovalDecision = "approved" | "denied" | "timeout";
+
+export interface BrowserActionApprovalRequest {
+  classification: RiskClassification;
+  request: ApprovalPayload;
+  taskId: string;
+}
+
+export interface BrowserActionApproval {
+  requestApproval(request: BrowserActionApprovalRequest): Promise<BrowserApprovalDecision>;
+  taskId: string;
+  trustedDomains?: string[];
+}
+
 export interface BrowserSessionCreateOptions {
+  approval?: BrowserActionApproval;
   display?: string;
   logger?: BrowserSessionLogger;
   port?: number;
@@ -207,6 +229,10 @@ async function handleAction(payload) {
     return pageState(Boolean(args.includeScreenshot));
   }
 
+  if (action === "pageContext") {
+    return { html: await page.content(), ...(await pageState(false)) };
+  }
+
   throw new Error("Unsupported browser action: " + action);
 }
 
@@ -359,7 +385,7 @@ export class E2BBrowserSession implements BrowserSession {
   constructor(
     private readonly options: Required<
       Pick<BrowserSessionCreateOptions, "display" | "logger" | "port" | "sandbox" | "userAgent" | "viewport">
-    >,
+    > & Pick<BrowserSessionCreateOptions, "approval">,
   ) {
     this.sandboxId = options.sandbox.sandboxId ?? "unknown";
   }
@@ -529,6 +555,7 @@ export class E2BBrowserSession implements BrowserSession {
     );
 
     try {
+      await this.requireApprovalIfNeeded(action, args, options.target);
       const result = await this.invokeAction(action, args);
       this.logActionComplete(action, options.target, startedAt, result);
       return result;
@@ -556,10 +583,96 @@ export class E2BBrowserSession implements BrowserSession {
         "Retrying idempotent browser action after browser session restart",
       );
       await this.restart();
+      await this.requireApprovalIfNeeded(action, args, options.target);
       const result = await this.invokeAction(action, args);
       this.logActionComplete(action, options.target, startedAt, result, true);
       return result;
     }
+  }
+
+  private async requireApprovalIfNeeded(
+    action: string,
+    args: Record<string, unknown>,
+    target: string,
+  ) {
+    const approval = this.options.approval;
+    if (!approval) return;
+
+    const startedAt = Date.now();
+    const pageContext = await this.pageContextForRisk(action, args, target);
+    let classification = classifyBrowserAction(action, target, pageContext);
+    const actionUrl =
+      action === "navigate" && typeof args.url === "string" ? args.url : pageContext.url;
+
+    if (
+      classification.level === "approve" &&
+      hostMatchesTrustedDomains(actionUrl, approval.trustedDomains ?? [])
+    ) {
+      classification = {
+        level: "safe",
+        reason: `Trusted domain allowed action that would otherwise require approval: ${classification.reason}`,
+        ...(classification.matchedRule ? { matchedRule: classification.matchedRule } : {}),
+      };
+    }
+
+    let approvalDecision: BrowserApprovalDecision | undefined;
+    let approvalRequested = false;
+
+    try {
+      if (classification.level === "safe") return;
+
+      if (classification.level === "deny") {
+        throw new Error(classification.reason);
+      }
+
+      approvalRequested = true;
+      const request = {
+        action: `browser_${action}`,
+        reason: classification.reason,
+        target,
+        type: "risky_browser_action",
+      } satisfies ApprovalPayload;
+
+      approvalDecision = await approval.requestApproval({
+        classification,
+        request,
+        taskId: approval.taskId,
+      });
+
+      if (approvalDecision !== "approved") {
+        throw new Error(`Risky browser action ${approvalDecision}: ${classification.reason}`);
+      }
+    } finally {
+      this.options.logger.info(
+        {
+          action,
+          approvalDecision,
+          approvalDurationMs: durationSince(startedAt),
+          approvalRequested,
+          classification,
+          sandboxId: this.sandboxId,
+          target,
+        },
+        "Browser action risk classification complete",
+      );
+    }
+  }
+
+  private async pageContextForRisk(
+    action: string,
+    args: Record<string, unknown>,
+    target: string,
+  ): Promise<BrowserPageContext> {
+    if (action === "navigate") {
+      return { html: "", url: typeof args.url === "string" ? args.url : target };
+    }
+
+    await this.ensureReady();
+    const result = await this.invokeAction("pageContext", {});
+    return {
+      html: stringFromResult(result, "html"),
+      url: stringFromResult(result, "url"),
+    };
   }
 
   private async invokeAction(action: string, args: Record<string, unknown>) {
@@ -908,6 +1021,7 @@ export class E2BBrowserSession implements BrowserSession {
 
 export function createBrowserSession(options: BrowserSessionCreateOptions): BrowserSession {
   return new E2BBrowserSession({
+    ...(options.approval ? { approval: options.approval } : {}),
     display: options.display ?? DEFAULT_DISPLAY,
     logger: options.logger ?? logger,
     port: options.port ?? DEFAULT_PORT,

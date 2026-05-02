@@ -10,6 +10,7 @@ export interface ToolExecutionContext {
   taskId: string;
   browserSession?: BrowserSession;
   sandbox: E2BSandboxLike;
+  trustedDomains?: string[];
 }
 
 export interface ToolDefinition {

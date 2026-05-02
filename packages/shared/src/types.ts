@@ -93,11 +93,13 @@ export interface ApprovalPayload {
     | 'shell_exec'
     | 'file_write_outside_workspace'
     | 'browser_use_actual_chrome'
+    | 'risky_browser_action'
     | 'destructive_integration_action';
   command?: string;
   path?: string;
   integration?: string;
   action?: string;
+  target?: string;
   reason: string;
 }
 

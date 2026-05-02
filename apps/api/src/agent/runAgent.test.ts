@@ -102,7 +102,7 @@ describe("createAgentRunner", () => {
       },
     });
     expect(createAgent).toHaveBeenCalledWith(
-      { sandbox: testSandbox, taskId: "task-test" },
+      { sandbox: testSandbox, taskId: "task-test", trustedDomains: [] },
       { llm: fakeModel },
     );
     expect(store.task.update).toHaveBeenCalledWith({

@@ -166,6 +166,90 @@ describe("browserSession", () => {
     expect(shutdownCalls).toBe(0);
   });
 
+  it("requests approval before destructive browser clicks", async () => {
+    let actionCalls = 0;
+    const approvals: unknown[] = [];
+    const { sandbox } = sandboxWithRunner((command) => {
+      if (command.includes('\\"action\\":\\"pageContext\\"')) {
+        return actionResponse({
+          html: "<html><body><button>Delete Account</button></body></html>",
+          title: "Settings",
+          url: "https://example.com/settings",
+        });
+      }
+
+      if (command.includes("/action")) {
+        actionCalls += 1;
+        return actionResponse({
+          title: "Deleted",
+          url: "https://example.com/settings",
+        });
+      }
+
+      return ok();
+    });
+
+    const session = createBrowserSession({
+      approval: {
+        requestApproval: vi.fn(async (request) => {
+          approvals.push(request);
+          return "approved";
+        }),
+        taskId: "task-browser-approval",
+      },
+      logger: createLogger(),
+      sandbox,
+    });
+
+    await expect(session.click("button")).resolves.toMatchObject({
+      title: "Deleted",
+      url: "https://example.com/settings",
+    });
+
+    expect(actionCalls).toBe(1);
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]).toMatchObject({
+      request: {
+        action: "browser_click",
+        reason: expect.stringContaining("Delete Account"),
+        target: "button",
+        type: "risky_browser_action",
+      },
+      taskId: "task-browser-approval",
+    });
+  });
+
+  it("blocks risky browser actions when approval is denied", async () => {
+    let clickCalls = 0;
+    const { sandbox } = sandboxWithRunner((command) => {
+      if (command.includes('\\"action\\":\\"pageContext\\"')) {
+        return actionResponse({
+          html: "<html><body><button>Delete Account</button></body></html>",
+          title: "Settings",
+          url: "https://example.com/settings",
+        });
+      }
+
+      if (command.includes('\\"action\\":\\"click\\"')) {
+        clickCalls += 1;
+      }
+
+      return ok();
+    });
+
+    const session = createBrowserSession({
+      approval: {
+        requestApproval: vi.fn(async () => "denied"),
+        taskId: "task-browser-approval",
+      },
+      logger: createLogger(),
+      sandbox,
+    });
+
+    await expect(session.click("button")).rejects.toThrow("Risky browser action denied");
+    expect(clickCalls).toBe(0);
+  });
+
   it("extracts page text and shuts down the session", async () => {
     let shutdownCalls = 0;
     const { sandbox } = sandboxWithRunner((command) => {
