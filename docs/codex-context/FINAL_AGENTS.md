@@ -539,6 +539,51 @@ introduces new failure modes. Phase 2 surfaced this discipline through
 the KIMI, OAuth, and plan-generation debug cycles.
 
 ==================================================
+RULE 34: CODEX RUNS LIVE SMOKE BEFORE HUMAN VERIFICATION
+==================================================
+
+For sandbox, LLM, network, browser automation, and OAuth-touching
+features, Codex runs the relevant live smoke before declaring the
+work ready for human verification.
+
+This applies when implementing or fixing any code path that touches:
+- E2B sandboxes, including sandbox creation, command execution, or
+  file operations
+- Real LLM API calls, including provider tests, agent runs, and
+  computer-use tasks
+- Real browser automation, including browser tools and computer-use
+  actions
+- Real OAuth flows
+
+Codex runs the relevant smoke command on the user's Mac before
+declaring the work ready:
+
+```
+cd /Users/perlantir/projects/Handle
+git pull
+pnpm install
+pnpm smoke:<name>
+```
+
+If the smoke fails, Codex investigates and fixes, then re-runs. Codex
+stops only when:
+- The smoke passes, then declares ready for user verification
+- The smoke has failed three times with the same root cause, then
+  stops and asks the user
+- The smoke hits a non-recoverable issue, such as missing credentials,
+  network outage, or sandbox quota, then stops and explains
+- The fix would require an architectural change, then stops and
+  proposes that change
+
+The user still performs final verification before signoff. This rule
+eliminates fix-cycle ping-pong for bugs Codex can fix without human
+input; it does not replace user verification at signoff.
+
+Live smoke runs cost real money, typically around $0.05-0.50 each.
+That tradeoff is acceptable for faster iteration. The stop conditions
+exist to prevent runaway costs.
+
+==================================================
 COORDINATION: WHEN TO STOP AND ASK
 ==================================================
 
