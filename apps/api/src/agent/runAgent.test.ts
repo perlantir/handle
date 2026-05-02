@@ -102,7 +102,7 @@ describe("createAgentRunner", () => {
       },
     });
     expect(createAgent).toHaveBeenCalledWith(
-      { sandbox: testSandbox, taskId: "task-test" },
+      { sandbox: testSandbox, taskId: "task-test", trustedDomains: [] },
       { llm: fakeModel },
     );
     expect(store.task.update).toHaveBeenCalledWith({
@@ -157,6 +157,179 @@ describe("createAgentRunner", () => {
       taskId: "task-test",
       taskOverride: "openrouter",
     });
+  });
+
+  it("routes browser and desktop goals to the E2B Desktop sandbox", async () => {
+    const headlessSandbox = sandbox();
+    const desktopSandbox = { ...sandbox(), sandboxId: "desktop-sandbox-test" };
+    const createSandbox = vi.fn().mockResolvedValue(headlessSandbox);
+    const createDesktopSandbox = vi.fn().mockResolvedValue(desktopSandbox);
+    const createAgent = vi.fn().mockResolvedValue({
+      streamEvents: vi.fn().mockReturnValue(successfulStream()),
+    });
+    const selectedProvider = provider("openai", "gpt-4o");
+    const runner = createAgentRunner({
+      createAgent,
+      createDesktopSandbox,
+      createSandbox,
+      emitEvent: vi.fn(),
+      emitPlan: vi.fn().mockResolvedValue(undefined),
+      isSmokeEnabled: () => false,
+      providerRegistry: {
+        getActiveModel: vi.fn().mockResolvedValue({
+          model: fakeModel,
+          provider: selectedProvider,
+        }),
+        initialize: vi.fn().mockResolvedValue(undefined),
+      },
+      store: {
+        message: {
+          create: vi.fn().mockResolvedValue({}),
+        },
+        task: {
+          findUnique: vi.fn().mockResolvedValue({ providerOverride: null }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      },
+    });
+
+    await runner(
+      "task-desktop-test",
+      "Navigate to https://news.ycombinator.com.",
+    );
+
+    expect(createDesktopSandbox).toHaveBeenCalledWith({
+      resolution: [1280, 800],
+    });
+    expect(createSandbox).not.toHaveBeenCalled();
+    expect(createAgent).toHaveBeenCalledWith(
+      {
+        sandbox: desktopSandbox,
+        taskId: "task-desktop-test",
+        trustedDomains: [],
+      },
+      { llm: fakeModel },
+    );
+  });
+
+  it("runs pure desktop screenshot goals directly through computer_use", async () => {
+    const desktopSandbox = { ...sandbox(), sandboxId: "desktop-direct-test" };
+    const createAgent = vi.fn();
+    const createComputerUseTools = vi.fn().mockReturnValue([
+      {
+        implementation: vi
+          .fn()
+          .mockResolvedValue(
+            "I see an empty desktop. A panel is visible. The screen is ready.",
+          ),
+      },
+    ]);
+    const selectedProvider = provider("openai", "gpt-4o");
+    const store = {
+      message: {
+        create: vi.fn().mockResolvedValue({}),
+      },
+      task: {
+        findUnique: vi.fn().mockResolvedValue({ providerOverride: "openai" }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const emitEvent = vi.fn();
+    const runner = createAgentRunner({
+      createAgent,
+      createComputerUseTools,
+      createDesktopSandbox: vi.fn().mockResolvedValue(desktopSandbox),
+      createSandbox: vi.fn(),
+      emitEvent,
+      emitPlan: vi.fn().mockResolvedValue(undefined),
+      isSmokeEnabled: () => false,
+      providerRegistry: {
+        getActiveModel: vi.fn().mockResolvedValue({
+          model: fakeModel,
+          provider: selectedProvider,
+        }),
+        initialize: vi.fn().mockResolvedValue(undefined),
+      },
+      store,
+    });
+
+    await runner(
+      "task-direct-computer-use-test",
+      "Take a screenshot of the desktop and describe it.",
+    );
+
+    expect(createAgent).not.toHaveBeenCalled();
+    expect(createComputerUseTools()[0].implementation).toHaveBeenCalledWith(
+      {
+        goal: "Take a screenshot of the desktop and describe it.",
+        maxIterations: 4,
+      },
+      {
+        sandbox: desktopSandbox,
+        taskId: "task-direct-computer-use-test",
+        trustedDomains: [],
+      },
+    );
+    expect(store.message.create).toHaveBeenCalledWith({
+      data: {
+        content:
+          "I see an empty desktop. A panel is visible. The screen is ready.",
+        role: "ASSISTANT",
+        taskId: "task-direct-computer-use-test",
+      },
+    });
+    expect(store.task.update).toHaveBeenCalledWith({
+      data: { status: "STOPPED" },
+      where: { id: "task-direct-computer-use-test" },
+    });
+    expect(emitEvent).toHaveBeenCalledWith({
+      content:
+        "I see an empty desktop. A panel is visible. The screen is ready.",
+      role: "assistant",
+      taskId: "task-direct-computer-use-test",
+      type: "message",
+    });
+  });
+
+  it("keeps non-browser goals on the standard E2B sandbox", async () => {
+    const headlessSandbox = sandbox();
+    const createSandbox = vi.fn().mockResolvedValue(headlessSandbox);
+    const createDesktopSandbox = vi.fn();
+    const selectedProvider = provider("openai", "gpt-4o");
+    const runner = createAgentRunner({
+      createAgent: vi.fn().mockResolvedValue({
+        streamEvents: vi.fn().mockReturnValue(successfulStream()),
+      }),
+      createDesktopSandbox,
+      createSandbox,
+      emitEvent: vi.fn(),
+      emitPlan: vi.fn().mockResolvedValue(undefined),
+      isSmokeEnabled: () => false,
+      providerRegistry: {
+        getActiveModel: vi.fn().mockResolvedValue({
+          model: fakeModel,
+          provider: selectedProvider,
+        }),
+        initialize: vi.fn().mockResolvedValue(undefined),
+      },
+      store: {
+        message: {
+          create: vi.fn().mockResolvedValue({}),
+        },
+        task: {
+          findUnique: vi.fn().mockResolvedValue({ providerOverride: null }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      },
+    });
+
+    await runner(
+      "task-shell-test",
+      "Write a Python script that prints hello world.",
+    );
+
+    expect(createSandbox).toHaveBeenCalledOnce();
+    expect(createDesktopSandbox).not.toHaveBeenCalled();
   });
 
   it("marks the task errored when plan generation fails before sandbox creation", async () => {

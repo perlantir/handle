@@ -21,6 +21,7 @@ const scopeLabels = {
   browser_use_actual_chrome: ["Browser", "operate"],
   destructive_integration_action: ["Integration", "write"],
   file_write_outside_workspace: ["Files", "write"],
+  risky_browser_action: ["Browser", "approve"],
   shell_exec: ["Shell", "execute"],
 } satisfies Record<PendingApproval["request"]["type"], [string, string]>;
 
@@ -58,6 +59,7 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [trustSimilarRuns, setTrustSimilarRuns] = useState(false);
   const [scope, action] = scopeLabels[approval.request.type];
+  const isRiskyBrowserAction = approval.request.type === "risky_browser_action";
 
   async function decide(decision: "approved" | "denied") {
     setIsSubmitting(true);
@@ -88,8 +90,13 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
           label="Needs approval"
         />
         <h2 className="font-display text-[22px] font-semibold leading-[28px] tracking-[-0.02em] text-text-primary">
-          {approval.request.reason}
+          {isRiskyBrowserAction ? "Approve action?" : approval.request.reason}
         </h2>
+        {isRiskyBrowserAction && (
+          <p className="mt-2 text-[13px] leading-[19px] text-text-secondary">
+            {approval.request.reason}
+          </p>
+        )}
       </div>
 
       <div className="border-t border-border-subtle px-8 py-5">
@@ -109,6 +116,12 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
             approval.request.integration ??
               approval.request.path ??
               approval.request.command,
+            isRiskyBrowserAction && approval.request.action
+              ? `Action: ${approval.request.action}`
+              : null,
+            isRiskyBrowserAction && approval.request.target
+              ? `Target: ${approval.request.target}`
+              : null,
           ]
             .filter(Boolean)
             .map((chip) => (
@@ -138,18 +151,19 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
         </span>
         <span className="flex-1" />
         <PillButton
+          className={isRiskyBrowserAction ? "border-status-error/25 text-status-error hover:bg-status-error/5" : undefined}
           disabled={isSubmitting}
           onClick={() => decide("denied")}
           variant="secondary"
         >
-          Decline
+          {isRiskyBrowserAction ? "Deny" : "Decline"}
         </PillButton>
         <PillButton
           disabled={isSubmitting}
           onClick={() => decide("approved")}
           variant="primary"
         >
-          Approve & run
+          {isRiskyBrowserAction ? "Approve" : "Approve & run"}
         </PillButton>
       </div>
     </Modal>

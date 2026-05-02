@@ -14,8 +14,14 @@ import {
   createLangChainTools,
   type ToolExecutionContext,
 } from "./toolRegistry";
+import { createBrowserToolDefinitions } from "./browserTools";
+import { createComputerUseToolDefinitions } from "./computerUseTools";
 import { createPhase1ToolDefinitions } from "./tools";
-import { PHASE_1_SYSTEM_PROMPT, SYSTEM_PROMPT_VERSION } from "./prompts";
+import {
+  PHASE_1_SYSTEM_PROMPT,
+  PHASE_3_SYSTEM_PROMPT,
+  SYSTEM_PROMPT_VERSION,
+} from "./prompts";
 
 export function createOpenAIChatModel({
   streaming = true,
@@ -61,6 +67,41 @@ export async function createPhase1Agent(
     prompt,
     // Provider content blocks can stream in vendor-specific shapes.
     // Parse one complete AIMessage before deciding on the next action.
+    streamRunnable: false,
+    tools,
+  });
+
+  return new AgentExecutor({
+    agent,
+    maxIterations: 40,
+    returnIntermediateSteps: false,
+    tools,
+    verbose: false,
+  });
+}
+
+export async function createHandleAgent(
+  context: ToolExecutionContext,
+  options: CreatePhase1AgentOptions = {},
+) {
+  const tools = createLangChainTools(
+    [
+      ...createPhase1ToolDefinitions(),
+      ...createBrowserToolDefinitions(),
+      ...createComputerUseToolDefinitions(),
+    ],
+    context,
+  );
+  const llm = options.llm ?? createOpenAIChatModel();
+  const prompt = ChatPromptTemplate.fromMessages([
+    ["system", PHASE_3_SYSTEM_PROMPT],
+    new MessagesPlaceholder("chat_history"),
+    ["human", "{input}"],
+    new MessagesPlaceholder("agent_scratchpad"),
+  ]);
+  const agent = createToolCallingAgent({
+    llm,
+    prompt,
     streamRunnable: false,
     tools,
   });

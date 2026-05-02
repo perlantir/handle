@@ -17,6 +17,7 @@ test-results/
 .turbo/
 *.tsbuildinfo
 apps/web/next-env.d.ts
+smoke-artifacts/
 
 # Logs
 *.log

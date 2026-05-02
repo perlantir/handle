@@ -3,7 +3,7 @@ import { AIMessage } from "@langchain/core/messages";
 import type { ChatResult } from "@langchain/core/outputs";
 import { FakeStreamingChatModel } from "@langchain/core/utils/testing";
 import { describe, expect, it } from "vitest";
-import { createPhase1Agent } from "./createAgent";
+import { createHandleAgent, createPhase1Agent } from "./createAgent";
 import type { E2BSandboxLike } from "../execution/types";
 
 function structuredText(text: string) {
@@ -166,4 +166,32 @@ describe("createPhase1Agent", () => {
       );
     },
   );
+});
+
+describe("createHandleAgent", () => {
+  it("creates an AgentExecutor with Phase 1, browser, and computer-use tools", async () => {
+    process.env.OPENAI_API_KEY = "test-key-not-real";
+
+    const executor = await createHandleAgent({
+      taskId: "task-agent-phase3-test",
+      sandbox,
+    });
+    const toolNames = executor.tools.map((agentTool) => agentTool.name);
+
+    expect(toolNames).toEqual([
+      "shell_exec",
+      "file_write",
+      "file_read",
+      "file_list",
+      "browser_navigate",
+      "browser_click",
+      "browser_type",
+      "browser_extract_text",
+      "browser_screenshot",
+      "browser_go_back",
+      "browser_scroll",
+      "browser_wait_for_selector",
+      "computer_use",
+    ]);
+  });
 });

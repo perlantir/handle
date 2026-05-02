@@ -76,6 +76,18 @@ export interface ProviderFallbackEvent {
   taskId: string;
 }
 
+export interface BrowserScreenshotEvent {
+  type: 'browser_screenshot';
+  taskId: string;
+  callId?: string;
+  imageBase64: string;
+  width: number;
+  height: number;
+  byteCount: number;
+  timestamp: string;
+  source: 'browser_tools' | 'computer_use';
+}
+
 export type SSEEvent =
   | ThoughtEvent
   | ToolCallEvent
@@ -85,6 +97,7 @@ export type SSEEvent =
   | AssistantMessageEvent
   | AgentErrorEvent
   | ApprovalRequestEvent
+  | BrowserScreenshotEvent
   | PlanUpdateEvent
   | ProviderFallbackEvent;
 
@@ -93,11 +106,13 @@ export interface ApprovalPayload {
     | 'shell_exec'
     | 'file_write_outside_workspace'
     | 'browser_use_actual_chrome'
+    | 'risky_browser_action'
     | 'destructive_integration_action';
   command?: string;
   path?: string;
   integration?: string;
   action?: string;
+  target?: string;
   reason: string;
 }
 

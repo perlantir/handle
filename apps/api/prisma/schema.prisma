@@ -44,6 +44,12 @@ model ProviderConfig {
   updatedAt     DateTime @default(now()) @updatedAt
 }
 
+model SafetySettings {
+  id             String   @id @default("global")
+  trustedDomains Json     @default("[]")
+  updatedAt      DateTime @default(now()) @updatedAt
+}
+
 enum TaskStatus {
   RUNNING
   WAITING

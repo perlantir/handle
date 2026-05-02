@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useReducer } from 'react';
-import type { ApprovalPayload, PlanStep, SSEEvent, TaskStatus } from '@handle/shared';
+import type { ApprovalPayload, BrowserScreenshotEvent, PlanStep, SSEEvent, TaskStatus } from '@handle/shared';
 
 export interface ToolCallState {
   args: Record<string, unknown>;
@@ -15,6 +15,7 @@ export interface ToolCallState {
 }
 
 export interface AgentStreamState {
+  browserScreenshots: BrowserScreenshotEvent[];
   error: string | null;
   finalMessage: string | null;
   pendingApproval: (ApprovalPayload & { approvalId: string }) | null;
@@ -27,6 +28,7 @@ export interface AgentStreamState {
 type Action = { type: 'event'; event: SSEEvent } | { type: 'reset' };
 
 const initialState: AgentStreamState = {
+  browserScreenshots: [],
   error: null,
   finalMessage: null,
   pendingApproval: null,
@@ -44,6 +46,11 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
   switch (event.type) {
     case 'approval_request':
       return { ...state, pendingApproval: { ...event.request, approvalId: event.approvalId } };
+    case 'browser_screenshot':
+      return {
+        ...state,
+        browserScreenshots: [...state.browserScreenshots, event].slice(-10),
+      };
     case 'error':
       return { ...state, error: event.message, status: 'ERROR' };
     case 'message':
