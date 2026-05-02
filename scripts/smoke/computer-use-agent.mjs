@@ -138,6 +138,7 @@ async function waitForServer(url, label) {
 async function createTask() {
   const response = await fetch(`${API_URL}/api/tasks`, {
     body: JSON.stringify({
+      backend: "e2b",
       goal: GOAL,
       ...(providerOverride ? { providerOverride } : {}),
     }),
