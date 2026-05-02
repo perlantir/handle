@@ -105,6 +105,7 @@ export interface ApprovalPayload {
   type:
     | 'shell_exec'
     | 'file_write_outside_workspace'
+    | 'file_delete'
     | 'browser_use_actual_chrome'
     | 'risky_browser_action'
     | 'destructive_integration_action';
