@@ -292,6 +292,64 @@ describe('LocalBackend shell execution', () => {
     });
   });
 
+  it('allows workspace-internal command chains without approval', async () => {
+    const requestApproval = vi.fn(async () => 'approved' as const);
+    const backend = new LocalBackend('task-local-shell-workspace-chain-test', {
+      auditLogPath,
+      requestApproval,
+      workspaceDir,
+    });
+    const outputPath = join(workspaceDir, 'chain-output.txt');
+
+    await backend.initialize();
+    const result = await backend.shellExec(`cd ${workspaceDir} && echo hello > ${outputPath}`, {
+      onStderr: () => {},
+      onStdout: () => {},
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(await fs.readFile(outputPath, 'utf8')).toContain('hello');
+    expect(requestApproval).not.toHaveBeenCalled();
+    const audit = (await fs.readFile(auditLogPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    expect(audit.at(-1)).toMatchObject({
+      action: 'shell_exec',
+      decision: 'allow',
+    });
+  });
+
+  it('routes shell redirection outside scope through approval before spawning', async () => {
+    const requestApproval = vi.fn(async () => 'denied' as const);
+    const backend = new LocalBackend('task-local-shell-redirect-approval-test', {
+      auditLogPath,
+      requestApproval,
+      workspaceDir,
+    });
+
+    await backend.initialize();
+    await expect(
+      backend.shellExec('echo hello > ~/Desktop/handle-redirect-test.txt', {
+        onStderr: () => {},
+        onStdout: () => {},
+      }),
+    ).rejects.toThrow('User denied approval');
+
+    expect(requestApproval).toHaveBeenCalledWith(
+      'task-local-shell-redirect-approval-test',
+      expect.objectContaining({
+        command: 'echo hello > ~/Desktop/handle-redirect-test.txt',
+        type: 'shell_exec',
+      }),
+      { timeoutMs: 300000 },
+    );
+    const audit = (await fs.readFile(auditLogPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    expect(audit.at(-1)).toMatchObject({
+      action: 'shell_exec',
+      approved: false,
+      decision: 'approve',
+      matchedPattern: 'redirect-outside-scope',
+    });
+  });
+
   it('denies forbidden shell commands before spawning', async () => {
     const backend = new LocalBackend('task-local-shell-deny-test', {
       auditLogPath,
