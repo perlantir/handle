@@ -7,12 +7,21 @@ import { redactSecrets } from "../lib/redact";
 export interface BrowserSessionSandbox {
   sandboxId?: string;
   commands: {
-    run(command: string): Promise<{
+    run(
+      command: string,
+      options?: {
+        onStderr?: (data: string) => void | Promise<void>;
+        onStdout?: (data: string) => void | Promise<void>;
+      },
+    ): Promise<{
       error?: string;
       exitCode?: number;
       stderr?: string;
       stdout?: string;
     }>;
+  };
+  files?: {
+    write(path: string, data: string): Promise<unknown>;
   };
 }
 
@@ -86,6 +95,8 @@ const DEFAULT_DISPLAY = ":0";
 const SERVER_PATH = "/tmp/handle-browser-server.py";
 const SERVER_LOG_PATH = "/tmp/handle-browser-server.log";
 const SERVER_PROFILE_PATH = "/tmp/handle-browser-profile";
+const VENV_PATH = "/tmp/handle-browser-playwright-venv";
+const VENV_PYTHON = `${VENV_PATH}/bin/python`;
 const ACTION_TIMEOUT_MS = 30_000;
 
 const BROWSER_SERVER_SCRIPT = String.raw`
@@ -261,8 +272,8 @@ function shellSingleQuote(value: string) {
   return `'${value.replaceAll("'", "'\"'\"'")}'`;
 }
 
-function pythonJsonLiteral(value: unknown) {
-  return JSON.stringify(JSON.stringify(value));
+function pythonStringLiteral(value: string) {
+  return JSON.stringify(value);
 }
 
 function parseServerResponse(stdout: string): BrowserServerResponse {
@@ -562,30 +573,75 @@ export class E2BBrowserSession implements BrowserSession {
       "Browser runtime install started",
     );
 
-    const result = await this.options.sandbox.commands.run(
-      [
-        "python3 -m pip install --quiet --disable-pip-version-check playwright",
-        "python3 -m playwright install chromium",
-      ].join(" && "),
+    const command = [
+      "set -eu",
+      `if [ ! -x ${shellSingleQuote(VENV_PYTHON)} ]; then python3 -m venv ${shellSingleQuote(VENV_PATH)}; fi`,
+      `${shellSingleQuote(VENV_PYTHON)} -m pip install --quiet --disable-pip-version-check playwright`,
+      `${shellSingleQuote(VENV_PYTHON)} -m playwright install chromium`,
+    ].join("\n");
+
+    this.options.logger.info(
+      { command: redactSecrets(command), sandboxId: this.sandboxId },
+      "Browser runtime install command",
     );
+
+    const result = await this.options.sandbox.commands.run(command, {
+      onStderr: (data) => {
+        this.options.logger.info(
+          { sandboxId: this.sandboxId, stderr: redactSecrets(data) },
+          "Browser runtime install stderr",
+        );
+      },
+      onStdout: (data) => {
+        this.options.logger.info(
+          { sandboxId: this.sandboxId, stdout: redactSecrets(data) },
+          "Browser runtime install stdout",
+        );
+      },
+    });
 
     if (typeof result.exitCode === "number" && result.exitCode !== 0) {
       throw new Error(commandFailureMessage("Browser runtime install", result));
     }
 
     this.options.logger.info(
-      { durationMs: durationSince(startedAt), sandboxId: this.sandboxId },
+      {
+        durationMs: durationSince(startedAt),
+        sandboxId: this.sandboxId,
+        venvPath: VENV_PATH,
+      },
       "Browser runtime install complete",
     );
   }
 
   private async writeServerScript() {
+    const startedAt = Date.now();
+
+    if (this.options.sandbox.files?.write) {
+      await this.options.sandbox.files.write(SERVER_PATH, BROWSER_SERVER_SCRIPT);
+      this.options.logger.info(
+        {
+          byteCount: Buffer.byteLength(BROWSER_SERVER_SCRIPT),
+          durationMs: durationSince(startedAt),
+          path: SERVER_PATH,
+          sandboxId: this.sandboxId,
+        },
+        "Browser server script written via filesystem API",
+      );
+      return;
+    }
+
+    this.options.logger.warn?.(
+      { path: SERVER_PATH, sandboxId: this.sandboxId },
+      "Browser server script filesystem API unavailable; falling back to Python writer",
+    );
+
     const encoded = Buffer.from(BROWSER_SERVER_SCRIPT, "utf8").toString("base64");
     const command = [
       "python3 - <<'PY'",
       "import base64",
       "from pathlib import Path",
-      `Path(${pythonJsonLiteral(SERVER_PATH)}).write_bytes(base64.b64decode(${pythonJsonLiteral(encoded)}))`,
+      `Path(${pythonStringLiteral(SERVER_PATH)}).write_bytes(base64.b64decode(${pythonStringLiteral(encoded)}))`,
       "PY",
     ].join("\n");
     const result = await this.options.sandbox.commands.run(command);
@@ -593,6 +649,16 @@ export class E2BBrowserSession implements BrowserSession {
     if (typeof result.exitCode === "number" && result.exitCode !== 0) {
       throw new Error(commandFailureMessage("Browser server script write", result));
     }
+
+    this.options.logger.info(
+      {
+        byteCount: Buffer.byteLength(BROWSER_SERVER_SCRIPT),
+        durationMs: durationSince(startedAt),
+        path: SERVER_PATH,
+        sandboxId: this.sandboxId,
+      },
+      "Browser server script written via Python fallback",
+    );
   }
 
   private async startServer() {
@@ -605,7 +671,7 @@ export class E2BBrowserSession implements BrowserSession {
       `export HANDLE_BROWSER_VIEWPORT_WIDTH=${shellSingleQuote(String(width))}`,
       `export HANDLE_BROWSER_VIEWPORT_HEIGHT=${shellSingleQuote(String(height))}`,
       `export HANDLE_BROWSER_USER_AGENT=${shellSingleQuote(this.options.userAgent)}`,
-      `nohup python3 ${shellSingleQuote(SERVER_PATH)} > ${shellSingleQuote(SERVER_LOG_PATH)} 2>&1 &`,
+      `nohup ${shellSingleQuote(VENV_PYTHON)} ${shellSingleQuote(SERVER_PATH)} > ${shellSingleQuote(SERVER_LOG_PATH)} 2>&1 &`,
       "for i in $(seq 1 100); do",
       this.healthCheckCommand({ allowFailure: true }),
       "  sleep 0.2",
@@ -653,9 +719,9 @@ export class E2BBrowserSession implements BrowserSession {
       "import http.client",
       "import json",
       "import sys",
-      `payload = json.loads(${pythonJsonLiteral(JSON.stringify(payload))})`,
+      `payload = json.loads(${pythonStringLiteral(JSON.stringify(payload))})`,
       `conn = http.client.HTTPConnection("127.0.0.1", ${this.options.port}, timeout=${timeout})`,
-      `conn.request("POST" if ${pythonJsonLiteral(path)} != "/health" else "GET", ${pythonJsonLiteral(path)}, body=json.dumps(payload), headers={"Content-Type": "application/json"})`,
+      `conn.request("POST" if ${pythonStringLiteral(path)} != "/health" else "GET", ${pythonStringLiteral(path)}, body=json.dumps(payload), headers={"Content-Type": "application/json"})`,
       "resp = conn.getresponse()",
       "body = resp.read().decode('utf-8', errors='replace')",
       "print(body)",

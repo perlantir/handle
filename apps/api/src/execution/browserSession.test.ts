@@ -41,13 +41,16 @@ function sandboxWithRunner(run: (command: string) => ReturnType<typeof ok> | Pro
           return run(command);
         }),
       },
+      files: {
+        write: vi.fn(async () => undefined),
+      },
       sandboxId: "sandbox-browser-test",
     },
   };
 }
 
 describe("browserSession", () => {
-  it("installs Browser-Use/Playwright and launches headed Chromium on the desktop display", async () => {
+  it("installs Playwright in a venv, writes the server script through files, and launches headed Chromium", async () => {
     const image = Buffer.from("png-bytes");
     const { calls, sandbox } = sandboxWithRunner((command) => {
       if (command.includes('payload = json.loads') && command.includes('/action')) {
@@ -67,12 +70,26 @@ describe("browserSession", () => {
 
     expect(result.title).toBe("Hacker News");
     expect(result.screenshot.equals(image)).toBe(true);
-    expect(calls[0]).toContain("python3 -m pip install --quiet --disable-pip-version-check playwright");
+    expect(calls[0]).toContain("python3 -m venv '/tmp/handle-browser-playwright-venv'");
+    expect(calls[0]).toContain(
+      "'/tmp/handle-browser-playwright-venv/bin/python' -m pip install --quiet --disable-pip-version-check playwright",
+    );
     expect(calls[0]).not.toContain("browser-use");
-    expect(calls[0]).toContain("python3 -m playwright install chromium");
-    expect(calls[2]).toContain("export DISPLAY=':0'");
-    expect(calls[2]).toContain("HANDLE_BROWSER_VIEWPORT_WIDTH='1280'");
-    expect(calls[2]).toContain("HANDLE_BROWSER_VIEWPORT_HEIGHT='800'");
+    expect(calls[0]).toContain(
+      "'/tmp/handle-browser-playwright-venv/bin/python' -m playwright install chromium",
+    );
+    expect(sandbox.files?.write).toHaveBeenCalledWith(
+      "/tmp/handle-browser-server.py",
+      expect.stringContaining("ThreadingHTTPServer"),
+    );
+    expect(calls[1]).toContain("export DISPLAY=':0'");
+    expect(calls[1]).toContain("HANDLE_BROWSER_VIEWPORT_WIDTH='1280'");
+    expect(calls[1]).toContain("HANDLE_BROWSER_VIEWPORT_HEIGHT='800'");
+    expect(calls[1]).toContain(
+      "nohup '/tmp/handle-browser-playwright-venv/bin/python' '/tmp/handle-browser-server.py'",
+    );
+    expect(calls[2]).toContain('payload = json.loads("{\\"action\\":\\"navigate\\"');
+    expect(calls[2]).not.toContain('payload = json.loads("\\"');
   });
 
   it("retries idempotent actions once after a browser crash", async () => {
