@@ -22,6 +22,7 @@ interface AuthenticatedRequestInput {
 }
 
 interface RespondToApprovalInput extends AuthenticatedRequestInput {
+  alwaysApprove?: boolean;
   approvalId: string;
   decision: ApprovalDecision;
 }
@@ -38,6 +39,7 @@ interface ProjectInput {
   defaultModel?: string | null;
   defaultProvider?: string | null;
   name?: string;
+  permissionMode?: ProjectSummary['permissionMode'];
   workspaceScope?: ProjectSummary['workspaceScope'];
 }
 
@@ -111,12 +113,13 @@ export async function listPendingApprovals({ token }: AuthenticatedRequestInput)
 }
 
 export async function respondToApproval({
+  alwaysApprove,
   approvalId,
   decision,
   token,
 }: RespondToApprovalInput): Promise<ApprovalResponse> {
   const response = await fetch(`${apiBaseUrl}/api/approvals/respond`, {
-    body: JSON.stringify({ approvalId, decision }),
+    body: JSON.stringify({ ...(alwaysApprove ? { alwaysApprove } : {}), approvalId, decision }),
     headers: authHeaders(token),
     method: 'POST',
   });
@@ -127,6 +130,24 @@ export async function respondToApproval({
   }
 
   return response.json() as Promise<ApprovalResponse>;
+}
+
+export async function pickProjectFolder({
+  token,
+}: AuthenticatedRequestInput): Promise<{ path: string }> {
+  const response = await fetch(`${apiBaseUrl}/api/projects/pick-folder`, {
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to choose folder');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { path?: string };
+  if (!body.path) throw new Error('Folder picker returned no path');
+  return { path: body.path };
 }
 
 export async function listProjects({

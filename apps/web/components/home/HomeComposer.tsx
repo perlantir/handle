@@ -9,6 +9,7 @@ import { useHandleAuth } from "@/lib/handleAuth";
 import {
   createConversation,
   listProjects,
+  pickProjectFolder,
   sendConversationMessage,
   updateProject,
 } from "@/lib/api";
@@ -34,6 +35,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [providers, setProviders] = useState<SettingsProvider[]>([]);
   const [customScopePath, setCustomScopePath] = useState("");
+  const [pickingFolder, setPickingFolder] = useState(false);
   const [selectedModelKey, setSelectedModelKey] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -105,6 +107,30 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
     return updated;
   }
 
+  async function chooseSpecificFolder(project = activeProject) {
+    if (!project) return;
+    setPickingFolder(true);
+    setError(null);
+    try {
+      const token = await getToken();
+      const { path } = await pickProjectFolder({ token });
+      const updated = await updateProject({
+        input: {
+          customScopePath: path,
+          workspaceScope: "CUSTOM_FOLDER",
+        },
+        projectId: project.id,
+        token,
+      });
+      updateProjectState(updated);
+      setCustomScopePath(updated.customScopePath ?? path);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not choose folder");
+    } finally {
+      setPickingFolder(false);
+    }
+  }
+
   async function handleSubmit(goal: string) {
     if (!activeProject) {
       setError("No project is available.");
@@ -149,7 +175,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
             aria-label="Project scope"
             className={cn(
               "h-8 rounded-pill border border-border-subtle bg-bg-surface px-3 text-[11.5px] font-medium text-text-secondary outline-none",
-              activeProject?.workspaceScope === "FULL_ACCESS" &&
+              activeProject?.permissionMode === "FULL_ACCESS" &&
                 "border-status-waiting bg-status-waiting/10 text-status-waiting",
             )}
             disabled={!activeProject || submitting}
@@ -159,6 +185,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
               setError(null);
               if (workspaceScope === "CUSTOM_FOLDER") {
                 updateProjectState({ ...activeProject, workspaceScope });
+                void chooseSpecificFolder(activeProject);
                 return;
               }
               try {
@@ -172,9 +199,29 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
             <option value="DEFAULT_WORKSPACE">Default workspace</option>
             <option value="CUSTOM_FOLDER">Specific folder</option>
             <option value="DESKTOP">Desktop</option>
+          </select>
+          <select
+            aria-label="Permission level"
+            className={cn(
+              "h-8 rounded-pill border border-border-subtle bg-bg-surface px-3 text-[11.5px] font-medium text-text-secondary outline-none",
+              activeProject?.permissionMode === "FULL_ACCESS" &&
+                "border-status-waiting bg-status-waiting/10 text-status-waiting",
+            )}
+            disabled={!activeProject || submitting}
+            onChange={(event) => {
+              const permissionMode = event.target.value as ProjectSummary["permissionMode"];
+              if (activeProject) updateProjectState({ ...activeProject, permissionMode });
+              void saveProjectPatch({ permissionMode }).catch((err) => {
+                setError(err instanceof Error ? err.message : "Could not update permission level");
+              });
+            }}
+            value={activeProject?.permissionMode ?? "ASK"}
+          >
+            <option value="ASK">Ask</option>
+            <option value="PLAN">Plan</option>
             <option value="FULL_ACCESS">Full access</option>
           </select>
-          {activeProject?.workspaceScope === "FULL_ACCESS" && (
+          {activeProject?.permissionMode === "FULL_ACCESS" && (
             <span className="inline-flex items-center gap-1 rounded-pill border border-status-waiting bg-status-waiting/10 px-2.5 py-1 text-[11px] font-medium text-status-waiting">
               <ShieldAlert className="h-3 w-3" />
               Full access
@@ -232,25 +279,19 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
           <input
             aria-label="Specific folder path"
             className="h-8 min-w-[320px] flex-1 rounded-pill border border-border-subtle bg-bg-surface px-3 font-mono text-[11.5px] text-text-primary outline-none"
-            onChange={(event) => setCustomScopePath(event.target.value)}
-            placeholder="/Users/perlantir/Projects/handle"
+            readOnly
+            placeholder="Choose a folder"
             value={customScopePath}
           />
           <button
             className="h-8 rounded-pill border border-border-subtle bg-bg-surface px-3 text-[11.5px] font-medium text-text-primary hover:bg-bg-subtle"
-            disabled={submitting || !customScopePath.trim()}
+            disabled={submitting || pickingFolder}
             onClick={() => {
-              setError(null);
-              void saveProjectPatch({
-                customScopePath: customScopePath.trim(),
-                workspaceScope: "CUSTOM_FOLDER",
-              }).catch((err) => {
-                setError(err instanceof Error ? err.message : "Could not save folder path");
-              });
+              void chooseSpecificFolder();
             }}
             type="button"
           >
-            Save folder
+            {pickingFolder ? "Choosing..." : "Choose folder"}
           </button>
         </div>
       )}

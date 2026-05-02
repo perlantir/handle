@@ -120,10 +120,11 @@ test.describe("Approval modal types", () => {
     ).toBeVisible();
     await expect(page.getByText("Files · write")).toBeVisible();
 
+    await page.getByLabel("Always approve this command or edit for this project").click();
     await page.getByRole("button", { name: "Approve" }).click();
     await expect
       .poll(() => responses)
-      .toContainEqual({ approvalId: "approval-type-test", decision: "approved" });
+      .toContainEqual({ alwaysApprove: true, approvalId: "approval-type-test", decision: "approved" });
   });
 
   test("renders file_delete approval copy", async ({ page }) => {

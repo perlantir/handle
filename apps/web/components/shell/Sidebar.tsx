@@ -4,7 +4,7 @@ import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { ConversationSummary, ProjectSummary } from '@handle/shared';
 import { Calendar, Check, Folder, Home, Pencil, Plug, Plus, Settings, Sparkles, X } from 'lucide-react';
-import { createProject, listConversations, listProjects, updateProject } from '@/lib/api';
+import { createProject, listConversations, listProjects, pickProjectFolder, updateProject } from '@/lib/api';
 import { Modal, PillButton } from '@/components/design-system';
 import { useHandleAuth } from '@/lib/handleAuth';
 import { cn } from '@/lib/utils';
@@ -81,6 +81,7 @@ export function Sidebar() {
         browserMode: draft.browserMode,
         defaultBackend: draft.defaultBackend,
         name: draft.name.trim(),
+        permissionMode: draft.permissionMode,
         workspaceScope: draft.workspaceScope,
       };
       if (draft.workspaceScope === 'CUSTOM_FOLDER') {
@@ -174,7 +175,7 @@ export function Sidebar() {
                   <button
                     className={cn(
                       'group flex w-full items-center gap-2 rounded-[8px] bg-bg-subtle px-3 py-2 text-left text-[12.5px] text-text-primary',
-                      project.workspaceScope === 'FULL_ACCESS' && 'text-status-waiting',
+                      project.permissionMode === 'FULL_ACCESS' && 'text-status-waiting',
                     )}
                     onClick={() => {
                       setRenamingProjectId(project.id);
@@ -189,7 +190,7 @@ export function Sidebar() {
                   <a
                     className={cn(
                       'block truncate rounded-[8px] px-3 py-2 text-[12.5px] text-text-secondary transition-colors duration-fast hover:bg-bg-subtle hover:text-text-primary',
-                      project.workspaceScope === 'FULL_ACCESS' && 'text-status-waiting',
+                      project.permissionMode === 'FULL_ACCESS' && 'text-status-waiting',
                     )}
                     href={`/?projectId=${project.id}`}
                   >
@@ -252,6 +253,7 @@ interface ProjectDraft {
   customScopePath: string;
   defaultBackend: ProjectSummary['defaultBackend'];
   name: string;
+  permissionMode: ProjectSummary['permissionMode'];
   workspaceScope: ProjectSummary['workspaceScope'];
 }
 
@@ -261,6 +263,7 @@ function defaultProjectDraft(): ProjectDraft {
     customScopePath: '',
     defaultBackend: 'E2B',
     name: '',
+    permissionMode: 'ASK',
     workspaceScope: 'DEFAULT_WORKSPACE',
   };
 }
@@ -278,6 +281,28 @@ function ProjectDraftFields({
   draft: ProjectDraft;
   onChange: Dispatch<SetStateAction<ProjectDraft>>;
 }) {
+  const { getToken } = useHandleAuth();
+  const [folderError, setFolderError] = useState<string | null>(null);
+  const [pickingFolder, setPickingFolder] = useState(false);
+
+  async function chooseFolder() {
+    setPickingFolder(true);
+    setFolderError(null);
+    try {
+      const token = await getToken();
+      const { path } = await pickProjectFolder({ token });
+      onChange((current) => ({
+        ...current,
+        customScopePath: path,
+        workspaceScope: 'CUSTOM_FOLDER',
+      }));
+    } catch (err) {
+      setFolderError(err instanceof Error ? err.message : 'Could not choose folder');
+    } finally {
+      setPickingFolder(false);
+    }
+  }
+
   return (
     <>
       <label className="grid gap-1.5">
@@ -297,36 +322,59 @@ function ProjectDraftFields({
         <select
           aria-label="New project scope"
           className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none"
-          onChange={(event) =>
-            onChange((current) => ({
-              ...current,
-              workspaceScope: event.target.value as ProjectSummary['workspaceScope'],
-            }))
-          }
+          onChange={(event) => {
+            const workspaceScope = event.target.value as ProjectSummary['workspaceScope'];
+            onChange((current) => ({ ...current, workspaceScope }));
+            if (workspaceScope === 'CUSTOM_FOLDER') void chooseFolder();
+          }}
           value={draft.workspaceScope}
         >
           <option value="DEFAULT_WORKSPACE">Default workspace</option>
           <option value="CUSTOM_FOLDER">Specific folder</option>
           <option value="DESKTOP">Desktop</option>
-          <option value="FULL_ACCESS">Full access</option>
         </select>
       </label>
 
       {draft.workspaceScope === 'CUSTOM_FOLDER' && (
-        <label className="grid gap-1.5">
+        <div className="grid gap-1.5">
           <span className="text-[12.5px] font-medium text-text-secondary">Folder path</span>
-          <input
-            aria-label="Specific folder path"
-            className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 font-mono text-[12px] text-text-primary outline-none"
-            onChange={(event) => onChange((current) => ({ ...current, customScopePath: event.target.value }))}
-            placeholder="/Users/perlantir/Projects/handle"
-            value={draft.customScopePath}
-          />
-          <span className="text-[11px] text-text-tertiary">
-            Native folder picker arrives with Tauri in Phase 11. For now, enter an existing absolute path.
-          </span>
-        </label>
+          <div className="flex gap-2">
+            <input
+              aria-label="Specific folder path"
+              className="h-9 min-w-0 flex-1 rounded-md border border-border-subtle bg-bg-canvas px-3 font-mono text-[12px] text-text-primary outline-none"
+              readOnly
+              placeholder="Choose a folder"
+              value={draft.customScopePath}
+            />
+            <PillButton disabled={pickingFolder} onClick={() => void chooseFolder()} type="button" variant="secondary">
+              {pickingFolder ? 'Choosing...' : 'Choose folder'}
+            </PillButton>
+          </div>
+          {folderError && <span className="text-[11px] text-status-error">{folderError}</span>}
+        </div>
       )}
+
+      <label className="grid gap-1.5">
+        <span className="text-[12.5px] font-medium text-text-secondary">Permission level</span>
+        <select
+          aria-label="New project permission level"
+          className={cn(
+            "h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none",
+            draft.permissionMode === 'FULL_ACCESS' && 'border-status-waiting text-status-waiting',
+          )}
+          onChange={(event) =>
+            onChange((current) => ({
+              ...current,
+              permissionMode: event.target.value as ProjectSummary['permissionMode'],
+            }))
+          }
+          value={draft.permissionMode}
+        >
+          <option value="ASK">Ask before destructive actions</option>
+          <option value="PLAN">Plan mode (read-only)</option>
+          <option value="FULL_ACCESS">Full access</option>
+        </select>
+      </label>
 
       <label className="grid gap-1.5">
         <span className="text-[12.5px] font-medium text-text-secondary">Default backend</span>

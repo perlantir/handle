@@ -4,7 +4,7 @@ import { Loader2, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ProjectSummary } from "@handle/shared";
 import { PillButton } from "@/components/design-system";
-import { listProjects, updateProject } from "@/lib/api";
+import { listProjects, pickProjectFolder, updateProject } from "@/lib/api";
 import { useHandleAuth } from "@/lib/handleAuth";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +16,7 @@ export function ProjectDefaultsSettings() {
   const [draft, setDraft] = useState<Partial<ProjectSummary>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [pickingFolder, setPickingFolder] = useState(false);
   const [status, setStatus] = useState<StatusState | null>(null);
 
   useEffect(() => {
@@ -63,6 +64,7 @@ export function ProjectDefaultsSettings() {
       if (draft.defaultModel !== undefined) input.defaultModel = draft.defaultModel;
       if (draft.defaultProvider !== undefined) input.defaultProvider = draft.defaultProvider;
       if (draft.name) input.name = draft.name;
+      if (draft.permissionMode) input.permissionMode = draft.permissionMode;
       if (draft.workspaceScope) input.workspaceScope = draft.workspaceScope;
       const updated = await updateProject({
         input,
@@ -79,6 +81,27 @@ export function ProjectDefaultsSettings() {
       });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function chooseFolder() {
+    setPickingFolder(true);
+    setStatus(null);
+    try {
+      const token = await getToken();
+      const { path } = await pickProjectFolder({ token });
+      setDraft((current) => ({
+        ...current,
+        customScopePath: path,
+        workspaceScope: "CUSTOM_FOLDER",
+      }));
+    } catch (error: unknown) {
+      setStatus({
+        message: error instanceof Error ? error.message : "Failed to choose folder",
+        tone: "error",
+      });
+    } finally {
+      setPickingFolder(false);
     }
   }
 
@@ -112,34 +135,58 @@ export function ProjectDefaultsSettings() {
             <span className="text-[12.5px] font-medium text-text-secondary">Workspace scope</span>
             <select
               className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none"
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  workspaceScope: event.target.value as ProjectSummary["workspaceScope"],
-                }))
-              }
+              onChange={(event) => {
+                const workspaceScope = event.target.value as ProjectSummary["workspaceScope"];
+                setDraft((current) => ({ ...current, workspaceScope }));
+                if (workspaceScope === "CUSTOM_FOLDER") void chooseFolder();
+              }}
               value={draft.workspaceScope ?? "DEFAULT_WORKSPACE"}
             >
               <option value="DEFAULT_WORKSPACE">Default workspace</option>
               <option value="CUSTOM_FOLDER">Specific folder</option>
               <option value="DESKTOP">Desktop</option>
-              <option value="FULL_ACCESS">Full access</option>
             </select>
           </label>
 
           {draft.workspaceScope === "CUSTOM_FOLDER" && (
-            <label className="grid gap-1.5">
+            <div className="grid gap-1.5">
               <span className="text-[12.5px] font-medium text-text-secondary">Specific folder path</span>
-              <input
-                className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 font-mono text-[12px] text-text-primary outline-none"
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, customScopePath: event.target.value || null }))
-                }
-                placeholder="/Users/perlantir/Projects/handle"
-                value={draft.customScopePath ?? ""}
-              />
-            </label>
+              <div className="flex gap-2">
+                <input
+                  aria-label="Specific folder path"
+                  className="h-9 min-w-0 flex-1 rounded-md border border-border-subtle bg-bg-canvas px-3 font-mono text-[12px] text-text-primary outline-none"
+                  readOnly
+                  placeholder="Choose a folder"
+                  value={draft.customScopePath ?? ""}
+                />
+                <PillButton disabled={pickingFolder} onClick={() => void chooseFolder()} type="button" variant="secondary">
+                  {pickingFolder ? "Choosing..." : "Choose folder"}
+                </PillButton>
+              </div>
+            </div>
           )}
+
+          <label className="grid gap-1.5">
+            <span className="text-[12.5px] font-medium text-text-secondary">Permission level</span>
+            <select
+              aria-label="Default project permission level"
+              className={cn(
+                "h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none",
+                draft.permissionMode === "FULL_ACCESS" && "border-status-waiting text-status-waiting",
+              )}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  permissionMode: event.target.value as ProjectSummary["permissionMode"],
+                }))
+              }
+              value={draft.permissionMode ?? "ASK"}
+            >
+              <option value="ASK">Ask before destructive actions</option>
+              <option value="PLAN">Plan mode (read-only)</option>
+              <option value="FULL_ACCESS">Full access</option>
+            </select>
+          </label>
 
           <label className="grid gap-1.5">
             <span className="text-[12.5px] font-medium text-text-secondary">Default backend</span>

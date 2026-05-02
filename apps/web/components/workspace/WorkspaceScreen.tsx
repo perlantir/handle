@@ -110,7 +110,10 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
         className="grid min-h-0 flex-1 overflow-hidden"
         style={{ gridTemplateColumns: `${chatWidth}% 6px minmax(0, 1fr)` }}
       >
-        <LeftPane state={state} task={task} />
+        <div className="flex min-h-0 flex-col overflow-hidden" data-testid="workspace-chat-shell">
+          <LeftPane state={state} task={task} />
+          <BottomComposer task={task} />
+        </div>
         <button
           aria-label="Resize chat pane"
           className="cursor-col-resize border-x border-border-subtle bg-bg-canvas hover:bg-bg-subtle"
@@ -152,7 +155,6 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
           />
         </div>
       </div>
-      <BottomComposer task={task} />
       {modalApproval && (
         <ApprovalModal
           approval={modalApproval}

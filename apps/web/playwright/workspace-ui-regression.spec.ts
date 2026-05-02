@@ -71,6 +71,7 @@ async function mockWorkspace(page: Page, taskId: string) {
           defaultBackend: "LOCAL",
           id: "project-ui",
           name: "Personal",
+          permissionMode: "ASK",
           workspaceScope: "DEFAULT_WORKSPACE",
         },
       ],
@@ -95,6 +96,78 @@ async function mockWorkspace(page: Page, taskId: string) {
       ],
     });
   });
+}
+
+async function mockHomeProjectControls(page: Page) {
+  const requests: Array<{ body: unknown; method: string; path: string }> = [];
+  let project = {
+    browserMode: "SEPARATE_PROFILE",
+    customScopePath: null as string | null,
+    defaultBackend: "LOCAL",
+    id: "project-ui",
+    name: "Personal",
+    permissionMode: "ASK",
+    workspaceScope: "DEFAULT_WORKSPACE",
+  };
+
+  await page.route("**/api/settings/execution", async (route) => {
+    await jsonRoute(route, 200, {
+      execution: {
+        cleanupPolicy: "keep-all",
+        defaultBackend: "local",
+        updatedAt: "2026-05-02T00:00:00.000Z",
+        workspaceBaseDir: "/Users/perlantir/Documents/Handle/workspaces",
+      },
+    });
+  });
+
+  await page.route("**/api/settings/providers", async (route) => {
+    await jsonRoute(route, 200, {
+      providers: [
+        {
+          authMode: "apiKey",
+          baseURL: null,
+          description: "Anthropic",
+          enabled: true,
+          fallbackOrder: 1,
+          hasApiKey: true,
+          id: "anthropic",
+          modelName: null,
+          primaryModel: "claude-opus-4-7",
+          updatedAt: "2026-05-02T00:00:00.000Z",
+        },
+      ],
+    });
+  });
+
+  await page.route("**/api/projects**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    const rawBody = request.postData();
+    const body = rawBody ? JSON.parse(rawBody) : null;
+    requests.push({ body, method, path });
+
+    if (method === "POST" && path === "/api/projects/pick-folder") {
+      await jsonRoute(route, 200, { path: "/Users/perlantir/Projects/handle" });
+      return;
+    }
+
+    if (method === "PUT" && path === "/api/projects/project-ui") {
+      project = { ...project, ...(body as Partial<typeof project>) };
+      await jsonRoute(route, 200, { project });
+      return;
+    }
+
+    if (method === "GET" && path === "/api/projects") {
+      await jsonRoute(route, 200, { projects: [project] });
+      return;
+    }
+
+    await jsonRoute(route, 200, { conversations: [] });
+  });
+
+  return { requests };
 }
 
 test.describe("Workspace UI regressions", () => {
@@ -124,5 +197,44 @@ test.describe("Workspace UI regressions", () => {
         page.evaluate(() => window.localStorage.getItem("handle.workspace.chatWidth")),
       )
       .not.toBeNull();
+
+    const chatBox = await page.getByTestId("workspace-chat-shell").boundingBox();
+    const composerBox = await page.getByTestId("workspace-bottom-composer").boundingBox();
+    expect(chatBox).not.toBeNull();
+    expect(composerBox).not.toBeNull();
+    expect(Math.abs((chatBox?.width ?? 0) - (composerBox?.width ?? 0))).toBeLessThan(2);
+  });
+});
+
+test.describe("Project control regressions", () => {
+  test("uses folder picker flow and saves permission level separately", async ({ page }) => {
+    const { requests } = await mockHomeProjectControls(page);
+
+    await page.goto("/");
+
+    await page.getByLabel("Project scope").selectOption("CUSTOM_FOLDER");
+    await expect(page.getByLabel("Specific folder path")).toHaveValue("/Users/perlantir/Projects/handle");
+    await expect
+      .poll(() => requests)
+      .toContainEqual({ body: null, method: "POST", path: "/api/projects/pick-folder" });
+    await expect
+      .poll(() => requests)
+      .toContainEqual({
+        body: {
+          customScopePath: "/Users/perlantir/Projects/handle",
+          workspaceScope: "CUSTOM_FOLDER",
+        },
+        method: "PUT",
+        path: "/api/projects/project-ui",
+      });
+
+    await page.getByLabel("Permission level").selectOption("FULL_ACCESS");
+    await expect
+      .poll(() => requests)
+      .toContainEqual({
+        body: { permissionMode: "FULL_ACCESS" },
+        method: "PUT",
+        path: "/api/projects/project-ui",
+      });
   });
 });

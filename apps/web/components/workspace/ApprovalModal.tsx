@@ -78,7 +78,7 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [understandsActualChromeRisk, setUnderstandsActualChromeRisk] = useState(false);
-  const [trustSimilarRuns, setTrustSimilarRuns] = useState(false);
+  const [alwaysApprove, setAlwaysApprove] = useState(false);
   const [scope, action] = scopeLabels[approval.request.type];
   const isActualChromeApproval = approval.request.type === "browser_use_actual_chrome";
   const isHostAffectingApproval =
@@ -98,6 +98,8 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
     try {
       const token = await getToken();
       await respondToApproval({
+        alwaysApprove:
+          decision === "approved" && isHostAffectingApproval && alwaysApprove,
         approvalId: approval.approvalId,
         decision,
         token,
@@ -197,16 +199,21 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
               I understand
             </span>
           </>
-        ) : (
+        ) : isHostAffectingApproval ? (
           <>
             <Toggle
-              checked={trustSimilarRuns}
-              onClick={() => setTrustSimilarRuns((value) => !value)}
+              aria-label="Always approve this command or edit for this project"
+              checked={alwaysApprove}
+              onClick={() => setAlwaysApprove((value) => !value)}
             />
             <span className="text-[12px] text-text-secondary">
-              Trust similar runs
+              Always approve this command or edit for this project
             </span>
           </>
+        ) : (
+          <span className="text-[12px] text-text-secondary">
+            Browser approvals apply to this action only.
+          </span>
         )}
         <span className="flex-1" />
         <PillButton

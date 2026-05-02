@@ -4,9 +4,10 @@ import { ArrowUp, Mic, Paperclip, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { ProjectSummary, TaskDetailResponse } from '@handle/shared';
-import { listProjects, sendConversationMessage, updateProject } from '@/lib/api';
+import { listProjects, pickProjectFolder, sendConversationMessage, updateProject } from '@/lib/api';
 import { useHandleAuth } from '@/lib/handleAuth';
 import { listSettingsProviders, type SettingsProvider } from '@/lib/settingsProviders';
+import { cn } from '@/lib/utils';
 
 function IconButton({ children, label }: { children: React.ReactNode; label: string }) {
   return (
@@ -28,6 +29,7 @@ export function BottomComposer({ task }: { task: TaskDetailResponse | null }) {
   const [customScopePath, setCustomScopePath] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickingFolder, setPickingFolder] = useState(false);
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [providers, setProviders] = useState<SettingsProvider[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState('');
@@ -77,6 +79,30 @@ export function BottomComposer({ task }: { task: TaskDetailResponse | null }) {
     return updated;
   }
 
+  async function chooseSpecificFolder() {
+    if (!project) return;
+    setPickingFolder(true);
+    setError(null);
+    try {
+      const token = await getToken();
+      const { path } = await pickProjectFolder({ token });
+      const updated = await updateProject({
+        input: {
+          customScopePath: path,
+          workspaceScope: 'CUSTOM_FOLDER',
+        },
+        projectId: project.id,
+        token,
+      });
+      setProject(updated);
+      setCustomScopePath(updated.customScopePath ?? path);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not choose folder');
+    } finally {
+      setPickingFolder(false);
+    }
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = value.trim();
@@ -105,7 +131,7 @@ export function BottomComposer({ task }: { task: TaskDetailResponse | null }) {
   }
 
   return (
-    <div className="shrink-0 border-t border-border-subtle bg-bg-surface px-6 py-[14px]">
+    <div className="shrink-0 border-t border-border-subtle bg-bg-surface px-6 py-[14px]" data-testid="workspace-bottom-composer">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <select
           aria-label="Project scope"
@@ -115,7 +141,9 @@ export function BottomComposer({ task }: { task: TaskDetailResponse | null }) {
             if (!project) return;
             const workspaceScope = event.target.value as ProjectSummary['workspaceScope'];
             setProject({ ...project, workspaceScope });
-            if (workspaceScope !== 'CUSTOM_FOLDER') {
+            if (workspaceScope === 'CUSTOM_FOLDER') {
+              void chooseSpecificFolder();
+            } else {
               void saveProjectPatch({ workspaceScope }).catch((err) =>
                 setError(err instanceof Error ? err.message : 'Could not update scope'),
               );
@@ -126,6 +154,26 @@ export function BottomComposer({ task }: { task: TaskDetailResponse | null }) {
           <option value="DEFAULT_WORKSPACE">Default workspace</option>
           <option value="CUSTOM_FOLDER">Specific folder</option>
           <option value="DESKTOP">Desktop</option>
+        </select>
+        <select
+          aria-label="Permission level"
+          className={cn(
+            "h-8 rounded-pill border border-border-subtle bg-bg-canvas px-3 text-[11.5px] text-text-secondary outline-none",
+            project?.permissionMode === 'FULL_ACCESS' && 'border-status-waiting text-status-waiting',
+          )}
+          disabled={!project || submitting}
+          onChange={(event) => {
+            if (!project) return;
+            const permissionMode = event.target.value as ProjectSummary['permissionMode'];
+            setProject({ ...project, permissionMode });
+            void saveProjectPatch({ permissionMode }).catch((err) =>
+              setError(err instanceof Error ? err.message : 'Could not update permission level'),
+            );
+          }}
+          value={project?.permissionMode ?? 'ASK'}
+        >
+          <option value="ASK">Ask</option>
+          <option value="PLAN">Plan</option>
           <option value="FULL_ACCESS">Full access</option>
         </select>
         <select
@@ -174,22 +222,19 @@ export function BottomComposer({ task }: { task: TaskDetailResponse | null }) {
             <input
               aria-label="Specific folder path"
               className="h-8 min-w-[260px] flex-1 rounded-pill border border-border-subtle bg-bg-canvas px-3 font-mono text-[11.5px] text-text-primary outline-none"
-              onChange={(event) => setCustomScopePath(event.target.value)}
-              placeholder="/Users/perlantir/Projects/handle"
+              readOnly
+              placeholder="Choose a folder"
               value={customScopePath}
             />
             <button
               className="h-8 rounded-pill border border-border-subtle bg-bg-canvas px-3 text-[11.5px] font-medium text-text-primary hover:bg-bg-subtle"
-              disabled={submitting || !customScopePath.trim()}
+              disabled={submitting || pickingFolder}
               onClick={() => {
-                void saveProjectPatch({
-                  customScopePath: customScopePath.trim(),
-                  workspaceScope: 'CUSTOM_FOLDER',
-                }).catch((err) => setError(err instanceof Error ? err.message : 'Could not save folder path'));
+                void chooseSpecificFolder();
               }}
               type="button"
             >
-              Save folder
+              {pickingFolder ? 'Choosing...' : 'Choose folder'}
             </button>
           </>
         )}

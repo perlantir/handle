@@ -57,6 +57,7 @@ async function mockTaskApis(page: Page) {
           defaultBackend: "LOCAL",
           id: "project-local-ui",
           name: "Personal",
+          permissionMode: "ASK",
           workspaceScope: "DEFAULT_WORKSPACE",
         },
       ],
