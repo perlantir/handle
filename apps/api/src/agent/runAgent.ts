@@ -1,5 +1,6 @@
 import { createE2BSandbox } from "../execution/e2bBackend";
 import type { E2BSandboxLike } from "../execution/types";
+import { createBrowserDesktopSandbox } from "../execution/browserSession";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { emitTaskEvent } from "../lib/eventBus";
 import { logger } from "../lib/logger";
@@ -11,7 +12,8 @@ import {
   type ProviderId,
   type ProviderInstance,
 } from "../providers/types";
-import { createPhase1Agent } from "./createAgent";
+import { createHandleAgent } from "./createAgent";
+import { createComputerUseToolDefinitions } from "./computerUseTools";
 import { parseAgentFinalResult } from "./finalResult";
 import { emitInitialPlan } from "./plan";
 import { isSmokeAgentEnabled, runSmokeAgent } from "./smokeAgent";
@@ -101,9 +103,15 @@ interface ProviderRegistryLike {
 
 interface RunAgentDependencies {
   createAgent?: (
-    context: { sandbox: E2BSandboxLike; taskId: string; trustedDomains?: string[] },
+    context: {
+      sandbox: E2BSandboxLike;
+      taskId: string;
+      trustedDomains?: string[];
+    },
     options: { llm: BaseChatModel },
   ) => Promise<AgentLike>;
+  createDesktopSandbox?: typeof createBrowserDesktopSandbox;
+  createComputerUseTools?: typeof createComputerUseToolDefinitions;
   createSandbox?: typeof createE2BSandbox;
   emitEvent?: typeof emitTaskEvent;
   emitPlan?: typeof emitInitialPlan;
@@ -117,6 +125,20 @@ export interface RunAgentOptions {
   providerOverride?: ProviderId;
 }
 
+const PHASE_3_DESKTOP_GOAL_PATTERN =
+  /\b(browser|browse|website|web page|webpage|navigate|url|https?:\/\/|click|selector|scroll|screenshot|screen|desktop|display|firefox|chrome|chromium|form|button|login|signin|checkout|payment)\b/i;
+const DIRECT_COMPUTER_USE_GOAL_PATTERN =
+  /\b(screenshot|screen|desktop|display)\b/i;
+const BROWSER_GOAL_PATTERN =
+  /\b(browser|browse|website|web page|webpage|navigate|url|https?:\/\/|click|selector|scroll|firefox|chrome|chromium|form|button|login|signin|checkout|payment)\b/i;
+
+function shouldRunDirectComputerUse(goal: string) {
+  return (
+    DIRECT_COMPUTER_USE_GOAL_PATTERN.test(goal) &&
+    !BROWSER_GOAL_PATTERN.test(goal)
+  );
+}
+
 function normalizeProviderOverride(value: string | null | undefined) {
   if (!value) return undefined;
   return isProviderId(value) ? value : undefined;
@@ -128,14 +150,19 @@ function timeoutError(label: string, timeoutMs: number) {
 
 function normalizeTrustedDomains(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  return value.filter(
+    (item): item is string =>
+      typeof item === "string" && item.trim().length > 0,
+  );
 }
 
 async function loadTrustedDomains(store: TaskStore) {
   const safetyStore = store as TaskStore & SafetySettingsStore;
   if (!safetyStore.safetySettings) return [];
 
-  const row = await safetyStore.safetySettings.findUnique({ where: { id: "global" } });
+  const row = await safetyStore.safetySettings.findUnique({
+    where: { id: "global" },
+  });
   return normalizeTrustedDomains(row?.trustedDomains);
 }
 
@@ -162,7 +189,9 @@ async function withTimeout<T>(
 }
 
 export function createAgentRunner({
-  createAgent = createPhase1Agent,
+  createAgent = createHandleAgent,
+  createComputerUseTools = createComputerUseToolDefinitions,
+  createDesktopSandbox = createBrowserDesktopSandbox,
   createSandbox = createE2BSandbox,
   emitEvent = emitTaskEvent,
   emitPlan = emitInitialPlan,
@@ -253,14 +282,60 @@ export function createAgentRunner({
         throw err;
       }
 
-      sandbox = await createSandbox();
+      const shouldUseDesktopSandbox = PHASE_3_DESKTOP_GOAL_PATTERN.test(goal);
+      logger.info(
+        { shouldUseDesktopSandbox, taskId },
+        "Selecting task sandbox runtime",
+      );
+      sandbox = shouldUseDesktopSandbox
+        ? ((await createDesktopSandbox({
+            resolution: [1280, 800],
+          })) as unknown as E2BSandboxLike)
+        : await createSandbox();
       await store.task.update({
         data: { sandboxId: sandbox.sandboxId },
         where: { id: taskId },
       });
 
       const trustedDomains = await loadTrustedDomains(store);
-      const agent = await createAgent({ taskId, sandbox, trustedDomains }, { llm: model });
+
+      if (shouldRunDirectComputerUse(goal)) {
+        logger.info(
+          { taskId },
+          "Routing task directly to Anthropic computer-use",
+        );
+        const computerUseTool = createComputerUseTools()[0];
+        if (!computerUseTool) {
+          throw new Error("computer_use tool definition is unavailable");
+        }
+        const finalMessage = redactSecrets(
+          await computerUseTool.implementation(
+            { goal, maxIterations: 4 },
+            { sandbox, taskId, trustedDomains },
+          ),
+        );
+
+        await store.message.create({
+          data: { content: finalMessage, role: "ASSISTANT", taskId },
+        });
+        await store.task.update({
+          data: { status: "STOPPED" },
+          where: { id: taskId },
+        });
+        emitEvent({
+          type: "message",
+          role: "assistant",
+          content: finalMessage,
+          taskId,
+        });
+        emitEvent({ type: "status_update", status: "STOPPED", taskId });
+        return;
+      }
+
+      const agent = await createAgent(
+        { taskId, sandbox, trustedDomains },
+        { llm: model },
+      );
       const stream = await agent.streamEvents(
         { chat_history: [], input: redactSecrets(goal) },
         { version: "v2" },
