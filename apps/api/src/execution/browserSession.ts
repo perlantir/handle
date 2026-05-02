@@ -21,6 +21,8 @@ export interface BrowserSessionSandbox {
     }>;
   };
   files?: {
+    read?(path: string, opts: { format: "text" }): Promise<string | Uint8Array>;
+    remove?(path: string): Promise<unknown>;
     write(path: string, data: string): Promise<unknown>;
   };
 }
@@ -316,6 +318,10 @@ function stringFromResult(result: Record<string, unknown>, field: string) {
   return typeof value === "string" ? value : "";
 }
 
+function textFromFileReadResult(value: string | Uint8Array) {
+  return typeof value === "string" ? value : Buffer.from(value).toString("utf8");
+}
+
 function commandFailureMessage(label: string, result: { error?: string; stderr?: string; stdout?: string }) {
   const body = result.stderr || result.stdout || result.error || "unknown error";
   return `${label} failed: ${redactSecrets(body)}`;
@@ -558,26 +564,53 @@ export class E2BBrowserSession implements BrowserSession {
 
   private async invokeAction(action: string, args: Record<string, unknown>) {
     await this.ensureReady();
-    const command = this.httpCommand("/action", { action, args });
-    let result: BrowserCommandResult;
+    const responsePath = this.options.sandbox.files?.read
+      ? `/tmp/handle-browser-response-${randomUUID()}.json`
+      : undefined;
+    const command = this.httpCommand("/action", { action, args }, responsePath);
+
+    let result: BrowserCommandResult | undefined;
+    let responseBody = "";
     try {
-      result = await this.options.sandbox.commands.run(command);
-    } catch (err) {
-      const thrownResult = commandResultFromThrownError(err);
-      if (!thrownResult) throw err;
-      result = thrownResult;
-    }
+      try {
+        result = await this.options.sandbox.commands.run(command);
+      } catch (err) {
+        const thrownResult = commandResultFromThrownError(err);
+        if (!thrownResult) throw err;
+        result = thrownResult;
+      }
 
-    if (typeof result.exitCode === "number" && result.exitCode !== 0) {
-      throw new Error(commandFailureMessage(`Browser action ${action}`, result));
-    }
+      if (responsePath && this.options.sandbox.files?.read) {
+        responseBody = textFromFileReadResult(
+          await this.options.sandbox.files.read(responsePath, { format: "text" }),
+        );
+      } else {
+        responseBody = result.stdout ?? "";
+      }
 
-    const parsed = parseServerResponse(result.stdout ?? "");
-    if (!parsed.ok) {
-      throw new Error(redactSecrets(parsed.error ?? `Browser action ${action} failed`));
-    }
+      if (typeof result.exitCode === "number" && result.exitCode !== 0) {
+        throw new Error(commandFailureMessage(`Browser action ${action}`, {
+          ...result,
+          stdout: responseBody || result.stdout || "",
+        }));
+      }
 
-    return parsed.result ?? {};
+      const parsed = parseServerResponse(responseBody);
+      if (!parsed.ok) {
+        throw new Error(redactSecrets(parsed.error ?? `Browser action ${action} failed`));
+      }
+
+      return parsed.result ?? {};
+    } finally {
+      if (responsePath && this.options.sandbox.files?.remove) {
+        await this.options.sandbox.files.remove(responsePath).catch((err) => {
+          this.options.logger.warn?.(
+            { err, path: responsePath, sandboxId: this.sandboxId },
+            "Browser action response cleanup failed",
+          );
+        });
+      }
+    }
   }
 
   private async ensureReady() {
@@ -805,13 +838,15 @@ export class E2BBrowserSession implements BrowserSession {
     ].join("\n");
   }
 
-  private httpCommand(path: "/action" | "/health" | "/shutdown", payload: unknown) {
+  private httpCommand(path: "/action" | "/health" | "/shutdown", payload: unknown, responsePath?: string) {
     const timeout = Math.ceil(ACTION_TIMEOUT_MS / 1000);
     return [
       `${shellSingleQuote(NODE_BINARY)} --input-type=module - <<'NODE'`,
+      "import { writeFile } from 'node:fs/promises';",
       `const payload = JSON.parse(${jsStringLiteral(JSON.stringify(payload))});`,
       `const path = ${jsStringLiteral(path)};`,
       `const port = ${this.options.port};`,
+      `const responsePath = ${jsStringLiteral(responsePath ?? "")};`,
       `const timeoutMs = ${timeout * 1000};`,
       "const body = JSON.stringify(payload);",
       "const controller = new AbortController();",
@@ -825,7 +860,12 @@ export class E2BBrowserSession implements BrowserSession {
       "    signal: controller.signal,",
       "  });",
       "  const text = await response.text();",
-      "  console.log(text);",
+      "  if (responsePath) {",
+      "    await writeFile(responsePath, text, 'utf8');",
+      "    console.log(JSON.stringify({ byteCount: Buffer.byteLength(text), ok: response.status < 400, responsePath, status: response.status }));",
+      "  } else {",
+      "    console.log(text);",
+      "  }",
       "  exitCode = response.status < 400 ? 0 : 1;",
       "} catch (err) {",
       "  console.error(err instanceof Error ? err.stack || err.message : String(err));",
