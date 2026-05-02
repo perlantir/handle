@@ -135,7 +135,7 @@ function browserTool(
 ): ToolDefinition {
   return {
     ...definition,
-    backendSupport: { e2b: true, local: false },
+    backendSupport: { e2b: true, local: true },
     requiresApproval: false,
   };
 }

@@ -85,7 +85,7 @@ describe('phase 1 tools', () => {
       'file_list',
     ]);
     expect(definitions.every((definition) => definition.backendSupport.e2b)).toBe(true);
-    expect(definitions.every((definition) => !definition.backendSupport.local)).toBe(true);
+    expect(definitions.every((definition) => definition.backendSupport.local)).toBe(true);
     expect(definitions.every((definition) => definition.requiresApproval === false)).toBe(true);
   });
 

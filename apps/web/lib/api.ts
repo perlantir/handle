@@ -3,6 +3,7 @@ import type { ApprovalDecision, CreateTaskResponse, PendingApproval, TaskDetailR
 const apiBaseUrl = process.env.NEXT_PUBLIC_HANDLE_API_BASE_URL ?? 'http://127.0.0.1:3001';
 
 interface CreateTaskInput {
+  backend?: 'e2b' | 'local';
   goal: string;
   token: string | null;
 }
@@ -35,9 +36,13 @@ function authHeaders(token: string | null) {
   };
 }
 
-export async function createTask({ goal, token }: CreateTaskInput): Promise<CreateTaskResponse> {
+export async function createTask({
+  backend,
+  goal,
+  token,
+}: CreateTaskInput): Promise<CreateTaskResponse> {
   const response = await fetch(`${apiBaseUrl}/api/tasks`, {
-    body: JSON.stringify({ goal }),
+    body: JSON.stringify({ ...(backend ? { backend } : {}), goal }),
     headers: authHeaders(token),
     method: 'POST',
   });

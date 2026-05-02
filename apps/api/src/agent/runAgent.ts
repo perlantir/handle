@@ -1,6 +1,7 @@
 import { E2BBackend, type E2BBackendOptions } from "../execution/e2bBackend";
 import type { E2BSandboxLike, ExecutionBackend } from "../execution/types";
 import { createBrowserDesktopSandbox } from "../execution/browserSession";
+import { LocalBackend, type LocalBackendOptions } from "../execution/localBackend";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { emitTaskEvent } from "../lib/eventBus";
 import { logger } from "../lib/logger";
@@ -78,7 +79,7 @@ interface TaskStore {
   task: {
     findUnique(
       args: unknown,
-    ): Promise<{ providerOverride: string | null } | null>;
+    ): Promise<{ backend: string | null; providerOverride: string | null } | null>;
     update(args: unknown): Promise<unknown>;
   };
 }
@@ -86,6 +87,12 @@ interface TaskStore {
 interface SafetySettingsStore {
   safetySettings?: {
     findUnique(args: unknown): Promise<{ trustedDomains: unknown } | null>;
+  };
+}
+
+interface BrowserSettingsStore {
+  browserSettings?: {
+    findUnique(args: unknown): Promise<{ mode: string } | null>;
   };
 }
 
@@ -116,6 +123,7 @@ interface RunAgentDependencies {
     options: { llm: BaseChatModel },
   ) => Promise<AgentLike>;
   createBackend?: (options?: E2BBackendOptions) => AgentExecutionBackend;
+  createLocalBackend?: (taskId: string, options?: LocalBackendOptions) => ExecutionBackend;
   createDesktopSandbox?: typeof createBrowserDesktopSandbox;
   createComputerUseTools?: typeof createComputerUseToolDefinitions;
   emitEvent?: typeof emitTaskEvent;
@@ -127,6 +135,7 @@ interface RunAgentDependencies {
 }
 
 export interface RunAgentOptions {
+  backend?: "e2b" | "local";
   providerOverride?: ProviderId;
 }
 
@@ -149,6 +158,27 @@ function normalizeProviderOverride(value: string | null | undefined) {
   return isProviderId(value) ? value : undefined;
 }
 
+function normalizeBackend(value: string | null | undefined) {
+  return value === "local" ? "local" : "e2b";
+}
+
+function localSandboxPlaceholder(taskId: string): E2BSandboxLike {
+  const unsupported = async () => {
+    throw new Error("Local backend does not expose an E2B sandbox");
+  };
+
+  return {
+    commands: { run: unsupported },
+    files: {
+      list: unsupported,
+      read: unsupported,
+      write: unsupported,
+    },
+    kill: async () => undefined,
+    sandboxId: `local:${taskId}`,
+  };
+}
+
 function timeoutError(label: string, timeoutMs: number) {
   return new Error(`${label} timed out after ${timeoutMs}ms`);
 }
@@ -169,6 +199,16 @@ async function loadTrustedDomains(store: TaskStore) {
     where: { id: "global" },
   });
   return normalizeTrustedDomains(row?.trustedDomains);
+}
+
+async function loadBrowserMode(store: TaskStore) {
+  const browserStore = store as TaskStore & BrowserSettingsStore;
+  if (!browserStore.browserSettings) return "separate-profile" as const;
+
+  const row = await browserStore.browserSettings.findUnique({
+    where: { id: "global" },
+  });
+  return row?.mode === "actual-chrome" ? "actual-chrome" : "separate-profile";
 }
 
 async function withTimeout<T>(
@@ -196,6 +236,7 @@ async function withTimeout<T>(
 export function createAgentRunner({
   createAgent = createHandleAgent,
   createBackend = (options) => new E2BBackend(options),
+  createLocalBackend = (taskId, options) => new LocalBackend(taskId, options),
   createComputerUseTools = createComputerUseToolDefinitions,
   createDesktopSandbox = createBrowserDesktopSandbox,
   emitEvent = emitTaskEvent,
@@ -215,19 +256,20 @@ export function createAgentRunner({
       return;
     }
 
-    let backend: AgentExecutionBackend | null = null;
+    let backend: ExecutionBackend | null = null;
     let sandbox: E2BSandboxLike | null = null;
 
     try {
       emitEvent({ type: "status_update", status: "RUNNING", taskId });
 
       const task = await store.task.findUnique({
-        select: { providerOverride: true },
+        select: { backend: true, providerOverride: true },
         where: { id: taskId },
       });
       const taskOverride =
         options.providerOverride ??
         normalizeProviderOverride(task?.providerOverride);
+      const selectedBackend = options.backend ?? normalizeBackend(task?.backend);
 
       await providerRegistry.initialize();
       const activeModelOptions = taskOverride
@@ -288,24 +330,36 @@ export function createAgentRunner({
         throw err;
       }
 
-      const shouldUseDesktopSandbox = PHASE_3_DESKTOP_GOAL_PATTERN.test(goal);
+      const shouldUseDesktopSandbox =
+        selectedBackend === "e2b" && PHASE_3_DESKTOP_GOAL_PATTERN.test(goal);
       logger.info(
-        { shouldUseDesktopSandbox, taskId },
+        { backend: selectedBackend, shouldUseDesktopSandbox, taskId },
         "Selecting task sandbox runtime",
       );
-      if (shouldUseDesktopSandbox) {
+      if (selectedBackend === "local") {
+        backend = createLocalBackend(taskId, {
+          browserMode: await loadBrowserMode(store),
+        });
+        await backend.initialize(taskId);
+        sandbox = localSandboxPlaceholder(taskId);
+      } else if (shouldUseDesktopSandbox) {
         const desktopSandbox = (await createDesktopSandbox({
           resolution: [1280, 800],
         })) as unknown as E2BSandboxLike;
-        backend = createBackend({
+        const e2bBackend = createBackend({
           installCommonPackages: false,
           sandbox: desktopSandbox,
         });
+        backend = e2bBackend;
+        await e2bBackend.initialize(taskId);
+        sandbox = e2bBackend.getSandbox();
       } else {
-        backend = createBackend();
+        const e2bBackend = createBackend();
+        backend = e2bBackend;
+        await e2bBackend.initialize(taskId);
+        sandbox = e2bBackend.getSandbox();
       }
-      await backend.initialize(taskId);
-      sandbox = backend.getSandbox();
+      if (!sandbox) throw new Error("Execution backend did not expose context");
       await store.task.update({
         data: { sandboxId: sandbox.sandboxId },
         where: { id: taskId },
@@ -313,7 +367,7 @@ export function createAgentRunner({
 
       const trustedDomains = await loadTrustedDomains(store);
 
-      if (shouldRunDirectComputerUse(goal)) {
+      if (selectedBackend === "e2b" && shouldRunDirectComputerUse(goal)) {
         logger.info(
           { taskId },
           "Routing task directly to Anthropic computer-use",

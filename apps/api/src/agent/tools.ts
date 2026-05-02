@@ -54,7 +54,7 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
     inputSchema: shellExecInput,
     sideEffectClass: 'execute',
     requiresApproval: false,
-    backendSupport: { e2b: true, local: false },
+    backendSupport: { e2b: true, local: true },
     async implementation(input, context) {
       const parsed = shellExecInput.parse(input);
       const callId = emitToolCall(context, 'shell_exec', parsed);
@@ -102,7 +102,7 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
     inputSchema: fileWriteInput,
     sideEffectClass: 'write',
     requiresApproval: false,
-    backendSupport: { e2b: true, local: false },
+    backendSupport: { e2b: true, local: true },
     async implementation(input, context) {
       const parsed = fileWriteInput.parse(input);
       const callId = emitToolCall(context, 'file_write', {
@@ -129,7 +129,7 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
     inputSchema: fileReadInput,
     sideEffectClass: 'read',
     requiresApproval: false,
-    backendSupport: { e2b: true, local: false },
+    backendSupport: { e2b: true, local: true },
     async implementation(input, context) {
       const parsed = fileReadInput.parse(input);
       const callId = emitToolCall(context, 'file_read', parsed);
@@ -153,7 +153,7 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
     inputSchema: fileListInput,
     sideEffectClass: 'read',
     requiresApproval: false,
-    backendSupport: { e2b: true, local: false },
+    backendSupport: { e2b: true, local: true },
     async implementation(input, context) {
       const parsed = fileListInput.parse(input);
       const callId = emitToolCall(context, 'file_list', parsed);

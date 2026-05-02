@@ -9,12 +9,16 @@ import { prisma } from "../lib/prisma";
 import { isProviderId, type ProviderId } from "../providers/types";
 
 const createTaskSchema = z.object({
+  backend: z.enum(["e2b", "local"]).optional(),
   goal: z.string().min(1).max(10_000),
   providerOverride: z.string().refine(isProviderId).optional(),
   skipAgent: z.boolean().optional(),
 });
 
 export interface TaskRouteStore {
+  executionSettings?: {
+    upsert(args: unknown): Promise<{ defaultBackend: string }>;
+  };
   user: {
     upsert(args: unknown): Promise<unknown>;
   };
@@ -29,13 +33,29 @@ interface CreateTasksRouterOptions {
   runAgent?: (
     taskId: string,
     goal: string,
-    options?: { providerOverride?: ProviderId },
+    options?: { backend?: "e2b" | "local"; providerOverride?: ProviderId },
   ) => Promise<void>;
   store?: TaskRouteStore;
 }
 
 function fallbackEmailForUserId(userId: string) {
   return `${encodeURIComponent(userId)}@handle.local`;
+}
+
+async function defaultBackendForTask(store: TaskRouteStore) {
+  if (!store.executionSettings) return "e2b" as const;
+
+  const row = await store.executionSettings.upsert({
+    create: {
+      cleanupPolicy: "keep-all",
+      defaultBackend: "e2b",
+      id: "global",
+    },
+    update: {},
+    where: { id: "global" },
+  });
+
+  return row.defaultBackend === "local" ? "local" : "e2b";
 }
 
 export function createTasksRouter({
@@ -64,8 +84,11 @@ export function createTasksRouter({
         where: { id: userId },
       });
 
+      const backend = parsed.data.backend ?? (await defaultBackendForTask(store));
+
       const task = await store.task.create({
         data: {
+          backend,
           goal: parsed.data.goal,
           messages: {
             create: { content: parsed.data.goal, role: "USER" },
@@ -78,11 +101,13 @@ export function createTasksRouter({
       });
 
       if (!parsed.data.skipAgent || process.env.NODE_ENV === "production") {
-        const runPromise = parsed.data.providerOverride
-          ? runAgent(task.id, parsed.data.goal, {
-              providerOverride: parsed.data.providerOverride,
-            })
-          : runAgent(task.id, parsed.data.goal);
+        const runOptions = {
+          backend,
+          ...(parsed.data.providerOverride
+            ? { providerOverride: parsed.data.providerOverride }
+            : {}),
+        };
+        const runPromise = runAgent(task.id, parsed.data.goal, runOptions);
 
         runPromise.catch((err) => {
           logger.error(

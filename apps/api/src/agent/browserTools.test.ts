@@ -112,6 +112,7 @@ describe("browserTools", () => {
       "browser_wait_for_selector",
     ]);
     expect(definitions.every((definition) => definition.backendSupport.e2b)).toBe(true);
+    expect(definitions.every((definition) => definition.backendSupport.local)).toBe(true);
     expect(definitions.every((definition) => definition.requiresApproval === false)).toBe(true);
   });
 

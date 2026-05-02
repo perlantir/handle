@@ -53,6 +53,7 @@ export function Composer({
           </PillButton>
         </div>
         <button
+          aria-label="Start task"
           className="flex h-9 w-9 items-center justify-center rounded-pill bg-bg-inverse text-text-onAccent transition-colors duration-fast hover:bg-text-primary"
           disabled={disabled || submitDisabled}
           type="submit"

@@ -144,6 +144,7 @@ export interface TaskMessage {
 }
 
 export interface TaskDetailResponse {
+  backend?: 'e2b' | 'local';
   createdAt?: string;
   goal: string;
   id: string;

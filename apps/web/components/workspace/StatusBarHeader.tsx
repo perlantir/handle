@@ -50,9 +50,20 @@ function Meta({ label, mono = false, value }: { label: string; mono?: boolean; v
   );
 }
 
+function backendLabel(backend: TaskDetailResponse['backend']) {
+  return backend === 'local' ? 'Local' : 'E2B';
+}
+
+function backendTooltip(backend: TaskDetailResponse['backend']) {
+  return backend === 'local'
+    ? 'This task is using the Local Mac execution backend.'
+    : 'This task is using the E2B Cloud execution backend.';
+}
+
 export function StatusBarHeader({ state, task }: StatusBarHeaderProps) {
   const status = state.status === 'IDLE' && task ? task.status : state.status;
   const hasPendingApproval = state.status === 'WAITING' || Boolean(state.pendingApproval);
+  const backend = task?.backend ?? 'e2b';
 
   return (
     <header className="mt-8 flex h-14 shrink-0 items-center gap-[14px] border-b border-border-subtle px-8 pr-6">
@@ -69,6 +80,13 @@ export function StatusBarHeader({ state, task }: StatusBarHeaderProps) {
       <span className="flex-1" />
 
       <div className="hidden items-center gap-4 lg:flex">
+        <span
+          className="rounded-pill border border-border-subtle bg-bg-surface px-2.5 py-1 text-[11px] font-medium text-text-secondary"
+          title={backendTooltip(backend)}
+        >
+          {backendLabel(backend)}
+        </span>
+        <span className="h-[22px] w-px bg-border-subtle" />
         <Meta label="Model" value="OpenAI" />
         <span className="h-[22px] w-px bg-border-subtle" />
         <Meta label="Runtime" mono value="Live" />

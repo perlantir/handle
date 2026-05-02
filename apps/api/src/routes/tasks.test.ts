@@ -9,7 +9,7 @@ function createApp(
   runAgent: (
     taskId: string,
     goal: string,
-    options?: { providerOverride?: ProviderId },
+    options?: { backend?: "e2b" | "local"; providerOverride?: ProviderId },
   ) => Promise<void>,
 ) {
   const app = express();
@@ -55,7 +55,82 @@ describe("tasks route", () => {
       update: {},
       where: { id: "user-test" },
     });
-    expect(runAgent).toHaveBeenCalledWith("task-test", "Write a file");
+    expect(runAgent).toHaveBeenCalledWith("task-test", "Write a file", {
+      backend: "e2b",
+    });
+  });
+
+  it("persists and forwards a backend override", async () => {
+    const runAgent = vi.fn().mockResolvedValue(undefined);
+    const createTask = vi.fn().mockResolvedValue({ id: "task-local" });
+    const store: TaskRouteStore = {
+      task: {
+        create: createTask,
+        async findFirst() {
+          return null;
+        },
+      },
+      user: {
+        async upsert() {
+          return {};
+        },
+      },
+    };
+
+    await request(createApp(store, runAgent))
+      .post("/api/tasks")
+      .send({ backend: "local", goal: "Use local backend" })
+      .expect(200);
+
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ backend: "local" }),
+      }),
+    );
+    expect(runAgent).toHaveBeenCalledWith(
+      "task-local",
+      "Use local backend",
+      {
+        backend: "local",
+      },
+    );
+  });
+
+  it("uses the saved default execution backend when no override is provided", async () => {
+    const runAgent = vi.fn().mockResolvedValue(undefined);
+    const createTask = vi.fn().mockResolvedValue({ id: "task-default-local" });
+    const store: TaskRouteStore = {
+      executionSettings: {
+        upsert: vi.fn().mockResolvedValue({ defaultBackend: "local" }),
+      },
+      task: {
+        create: createTask,
+        async findFirst() {
+          return null;
+        },
+      },
+      user: {
+        async upsert() {
+          return {};
+        },
+      },
+    };
+
+    await request(createApp(store, runAgent))
+      .post("/api/tasks")
+      .send({ goal: "Use settings default" })
+      .expect(200);
+
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ backend: "local" }),
+      }),
+    );
+    expect(runAgent).toHaveBeenCalledWith(
+      "task-default-local",
+      "Use settings default",
+      { backend: "local" },
+    );
   });
 
   it("persists and forwards a provider override", async () => {
@@ -86,6 +161,7 @@ describe("tasks route", () => {
       }),
     );
     expect(runAgent).toHaveBeenCalledWith("task-provider", "Use Anthropic", {
+      backend: "e2b",
       providerOverride: "anthropic",
     });
   });

@@ -68,6 +68,31 @@ function backendForSandbox(testSandbox: E2BSandboxLike) {
   } satisfies ExecutionBackend & { getSandbox(): E2BSandboxLike };
 }
 
+function localBackend() {
+  return {
+    id: "local",
+    async browserSession() {
+      throw new Error("browser not used in this test");
+    },
+    async fileDelete() {},
+    async fileList() {
+      return [];
+    },
+    async fileRead() {
+      return "";
+    },
+    async fileWrite() {},
+    getWorkspaceDir() {
+      return "/Users/perlantir/Documents/Handle/workspaces/task-local";
+    },
+    initialize: vi.fn().mockResolvedValue(undefined),
+    async shellExec() {
+      return { exitCode: 0, stderr: "", stdout: "" };
+    },
+    shutdown: vi.fn().mockResolvedValue(undefined),
+  } satisfies ExecutionBackend;
+}
+
 async function* successfulStream() {
   yield {
     data: { output: { output: "Done [[HANDLE_RESULT:SUCCESS]]" } },
@@ -99,7 +124,7 @@ describe("createAgentRunner", () => {
       task: {
         findUnique: vi
           .fn()
-          .mockResolvedValue({ providerOverride: "anthropic" }),
+          .mockResolvedValue({ backend: "e2b", providerOverride: "anthropic" }),
         update: vi.fn().mockResolvedValue({}),
       },
     };
@@ -175,7 +200,7 @@ describe("createAgentRunner", () => {
         task: {
           findUnique: vi
             .fn()
-            .mockResolvedValue({ providerOverride: "anthropic" }),
+            .mockResolvedValue({ backend: "e2b", providerOverride: "anthropic" }),
           update: vi.fn().mockResolvedValue({}),
         },
       },
@@ -221,7 +246,9 @@ describe("createAgentRunner", () => {
           create: vi.fn().mockResolvedValue({}),
         },
         task: {
-          findUnique: vi.fn().mockResolvedValue({ providerOverride: null }),
+          findUnique: vi
+            .fn()
+            .mockResolvedValue({ backend: "e2b", providerOverride: null }),
           update: vi.fn().mockResolvedValue({}),
         },
       },
@@ -271,7 +298,9 @@ describe("createAgentRunner", () => {
         create: vi.fn().mockResolvedValue({}),
       },
       task: {
-        findUnique: vi.fn().mockResolvedValue({ providerOverride: "openai" }),
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ backend: "e2b", providerOverride: "openai" }),
         update: vi.fn().mockResolvedValue({}),
       },
     };
@@ -359,7 +388,9 @@ describe("createAgentRunner", () => {
           create: vi.fn().mockResolvedValue({}),
         },
         task: {
-          findUnique: vi.fn().mockResolvedValue({ providerOverride: null }),
+          findUnique: vi
+            .fn()
+            .mockResolvedValue({ backend: "e2b", providerOverride: null }),
           update: vi.fn().mockResolvedValue({}),
         },
       },
@@ -372,6 +403,67 @@ describe("createAgentRunner", () => {
 
     expect(createBackend).toHaveBeenCalledWith();
     expect(createDesktopSandbox).not.toHaveBeenCalled();
+  });
+
+  it("uses the LocalBackend when the task backend is local", async () => {
+    const backend = localBackend();
+    const createBackend = vi.fn();
+    const createLocalBackend = vi.fn().mockReturnValue(backend);
+    const createAgent = vi.fn().mockResolvedValue({
+      streamEvents: vi.fn().mockReturnValue(successfulStream()),
+    });
+    const selectedProvider = provider("openai", "gpt-4o");
+    const store = {
+      browserSettings: {
+        findUnique: vi.fn().mockResolvedValue({ mode: "separate-profile" }),
+      },
+      message: {
+        create: vi.fn().mockResolvedValue({}),
+      },
+      task: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ backend: "local", providerOverride: null }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const runner = createAgentRunner({
+      createAgent,
+      createBackend,
+      createLocalBackend,
+      emitEvent: vi.fn(),
+      emitPlan: vi.fn().mockResolvedValue(undefined),
+      isSmokeEnabled: () => false,
+      providerRegistry: {
+        getActiveModel: vi.fn().mockResolvedValue({
+          model: fakeModel,
+          provider: selectedProvider,
+        }),
+        initialize: vi.fn().mockResolvedValue(undefined),
+      },
+      store,
+    });
+
+    await runner("task-local-test", "Write a Python script.");
+
+    expect(createBackend).not.toHaveBeenCalled();
+    expect(createLocalBackend).toHaveBeenCalledWith("task-local-test", {
+      browserMode: "separate-profile",
+    });
+    expect(createAgent).toHaveBeenCalledWith(
+      {
+        backend,
+        sandbox: expect.objectContaining({ sandboxId: "local:task-local-test" }),
+        taskId: "task-local-test",
+        trustedDomains: [],
+      },
+      { llm: fakeModel },
+    );
+    expect(store.task.update).toHaveBeenCalledWith({
+      data: { sandboxId: "local:task-local-test" },
+      where: { id: "task-local-test" },
+    });
+    expect(backend.shutdown).toHaveBeenCalledWith("task-local-test");
   });
 
   it("marks the task errored when plan generation fails before sandbox creation", async () => {
@@ -389,7 +481,9 @@ describe("createAgentRunner", () => {
         create: vi.fn().mockResolvedValue({}),
       },
       task: {
-        findUnique: vi.fn().mockResolvedValue({ providerOverride: "openai" }),
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ backend: "e2b", providerOverride: "openai" }),
         update: vi.fn().mockResolvedValue({}),
       },
     };
