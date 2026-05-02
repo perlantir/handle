@@ -45,13 +45,9 @@ function eventContentToString(content: unknown) {
 
 function getFinalOutput(output: unknown) {
   if (typeof output === "string") return output;
-  if (
-    typeof output === "object" &&
-    output &&
-    "output" in output &&
-    typeof output.output === "string"
-  ) {
-    return output.output;
+  if (Array.isArray(output)) return eventContentToString(output);
+  if (typeof output === "object" && output && "output" in output) {
+    return getFinalOutput(output.output);
   }
 
   return null;
