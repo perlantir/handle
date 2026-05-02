@@ -39,7 +39,7 @@ function approvalTitle(approval: PendingApproval) {
     case "risky_browser_action":
       return "Approve action?";
     case "shell_exec":
-      return `Run command: \`${request.command ?? "unknown"}\`?`;
+      return `Run command: ${request.command ?? "unknown"}?`;
     default:
       return request.reason;
   }
@@ -81,9 +81,15 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
   const [trustSimilarRuns, setTrustSimilarRuns] = useState(false);
   const [scope, action] = scopeLabels[approval.request.type];
   const isActualChromeApproval = approval.request.type === "browser_use_actual_chrome";
+  const isHostAffectingApproval =
+    approval.request.type === "file_delete" ||
+    approval.request.type === "file_write_outside_workspace" ||
+    approval.request.type === "shell_exec";
   const isRiskyBrowserAction = approval.request.type === "risky_browser_action";
   const title = approvalTitle(approval);
   const approvalDisabled = isSubmitting || (isActualChromeApproval && !understandsActualChromeRisk);
+  const usesDenyApproveLabels =
+    isActualChromeApproval || isHostAffectingApproval || isRiskyBrowserAction;
 
   async function decide(decision: "approved" | "denied") {
     setIsSubmitting(true);
@@ -205,19 +211,23 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
         <span className="flex-1" />
         <PillButton
           autoFocus={isActualChromeApproval}
-          className={isRiskyBrowserAction || isActualChromeApproval ? "border-status-error/25 text-status-error hover:bg-status-error/5" : undefined}
+          className={
+            usesDenyApproveLabels
+              ? "border-status-error/25 text-status-error hover:bg-status-error/5"
+              : undefined
+          }
           disabled={isSubmitting}
           onClick={() => decide("denied")}
           variant="secondary"
         >
-          {isRiskyBrowserAction || isActualChromeApproval ? "Deny" : "Decline"}
+          {usesDenyApproveLabels ? "Deny" : "Decline"}
         </PillButton>
         <PillButton
           disabled={approvalDisabled}
           onClick={() => decide("approved")}
           variant="primary"
         >
-          {isRiskyBrowserAction || isActualChromeApproval ? "Approve" : "Approve & run"}
+          {usesDenyApproveLabels ? "Approve" : "Approve & run"}
         </PillButton>
       </div>
     </Modal>

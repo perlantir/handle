@@ -17,6 +17,7 @@
     "smoke:e2e-providers": "node scripts/smoke/e2e-providers.mjs",
     "smoke:e2e-task": "node scripts/smoke/e2e-task.mjs",
     "smoke:approval-flow": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/approval-flow.mjs",
+    "smoke:approval-modal-types": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/approval-modal-types.spec.ts",
     "smoke:browser-tools": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/browser-tools.mjs",
     "smoke:computer-use-agent": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/computer-use-agent.mjs",
     "smoke:desktop-sandbox": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/desktop-sandbox.mjs",

@@ -137,7 +137,7 @@ test.describe("Workspace Browser Pane", () => {
     ).toBeVisible();
     await expect(page.getByText("Files · delete")).toBeVisible();
 
-    await page.getByRole("button", { name: "Approve & run" }).click();
+    await page.getByRole("button", { name: "Approve" }).click();
     await expect
       .poll(() => responses)
       .toContainEqual({ approvalId: "approval-browser-1", decision: "approved" });
