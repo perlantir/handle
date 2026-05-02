@@ -50,10 +50,10 @@ function sandboxWithRunner(run: (command: string) => ReturnType<typeof ok> | Pro
 }
 
 describe("browserSession", () => {
-  it("installs Playwright in a venv, writes the server script through files, and launches headed Chromium", async () => {
+  it("installs Playwright with npm, writes the Node server script through files, and launches headed Chromium", async () => {
     const image = Buffer.from("png-bytes");
     const { calls, sandbox } = sandboxWithRunner((command) => {
-      if (command.includes('payload = json.loads') && command.includes('/action')) {
+      if (command.includes('const path = "/action"')) {
         return actionResponse({
           screenshot: image.toString("base64"),
           screenshotByteCount: image.byteLength,
@@ -70,26 +70,25 @@ describe("browserSession", () => {
 
     expect(result.title).toBe("Hacker News");
     expect(result.screenshot.equals(image)).toBe(true);
-    expect(calls[0]).toContain("python3 -m venv '/tmp/handle-browser-playwright-venv'");
-    expect(calls[0]).toContain(
-      "'/tmp/handle-browser-playwright-venv/bin/python' -m pip install --quiet --disable-pip-version-check playwright",
-    );
+    expect(calls[0]).toContain("mkdir -p '/tmp/handle-browser-runtime'");
+    expect(calls[0]).toContain("cd '/tmp/handle-browser-runtime'");
+    expect(calls[0]).toContain("npm install --silent --no-audit --no-fund playwright");
     expect(calls[0]).not.toContain("browser-use");
-    expect(calls[0]).toContain(
-      "'/tmp/handle-browser-playwright-venv/bin/python' -m playwright install chromium",
-    );
+    expect(calls[0]).not.toContain("pip install");
+    expect(calls[0]).toContain("npx playwright install chromium");
     expect(sandbox.files?.write).toHaveBeenCalledWith(
-      "/tmp/handle-browser-server.py",
-      expect.stringContaining("ThreadingHTTPServer"),
+      "/tmp/handle-browser-runtime/handle-browser-server.mjs",
+      expect.stringContaining("createServer"),
     );
     expect(calls[1]).toContain("export DISPLAY=':0'");
     expect(calls[1]).toContain("HANDLE_BROWSER_VIEWPORT_WIDTH='1280'");
     expect(calls[1]).toContain("HANDLE_BROWSER_VIEWPORT_HEIGHT='800'");
+    expect(calls[1]).toContain("cd '/tmp/handle-browser-runtime'");
     expect(calls[1]).toContain(
-      "nohup '/tmp/handle-browser-playwright-venv/bin/python' '/tmp/handle-browser-server.py'",
+      "nohup node '/tmp/handle-browser-runtime/handle-browser-server.mjs'",
     );
-    expect(calls[2]).toContain('payload = json.loads("{\\"action\\":\\"navigate\\"');
-    expect(calls[2]).not.toContain('payload = json.loads("\\"');
+    expect(calls[2]).toContain('const payload = JSON.parse("{\\"action\\":\\"navigate\\"');
+    expect(calls[2]).not.toContain('const payload = JSON.parse("\\"');
   });
 
   it("retries idempotent actions once after a browser crash", async () => {
@@ -98,7 +97,7 @@ describe("browserSession", () => {
     let installCalls = 0;
     let shutdownCalls = 0;
     const { sandbox } = sandboxWithRunner((command) => {
-      if (command.includes("--disable-pip-version-check playwright")) {
+      if (command.includes("npm install --silent --no-audit --no-fund playwright")) {
         installCalls += 1;
         return ok();
       }

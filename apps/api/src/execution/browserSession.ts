@@ -92,176 +92,174 @@ const DEFAULT_VIEWPORT = { height: 800, width: 1280 };
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const DEFAULT_DISPLAY = ":0";
-const SERVER_PATH = "/tmp/handle-browser-server.py";
+const NODE_RUNTIME_PATH = "/tmp/handle-browser-runtime";
+const SERVER_PATH = `${NODE_RUNTIME_PATH}/handle-browser-server.mjs`;
 const SERVER_LOG_PATH = "/tmp/handle-browser-server.log";
 const SERVER_PROFILE_PATH = "/tmp/handle-browser-profile";
-const VENV_PATH = "/tmp/handle-browser-playwright-venv";
-const VENV_PYTHON = `${VENV_PATH}/bin/python`;
 const ACTION_TIMEOUT_MS = 30_000;
 
 const BROWSER_SERVER_SCRIPT = String.raw`
-import base64
-import json
-import os
-import sys
-import threading
-import traceback
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from playwright.sync_api import sync_playwright
+import { createServer } from "node:http";
+import { chromium } from "playwright";
 
-PORT = int(os.environ.get("HANDLE_BROWSER_PORT", "41231"))
-PROFILE = os.environ.get("HANDLE_BROWSER_PROFILE", "/tmp/handle-browser-profile")
-WIDTH = int(os.environ.get("HANDLE_BROWSER_VIEWPORT_WIDTH", "1280"))
-HEIGHT = int(os.environ.get("HANDLE_BROWSER_VIEWPORT_HEIGHT", "800"))
-USER_AGENT = os.environ.get("HANDLE_BROWSER_USER_AGENT")
+const PORT = Number.parseInt(process.env.HANDLE_BROWSER_PORT ?? "41231", 10);
+const PROFILE = process.env.HANDLE_BROWSER_PROFILE ?? "/tmp/handle-browser-profile";
+const WIDTH = Number.parseInt(process.env.HANDLE_BROWSER_VIEWPORT_WIDTH ?? "1280", 10);
+const HEIGHT = Number.parseInt(process.env.HANDLE_BROWSER_VIEWPORT_HEIGHT ?? "800", 10);
+const USER_AGENT = process.env.HANDLE_BROWSER_USER_AGENT || undefined;
 
-playwright = sync_playwright().start()
-context = playwright.chromium.launch_persistent_context(
-    PROFILE,
-    args=[
-        "--disable-dev-shm-usage",
-        "--no-sandbox",
-        f"--window-size={WIDTH},{HEIGHT}",
-    ],
-    headless=False,
-    user_agent=USER_AGENT,
-    viewport={"width": WIDTH, "height": HEIGHT},
-)
-page = context.pages[0] if context.pages else context.new_page()
+const context = await chromium.launchPersistentContext(PROFILE, {
+  args: [
+    "--disable-dev-shm-usage",
+    "--no-sandbox",
+    "--window-size=" + WIDTH + "," + HEIGHT,
+  ],
+  headless: false,
+  userAgent: USER_AGENT,
+  viewport: { width: WIDTH, height: HEIGHT },
+});
+const page = context.pages()[0] ?? await context.newPage();
 
-def screenshot_b64():
-    image = page.screenshot(type="png")
-    return base64.b64encode(image).decode("ascii"), len(image)
+function selectorTimeout(args) {
+  return args.timeoutMs === undefined || args.timeoutMs === null ? 30000 : Number(args.timeoutMs);
+}
 
-def page_state(include_screenshot=False):
-    result = {
-        "title": page.title(),
-        "url": page.url,
-    }
-    if include_screenshot:
-        image, byte_count = screenshot_b64()
-        result["screenshot"] = image
-        result["screenshotByteCount"] = byte_count
-    return result
+async function screenshotB64() {
+  const image = await page.screenshot({ type: "png" });
+  return { image: image.toString("base64"), byteCount: image.byteLength };
+}
 
-def selector_timeout(args):
-    timeout = args.get("timeoutMs")
-    return int(timeout) if timeout is not None else 30000
+async function pageState(includeScreenshot = false) {
+  const result = {
+    title: await page.title(),
+    url: page.url(),
+  };
 
-def handle_action(payload):
-    action = payload.get("action")
-    args = payload.get("args") or {}
+  if (includeScreenshot) {
+    const screenshot = await screenshotB64();
+    result.screenshot = screenshot.image;
+    result.screenshotByteCount = screenshot.byteCount;
+  }
 
-    if action == "navigate":
-        page.goto(args["url"], wait_until="domcontentloaded", timeout=selector_timeout(args))
-        return page_state(include_screenshot=True)
+  return result;
+}
 
-    if action == "click":
-        selector = args["selector"]
-        page.locator(selector).first.click(timeout=selector_timeout(args))
-        return page_state(include_screenshot=bool(args.get("includeScreenshot")))
+async function handleAction(payload) {
+  const action = payload.action;
+  const args = payload.args ?? {};
 
-    if action == "type":
-        selector = args["selector"]
-        text = args.get("text", "")
-        locator = page.locator(selector).first
-        locator.click(timeout=selector_timeout(args))
-        page.keyboard.type(text)
-        return page_state(include_screenshot=bool(args.get("includeScreenshot")))
+  if (action === "navigate") {
+    await page.goto(args.url, { waitUntil: "domcontentloaded", timeout: selectorTimeout(args) });
+    return pageState(true);
+  }
 
-    if action == "extractText":
-        selector = args.get("selector")
-        if selector:
-            text = page.locator(selector).first.inner_text(timeout=selector_timeout(args))
-        else:
-            text = page.locator("body").inner_text(timeout=selector_timeout(args))
-        return {"text": text, "textLength": len(text), **page_state(False)}
+  if (action === "click") {
+    await page.locator(args.selector).first().click({ timeout: selectorTimeout(args) });
+    return pageState(Boolean(args.includeScreenshot));
+  }
 
-    if action == "screenshot":
-        image, byte_count = screenshot_b64()
-        return {"screenshot": image, "screenshotByteCount": byte_count, **page_state(False)}
+  if (action === "type") {
+    const locator = page.locator(args.selector).first();
+    await locator.click({ timeout: selectorTimeout(args) });
+    await page.keyboard.type(args.text ?? "");
+    return pageState(Boolean(args.includeScreenshot));
+  }
 
-    if action == "goBack":
-        page.go_back(wait_until="domcontentloaded", timeout=selector_timeout(args))
-        return page_state(include_screenshot=bool(args.get("includeScreenshot")))
+  if (action === "extractText") {
+    const selector = args.selector ?? "body";
+    const text = await page.locator(selector).first().innerText({ timeout: selectorTimeout(args) });
+    return { text, textLength: text.length, ...(await pageState(false)) };
+  }
 
-    if action == "scroll":
-        direction = args.get("direction", "down")
-        amount = int(args.get("amount") or 600)
-        delta = -amount if direction == "up" else amount
-        page.mouse.wheel(0, delta)
-        return page_state(include_screenshot=bool(args.get("includeScreenshot")))
+  if (action === "screenshot") {
+    const screenshot = await screenshotB64();
+    return { screenshot: screenshot.image, screenshotByteCount: screenshot.byteCount, ...(await pageState(false)) };
+  }
 
-    if action == "waitForSelector":
-        page.locator(args["selector"]).first.wait_for(timeout=selector_timeout(args))
-        return page_state(include_screenshot=bool(args.get("includeScreenshot")))
+  if (action === "goBack") {
+    await page.goBack({ waitUntil: "domcontentloaded", timeout: selectorTimeout(args) });
+    return pageState(Boolean(args.includeScreenshot));
+  }
 
-    raise ValueError(f"Unsupported browser action: {action}")
+  if (action === "scroll") {
+    const amount = Number(args.amount ?? 600);
+    const delta = args.direction === "up" ? -amount : amount;
+    await page.mouse.wheel(0, delta);
+    return pageState(Boolean(args.includeScreenshot));
+  }
 
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        return
+  if (action === "waitForSelector") {
+    await page.locator(args.selector).first().waitFor({ timeout: selectorTimeout(args) });
+    return pageState(Boolean(args.includeScreenshot));
+  }
 
-    def _json(self, status, payload):
-        data = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+  throw new Error("Unsupported browser action: " + action);
+}
 
-    def do_GET(self):
-        if self.path == "/health":
-            self._json(200, {"ok": True, **page_state(False)})
-            return
-        self._json(404, {"ok": False, "error": "Not found"})
+function json(res, status, payload) {
+  const body = JSON.stringify(payload);
+  res.writeHead(status, {
+    "Content-Length": Buffer.byteLength(body),
+    "Content-Type": "application/json",
+  });
+  res.end(body);
+}
 
-    def do_POST(self):
-        length = int(self.headers.get("content-length", "0"))
-        raw = self.rfile.read(length) if length else b"{}"
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      data += chunk;
+    });
+    req.on("end", () => resolve(data || "{}"));
+    req.on("error", reject);
+  });
+}
 
-        if self.path == "/shutdown":
-            self._json(200, {"ok": True})
-            threading.Thread(target=shutdown_server, daemon=True).start()
-            return
+async function shutdown() {
+  try {
+    await context.close();
+  } finally {
+    server.close(() => process.exit(0));
+  }
+}
 
-        if self.path != "/action":
-            self._json(404, {"ok": False, "error": "Not found"})
-            return
+const server = createServer(async (req, res) => {
+  if (req.method === "GET" && req.url === "/health") {
+    json(res, 200, { ok: true, ...(await pageState(false)) });
+    return;
+  }
 
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-            self._json(200, {"ok": True, "result": handle_action(payload)})
-        except Exception as exc:
-            self._json(
-                500,
-                {
-                    "ok": False,
-                    "error": str(exc),
-                    "traceback": traceback.format_exc(),
-                },
-            )
+  if (req.method === "POST" && req.url === "/shutdown") {
+    json(res, 200, { ok: true });
+    setImmediate(() => void shutdown());
+    return;
+  }
 
-def shutdown_server():
-    try:
-        context.close()
-    finally:
-        playwright.stop()
-        server.shutdown()
+  if (req.method !== "POST" || req.url !== "/action") {
+    json(res, 404, { ok: false, error: "Not found" });
+    return;
+  }
 
-server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-print(json.dumps({"event": "handle_browser_server_started", "port": PORT}), flush=True)
-try:
-    server.serve_forever()
-finally:
-    try:
-        context.close()
-    except Exception:
-        pass
-    try:
-        playwright.stop()
-    except Exception:
-        pass
+  try {
+    const payload = JSON.parse(await readBody(req));
+    json(res, 200, { ok: true, result: await handleAction(payload) });
+  } catch (err) {
+    json(res, 500, {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+  }
+});
+
+server.listen(PORT, "127.0.0.1", () => {
+  console.log(JSON.stringify({ event: "handle_browser_server_started", port: PORT }));
+});
+
+process.on("SIGTERM", () => void shutdown());
+process.on("SIGINT", () => void shutdown());
 `;
 
 function durationSince(startedAt: number) {
@@ -272,7 +270,7 @@ function shellSingleQuote(value: string) {
   return `'${value.replaceAll("'", "'\"'\"'")}'`;
 }
 
-function pythonStringLiteral(value: string) {
+function jsStringLiteral(value: string) {
   return JSON.stringify(value);
 }
 
@@ -575,9 +573,11 @@ export class E2BBrowserSession implements BrowserSession {
 
     const command = [
       "set -eu",
-      `if [ ! -x ${shellSingleQuote(VENV_PYTHON)} ]; then python3 -m venv ${shellSingleQuote(VENV_PATH)}; fi`,
-      `${shellSingleQuote(VENV_PYTHON)} -m pip install --quiet --disable-pip-version-check playwright`,
-      `${shellSingleQuote(VENV_PYTHON)} -m playwright install chromium`,
+      `mkdir -p ${shellSingleQuote(NODE_RUNTIME_PATH)}`,
+      `cd ${shellSingleQuote(NODE_RUNTIME_PATH)}`,
+      "[ -f package.json ] || npm init -y >/dev/null 2>&1",
+      "npm install --silent --no-audit --no-fund playwright",
+      "npx playwright install chromium",
     ].join("\n");
 
     this.options.logger.info(
@@ -607,8 +607,8 @@ export class E2BBrowserSession implements BrowserSession {
     this.options.logger.info(
       {
         durationMs: durationSince(startedAt),
+        runtimePath: NODE_RUNTIME_PATH,
         sandboxId: this.sandboxId,
-        venvPath: VENV_PATH,
       },
       "Browser runtime install complete",
     );
@@ -641,7 +641,7 @@ export class E2BBrowserSession implements BrowserSession {
       "python3 - <<'PY'",
       "import base64",
       "from pathlib import Path",
-      `Path(${pythonStringLiteral(SERVER_PATH)}).write_bytes(base64.b64decode(${pythonStringLiteral(encoded)}))`,
+      `Path(${jsStringLiteral(SERVER_PATH)}).write_bytes(base64.b64decode(${jsStringLiteral(encoded)}))`,
       "PY",
     ].join("\n");
     const result = await this.options.sandbox.commands.run(command);
@@ -671,7 +671,8 @@ export class E2BBrowserSession implements BrowserSession {
       `export HANDLE_BROWSER_VIEWPORT_WIDTH=${shellSingleQuote(String(width))}`,
       `export HANDLE_BROWSER_VIEWPORT_HEIGHT=${shellSingleQuote(String(height))}`,
       `export HANDLE_BROWSER_USER_AGENT=${shellSingleQuote(this.options.userAgent)}`,
-      `nohup ${shellSingleQuote(VENV_PYTHON)} ${shellSingleQuote(SERVER_PATH)} > ${shellSingleQuote(SERVER_LOG_PATH)} 2>&1 &`,
+      `cd ${shellSingleQuote(NODE_RUNTIME_PATH)}`,
+      `nohup node ${shellSingleQuote(SERVER_PATH)} > ${shellSingleQuote(SERVER_LOG_PATH)} 2>&1 &`,
       "for i in $(seq 1 100); do",
       this.healthCheckCommand({ allowFailure: true }),
       "  sleep 0.2",
@@ -715,18 +716,31 @@ export class E2BBrowserSession implements BrowserSession {
   private httpCommand(path: "/action" | "/health" | "/shutdown", payload: unknown) {
     const timeout = Math.ceil(ACTION_TIMEOUT_MS / 1000);
     return [
-      "python3 - <<'PY'",
-      "import http.client",
-      "import json",
-      "import sys",
-      `payload = json.loads(${pythonStringLiteral(JSON.stringify(payload))})`,
-      `conn = http.client.HTTPConnection("127.0.0.1", ${this.options.port}, timeout=${timeout})`,
-      `conn.request("POST" if ${pythonStringLiteral(path)} != "/health" else "GET", ${pythonStringLiteral(path)}, body=json.dumps(payload), headers={"Content-Type": "application/json"})`,
-      "resp = conn.getresponse()",
-      "body = resp.read().decode('utf-8', errors='replace')",
-      "print(body)",
-      "sys.exit(0 if resp.status < 400 else 1)",
-      "PY",
+      "node --input-type=module - <<'NODE'",
+      `const payload = JSON.parse(${jsStringLiteral(JSON.stringify(payload))});`,
+      `const path = ${jsStringLiteral(path)};`,
+      `const port = ${this.options.port};`,
+      `const timeoutMs = ${timeout * 1000};`,
+      "const body = JSON.stringify(payload);",
+      "const controller = new AbortController();",
+      "const timeout = setTimeout(() => controller.abort(), timeoutMs);",
+      "try {",
+      "  const response = await fetch('http://127.0.0.1:' + port + path, {",
+      "    body: path === '/health' ? undefined : body,",
+      "    headers: { 'Content-Type': 'application/json' },",
+      "    method: path === '/health' ? 'GET' : 'POST',",
+      "    signal: controller.signal,",
+      "  });",
+      "  const text = await response.text();",
+      "  console.log(text);",
+      "  process.exit(response.status < 400 ? 0 : 1);",
+      "} catch (err) {",
+      "  console.error(err instanceof Error ? err.stack || err.message : String(err));",
+      "  process.exit(1);",
+      "} finally {",
+      "  clearTimeout(timeout);",
+      "}",
+      "NODE",
     ].join("\n");
   }
 
