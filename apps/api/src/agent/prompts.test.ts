@@ -35,4 +35,13 @@ describe("agent prompts", () => {
     expect(prompt).toContain("This is not an E2B Ubuntu sandbox");
     expect(prompt).toContain("browser_navigate");
   });
+
+  it("instructs the agent to answer trivial questions without shell tools", () => {
+    const prompt = buildHandleSystemPrompt();
+
+    expect(prompt).toContain("answer directly without tools");
+    expect(prompt).toContain("Do not use");
+    expect(prompt).toContain("shell_exec for simple math");
+    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v9");
+  });
 });

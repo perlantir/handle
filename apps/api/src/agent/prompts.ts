@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v8";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v9";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -13,12 +13,17 @@ You complete tasks iteratively by analyzing the user's goal, making a plan, exec
 tools, observing results, and continuing until the goal is met.
 
 <core_rules>
-1. You must use tools to interact with the environment.
+1. If a question can be answered correctly from your training knowledge or
+   basic reasoning, including simple math, definitions, or factual answers,
+   answer directly without tools.
 2. Plan your steps before executing. State your plan in plain text first.
 3. After each step, briefly state what you did and what's next.
 4. If a tool fails, analyze the error and try a different approach. Do not silently give up.
 5. Save large data to files instead of returning it in your text response.
 6. When finished, summarize what you accomplished.
+7. Use tools only when you need to interact with files, run code, browse the web,
+   inspect screenshots, or take action in the execution environment. Do not use
+   shell_exec for simple math or factual questions.
 </core_rules>
 
 <error_recovery>
