@@ -11,6 +11,7 @@ import {
   type AuditLogAction,
   type SafetyCheckResult,
   type SafetyDecision,
+  type WorkspaceScope,
 } from './safetyGovernor';
 import type {
   ExecutionBackend,
@@ -48,10 +49,13 @@ export interface LocalBackendOptions {
   approvalTimeoutMs?: number;
   auditLogPath?: string;
   browserMode?: LocalBrowserMode;
+  customScopePath?: string | null;
   fileSystem?: LocalBackendFilesystem;
+  projectId?: string;
   requestApproval?: LocalApprovalRequester;
   safetyGovernor?: SafetyGovernor;
   workspaceDir?: string;
+  workspaceScope?: WorkspaceScope | 'default-workspace' | 'custom-folder' | 'full-access' | null;
 }
 
 const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -104,8 +108,11 @@ export class LocalBackend implements ExecutionBackend {
       options.safetyGovernor ??
       new SafetyGovernor({
         ...(options.auditLogPath ? { auditLogPath: options.auditLogPath } : {}),
+        ...(options.customScopePath ? { customScopePath: options.customScopePath } : {}),
+        ...(options.projectId ? { projectId: options.projectId } : {}),
         taskId,
         workspaceDir: this.workspaceDir,
+        ...(options.workspaceScope ? { workspaceScope: options.workspaceScope } : {}),
       });
   }
 

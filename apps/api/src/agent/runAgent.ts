@@ -3,6 +3,8 @@ import type { E2BSandboxLike, ExecutionBackend } from "../execution/types";
 import { createBrowserDesktopSandbox } from "../execution/browserSession";
 import { LocalBackend, type LocalBackendOptions } from "../execution/localBackend";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { emitTaskEvent } from "../lib/eventBus";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
@@ -307,6 +309,10 @@ function localSandboxPlaceholder(taskId: string): E2BSandboxLike {
   };
 }
 
+function defaultProjectWorkspaceDir(projectId: string | undefined, taskId: string) {
+  return join(homedir(), "Documents", "Handle", "workspaces", projectId ?? taskId);
+}
+
 function timeoutError(label: string, timeoutMs: number) {
   return new Error(`${label} timed out after ${timeoutMs}ms`);
 }
@@ -477,12 +483,27 @@ export function createAgentRunner({
         "Selecting task sandbox runtime",
       );
       if (selectedBackend === "local") {
-        backend = createLocalBackend(taskId, {
+        const localBackendOptions: LocalBackendOptions = {
           browserMode:
             project?.browserMode === "ACTUAL_CHROME"
               ? "actual-chrome"
               : await loadBrowserMode(store),
-        });
+        };
+        if (project?.customScopePath) {
+          localBackendOptions.customScopePath = project.customScopePath;
+        }
+        if (project?.id) {
+          localBackendOptions.projectId = project.id;
+          localBackendOptions.workspaceDir = defaultProjectWorkspaceDir(
+            project.id,
+            taskId,
+          );
+        }
+        if (project?.workspaceScope) {
+          localBackendOptions.workspaceScope =
+            project.workspaceScope as NonNullable<LocalBackendOptions["workspaceScope"]>;
+        }
+        backend = createLocalBackend(taskId, localBackendOptions);
         await backend.initialize(taskId);
         sandbox = localSandboxPlaceholder(taskId);
       } else if (shouldUseDesktopSandbox) {

@@ -10,12 +10,15 @@ export type AuditLogAction = 'file_write' | 'file_delete' | 'shell_exec' | 'brow
 export interface AuditLogEntry {
   timestamp: string;
   taskId: string;
+  projectId?: string;
   action: AuditLogAction;
   target: string;
   decision: SafetyDecision;
   approved?: boolean;
   approvalDurationMs?: number;
   matchedPattern?: string;
+  scope?: WorkspaceScope;
+  customScopePath?: string;
   workspaceDir: string;
 }
 
@@ -28,11 +31,17 @@ export interface SafetyCheckResult {
 
 export interface SafetyGovernorOptions {
   auditLogPath?: string;
+  customScopePath?: string | null;
   homeDir?: string;
   now?: () => Date;
+  projectId?: string;
   taskId: string;
   workspaceDir: string;
+  workspaceScope?: WorkspaceScope | LowercaseWorkspaceScope | null;
 }
+
+export type WorkspaceScope = 'DEFAULT_WORKSPACE' | 'CUSTOM_FOLDER' | 'FULL_ACCESS';
+type LowercaseWorkspaceScope = 'default-workspace' | 'custom-folder' | 'full-access';
 
 interface ForbiddenPathRule {
   label: string;
@@ -54,6 +63,8 @@ const HIGH_RISK_COMMANDS = new Set([
 const FORBIDDEN_COMMANDS = new Set(['shutdown', 'reboot', 'halt', 'poweroff', 'doas', 'pkexec']);
 
 const CHAIN_OR_PIPE_PATTERN = /(\|\|?|\&\&|;)/;
+const REDIRECTION_PATTERN = /(?:^|[\s;&|])(?:\d?>|&>|>>|>)\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/g;
+const PATH_TOKEN_PATTERN = /(?:"([^"]*(?:\/|~)[^"]*)"|'([^']*(?:\/|~)[^']*)'|((?:~|\/)[^\s;&|'"`]+))/g;
 const SUDO_VARIABLE_PATTERN = /\$(?:\{SUDO\}|SUDO\b)/i;
 const SUDO_COMMAND_PATTERN = /(?:^|[\s;&|()])sudo(?:\s|$)/i;
 const DANGEROUS_RM_PATTERN = /(?:^|[\s;&|()])rm\s+(?=[^;&|]*(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r|--recursive))[^;&|]*(?:^|\s)(\/|\/\*|~)(?:\s|$)/i;
@@ -103,7 +114,11 @@ function createForbiddenPathRules(homeDir: string): ForbiddenPathRule[] {
     },
     {
       label: '/private',
-      matches: (path) => path === '/private' || path.startsWith('/private/'),
+      matches: (path) =>
+        path === '/private/etc' ||
+        path.startsWith('/private/etc/') ||
+        path === '/private/root' ||
+        path.startsWith('/private/root/'),
     },
     {
       label: '/usr-not-local',
@@ -115,7 +130,15 @@ function createForbiddenPathRules(homeDir: string): ForbiddenPathRule[] {
     },
     {
       label: '/var',
-      matches: (path) => path === '/var' || path.startsWith('/var/'),
+      matches: (path) =>
+        path === '/var' ||
+        path.startsWith('/var/log/') ||
+        path.startsWith('/var/db/') ||
+        path.startsWith('/var/root/') ||
+        path === '/private/var' ||
+        path.startsWith('/private/var/log/') ||
+        path.startsWith('/private/var/db/') ||
+        path.startsWith('/private/var/root/'),
     },
     {
       label: '/Library',
@@ -175,8 +198,12 @@ async function realpathForPolicy(path: string) {
 
 export class SafetyGovernor {
   readonly auditLogPath: string;
+  readonly customScopePath: string | undefined;
   readonly homeDir: string;
+  readonly projectId: string | undefined;
+  readonly scopeRoot: string | null;
   readonly taskId: string;
+  readonly workspaceScope: WorkspaceScope;
   readonly workspaceDir: string;
   private readonly now: () => Date;
   private readonly forbiddenPathRules: ForbiddenPathRule[];
@@ -185,8 +212,19 @@ export class SafetyGovernor {
     this.auditLogPath = options.auditLogPath ?? defaultAuditLogPath();
     this.homeDir = resolve(options.homeDir ?? homedir());
     this.now = options.now ?? (() => new Date());
+    this.projectId = options.projectId;
     this.taskId = options.taskId;
     this.workspaceDir = resolve(expandHome(options.workspaceDir, this.homeDir));
+    this.workspaceScope = normalizeWorkspaceScope(options.workspaceScope);
+    this.customScopePath = options.customScopePath
+      ? resolve(expandHome(options.customScopePath, this.homeDir))
+      : undefined;
+    this.scopeRoot =
+      this.workspaceScope === 'FULL_ACCESS'
+        ? null
+        : this.workspaceScope === 'CUSTOM_FOLDER' && this.customScopePath
+          ? this.customScopePath
+          : this.workspaceDir;
     this.forbiddenPathRules = createForbiddenPathRules(this.homeDir);
   }
 
@@ -199,15 +237,7 @@ export class SafetyGovernor {
   }
 
   async checkFileRead(path: string): Promise<SafetyCheckResult> {
-    const result = await this.classifyPath(path);
-    if (result.decision === 'allow') return result;
-    if (result.decision === 'deny') return result;
-    return {
-      ...result,
-      decision: 'deny',
-      matchedPattern: result.matchedPattern ?? 'outside-workspace-read',
-      reason: `Read denied outside workspace: ${result.resolvedTarget}`,
-    };
+    return this.classifyPath(path);
   }
 
   async checkFileList(path: string): Promise<SafetyCheckResult> {
@@ -238,6 +268,9 @@ export class SafetyGovernor {
       return this.shellDecision('deny', command, 'mkfs', 'Shell command denied: filesystem formatting is forbidden');
     }
 
+    const redirectDecision = this.classifyShellRedirections(command);
+    if (redirectDecision) return redirectDecision;
+
     const forbiddenPath = this.matchForbiddenPathInCommand(normalized);
     if (forbiddenPath) {
       return this.shellDecision(
@@ -249,6 +282,18 @@ export class SafetyGovernor {
     }
 
     if (CHAIN_OR_PIPE_PATTERN.test(normalized)) {
+      const outsideScopePath = this.matchOutsideScopePathInCommand(normalized);
+      if (outsideScopePath) {
+        return this.shellDecision(
+          'approve',
+          command,
+          'pipe-or-chain',
+          `Shell command requires approval: pipe or command chaining detected (${outsideScopePath})`,
+        );
+      }
+      if (this.commandHasPathToken(normalized)) {
+        return this.shellDecision('allow', command, undefined, 'Shell command chain allowed inside workspace scope');
+      }
       return this.shellDecision('approve', command, 'pipe-or-chain', 'Shell command requires approval: pipe or command chaining detected');
     }
     if (HIGH_RISK_COMMANDS.has(cmd)) {
@@ -262,6 +307,9 @@ export class SafetyGovernor {
     const completeEntry: AuditLogEntry = {
       timestamp: this.now().toISOString(),
       taskId: this.taskId,
+      ...(this.projectId ? { projectId: this.projectId } : {}),
+      ...(this.customScopePath ? { customScopePath: this.customScopePath } : {}),
+      scope: this.workspaceScope,
       workspaceDir: this.workspaceDir,
       ...entry,
       target: redactSecrets(entry.target),
@@ -284,23 +332,29 @@ export class SafetyGovernor {
   private async classifyPath(path: string): Promise<SafetyCheckResult> {
     const originalTarget = this.resolveLexicalPath(path);
     const resolvedTarget = await realpathForPolicy(originalTarget);
-    const workspaceReal = await this.resolveWorkspace();
+    const scopeReal =
+      this.workspaceScope === 'FULL_ACCESS' ? null : await this.resolveScopeRoot();
 
-    if (isInsideOrEqual(lowercasePath(resolvedTarget), lowercasePath(workspaceReal))) {
+    if (
+      scopeReal &&
+      isInsideOrEqual(lowercasePath(resolvedTarget), lowercasePath(scopeReal))
+    ) {
       return {
         decision: 'allow',
-        reason: `Path is inside workspace: ${resolvedTarget}`,
+        reason: `Path is inside ${this.workspaceScope === 'CUSTOM_FOLDER' ? 'custom folder' : 'workspace'} scope: ${resolvedTarget}`,
         resolvedTarget,
       };
     }
 
-    const originalWorkspace = this.resolveLexicalPath(this.workspaceDir);
-    const originalEscapedWorkspace = !isInsideOrEqual(
-      lowercasePath(originalTarget),
-      lowercasePath(originalWorkspace),
-    );
+    const originalEscapedScope =
+      !scopeReal ||
+      (!isInsideOrEqual(lowercasePath(originalTarget), lowercasePath(scopeReal)) &&
+        !isInsideOrEqual(
+          lowercasePath(originalTarget),
+          lowercasePath(resolve(this.scopeRoot ?? this.workspaceDir)),
+        ));
     const matchedPattern =
-      (originalEscapedWorkspace ? this.matchForbiddenPath(originalTarget) : undefined) ??
+      (originalEscapedScope ? this.matchForbiddenPath(originalTarget) : undefined) ??
       this.matchForbiddenPath(resolvedTarget);
     if (matchedPattern) {
       return {
@@ -311,10 +365,21 @@ export class SafetyGovernor {
       };
     }
 
+    if (this.workspaceScope === 'FULL_ACCESS') {
+      return {
+        decision: 'allow',
+        reason: `Path allowed by full-access scope: ${resolvedTarget}`,
+        resolvedTarget,
+      };
+    }
+
     return {
       decision: 'approve',
-      matchedPattern: 'outside-workspace',
-      reason: `Path requires approval outside workspace: ${resolvedTarget}`,
+      matchedPattern:
+        this.workspaceScope === 'DEFAULT_WORKSPACE'
+          ? 'outside-workspace'
+          : 'outside-scope',
+      reason: `Path requires approval outside project scope: ${resolvedTarget}`,
       resolvedTarget,
     };
   }
@@ -325,15 +390,69 @@ export class SafetyGovernor {
   }
 
   private matchForbiddenPathInCommand(command: string) {
-    const lower = lowercasePath(command);
-    return this.forbiddenPathRules.find((rule) => {
-      const token = rule.label.startsWith('~') ? rule.label : rule.label.toLowerCase();
-      if (rule.label === '/usr-not-local') {
-        return /(?:^|[\s"'=])\/usr\/(?!local(?:\/|\s|$))/.test(lower);
+    PATH_TOKEN_PATTERN.lastIndex = 0;
+    for (const match of command.matchAll(PATH_TOKEN_PATTERN)) {
+      const token = match[1] ?? match[2] ?? match[3];
+      if (!token) continue;
+      const resolvedTarget = this.resolveLexicalPath(token);
+      if (this.isPathInsideScopeLexically(resolvedTarget)) continue;
+      const matchedPattern =
+        this.matchForbiddenPath(token) ?? this.matchForbiddenPath(resolvedTarget);
+      if (matchedPattern) return matchedPattern;
+    }
+    return undefined;
+  }
+
+  private classifyShellRedirections(command: string) {
+    const targets = this.extractRedirectionTargets(command);
+    for (const target of targets) {
+      const resolvedTarget = this.resolveLexicalPath(target);
+      const matchedPattern = this.matchForbiddenPath(resolvedTarget);
+      if (matchedPattern) {
+        return this.shellDecision(
+          'deny',
+          command,
+          matchedPattern,
+          `Shell command denied: redirection targets forbidden path rule ${matchedPattern}`,
+        );
       }
-      const pathToken = token.startsWith('~') ? token.replace('~', lowercasePath(this.homeDir)) : token;
-      return lower.includes(pathToken.toLowerCase()) || lower.includes(token.toLowerCase());
-    })?.label;
+      if (!this.isPathInsideScopeLexically(resolvedTarget)) {
+        return this.shellDecision(
+          'approve',
+          command,
+          'redirect-outside-scope',
+          `Shell command requires approval: redirection writes outside project scope (${resolvedTarget})`,
+        );
+      }
+    }
+    return null;
+  }
+
+  private extractRedirectionTargets(command: string) {
+    const targets: string[] = [];
+    REDIRECTION_PATTERN.lastIndex = 0;
+    for (const match of command.matchAll(REDIRECTION_PATTERN)) {
+      const target = match[1] ?? match[2] ?? match[3];
+      if (target && target !== '&1' && target !== '&2') targets.push(target);
+    }
+    return targets;
+  }
+
+  private matchOutsideScopePathInCommand(command: string) {
+    PATH_TOKEN_PATTERN.lastIndex = 0;
+    for (const match of command.matchAll(PATH_TOKEN_PATTERN)) {
+      const token = match[1] ?? match[2] ?? match[3];
+      if (!token) continue;
+      const resolvedTarget = this.resolveLexicalPath(token);
+      if (this.matchForbiddenPath(resolvedTarget)) continue;
+      if (!this.isPathInsideScopeLexically(resolvedTarget)) return resolvedTarget;
+    }
+    return null;
+  }
+
+  private commandHasPathToken(command: string) {
+    PATH_TOKEN_PATTERN.lastIndex = 0;
+    return PATH_TOKEN_PATTERN.test(command);
   }
 
   private resolveLexicalPath(path: string) {
@@ -345,6 +464,18 @@ export class SafetyGovernor {
   private async resolveWorkspace() {
     await fs.mkdir(this.workspaceDir, { recursive: true });
     return realpathForPolicy(this.workspaceDir);
+  }
+
+  private async resolveScopeRoot() {
+    if (!this.scopeRoot) return this.resolveWorkspace();
+    await fs.mkdir(this.scopeRoot, { recursive: true });
+    return realpathForPolicy(this.scopeRoot);
+  }
+
+  private isPathInsideScopeLexically(path: string) {
+    if (this.workspaceScope === 'FULL_ACCESS') return true;
+    const scopeRoot = this.scopeRoot ?? this.workspaceDir;
+    return isInsideOrEqual(lowercasePath(resolve(path)), lowercasePath(resolve(scopeRoot)));
   }
 
   private shellDecision(
@@ -360,4 +491,10 @@ export class SafetyGovernor {
       resolvedTarget: command,
     };
   }
+}
+
+function normalizeWorkspaceScope(value: SafetyGovernorOptions['workspaceScope']): WorkspaceScope {
+  if (value === 'CUSTOM_FOLDER' || value === 'custom-folder') return 'CUSTOM_FOLDER';
+  if (value === 'FULL_ACCESS' || value === 'full-access') return 'FULL_ACCESS';
+  return 'DEFAULT_WORKSPACE';
 }

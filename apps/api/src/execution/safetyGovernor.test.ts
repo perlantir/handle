@@ -110,11 +110,11 @@ describe('SafetyGovernor path predicates', () => {
     },
   );
 
-  it('denies file reads outside the workspace when no read approval type exists', async () => {
+  it('classifies file reads outside the workspace as requiring approval', async () => {
     const governor = await createGovernor();
 
     await expect(governor.checkFileRead('/tmp/outside-workspace.txt')).resolves.toMatchObject({
-      decision: 'deny',
+      decision: 'approve',
       matchedPattern: expect.stringMatching(/^(outside-workspace|\/private)$/),
     });
   });
@@ -208,6 +208,102 @@ describe('SafetyGovernor shell predicates', () => {
     const governor = await createGovernor();
 
     expect(governor.checkShellExec('echo hello')).toMatchObject({
+      decision: 'allow',
+    });
+  });
+});
+
+describe('SafetyGovernor project scopes', () => {
+  it('allows custom-folder paths and requires approval outside the custom folder', async () => {
+    const customScopePath = join(tempRoot, 'custom-scope');
+    await fs.mkdir(customScopePath, { recursive: true });
+    const governor = new SafetyGovernor({
+      auditLogPath,
+      customScopePath,
+      projectId: 'project-custom',
+      taskId: 'task-safety-test',
+      workspaceDir,
+      workspaceScope: 'CUSTOM_FOLDER',
+    });
+
+    await expect(governor.checkFileWrite(join(customScopePath, 'ok.txt'))).resolves.toMatchObject({
+      decision: 'allow',
+    });
+    await expect(governor.checkFileWrite(join(workspaceDir, 'outside-custom.txt'))).resolves.toMatchObject({
+      decision: 'approve',
+      matchedPattern: 'outside-scope',
+    });
+  });
+
+  it('allows non-forbidden paths in full-access scope but still denies forbidden paths', async () => {
+    const governor = new SafetyGovernor({
+      auditLogPath,
+      projectId: 'project-full',
+      taskId: 'task-safety-test',
+      workspaceDir,
+      workspaceScope: 'FULL_ACCESS',
+    });
+
+    await expect(governor.checkFileWrite('/tmp/handle-full-access.txt')).resolves.toMatchObject({
+      decision: 'allow',
+    });
+    await expect(governor.checkFileWrite('/System/handle-denied.txt')).resolves.toMatchObject({
+      decision: 'deny',
+      matchedPattern: '/System',
+    });
+  });
+
+  it('adds project scope fields to audit entries', async () => {
+    const governor = new SafetyGovernor({
+      auditLogPath,
+      customScopePath: join(tempRoot, 'custom-scope'),
+      projectId: 'project-audit',
+      taskId: 'task-safety-test',
+      workspaceDir,
+      workspaceScope: 'CUSTOM_FOLDER',
+    });
+
+    await governor.writeAuditEntry({
+      action: 'file_write',
+      decision: 'allow',
+      target: join(tempRoot, 'custom-scope', 'ok.txt'),
+    });
+
+    const line = JSON.parse(await fs.readFile(auditLogPath, 'utf8'));
+    expect(line).toMatchObject({
+      action: 'file_write',
+      decision: 'allow',
+      projectId: 'project-audit',
+      scope: 'CUSTOM_FOLDER',
+      taskId: 'task-safety-test',
+    });
+    expect(line.customScopePath).toContain('custom-scope');
+  });
+
+  it('requires approval when shell redirection writes outside scope', async () => {
+    const governor = await createGovernor();
+
+    expect(governor.checkShellExec('echo hello > ~/Desktop/handle-test.txt')).toMatchObject({
+      decision: 'approve',
+      matchedPattern: 'redirect-outside-scope',
+    });
+  });
+
+  it('denies shell redirection into forbidden paths', async () => {
+    const governor = await createGovernor();
+
+    expect(governor.checkShellExec('echo hello > /System/handle-test.txt')).toMatchObject({
+      decision: 'deny',
+      matchedPattern: '/System',
+    });
+  });
+
+  it('allows command chains when every referenced path is inside the workspace scope', async () => {
+    const governor = await createGovernor();
+
+    expect(
+      governor.checkShellExec(`cd ${workspaceDir} && python3 ${join(workspaceDir, 'script.py')}`),
+    ).toMatchObject({
       decision: 'allow',
     });
   });
