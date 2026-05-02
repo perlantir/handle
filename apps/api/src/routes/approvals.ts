@@ -26,7 +26,12 @@ export interface ApprovalRouteStore {
     findMany(args: unknown): Promise<ApprovalRow[]>;
     update(args: unknown): Promise<{ id: string; status: string; taskId: string }>;
   };
-  task: {
+  agentRun?: {
+    findFirst(args: unknown): Promise<unknown | null>;
+    findMany(args: unknown): Promise<Array<{ id: string }>>;
+    update(args: unknown): Promise<unknown>;
+  };
+  task?: {
     findFirst(args: unknown): Promise<unknown | null>;
     findMany(args: unknown): Promise<Array<{ id: string }>>;
     update(args: unknown): Promise<unknown>;
@@ -57,9 +62,12 @@ export function createApprovalsRouter({ getUserId = getAuthenticatedUserId, stor
       const userId = getUserId(req);
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-      const tasks = await store.task.findMany({
+      const runStore = store.agentRun ?? store.task;
+      if (!runStore) return res.json({ approvals: [] });
+
+      const tasks = await runStore.findMany({
         select: { id: true },
-        where: { userId },
+        where: store.agentRun ? {} : { userId },
       });
       const taskIds = tasks.map((task) => task.id);
 
@@ -93,8 +101,11 @@ export function createApprovalsRouter({ getUserId = getAuthenticatedUserId, stor
       });
       if (!approval) return res.status(404).json({ error: 'Approval not found' });
 
-      const task = await store.task.findFirst({
-        where: { id: approval.taskId, userId },
+      const runStore = store.agentRun ?? store.task;
+      if (!runStore) return res.status(404).json({ error: 'Approval not found' });
+
+      const task = await runStore.findFirst({
+        where: store.agentRun ? { id: approval.taskId } : { id: approval.taskId, userId },
       });
       if (!task) return res.status(404).json({ error: 'Approval not found' });
 
@@ -106,7 +117,7 @@ export function createApprovalsRouter({ getUserId = getAuthenticatedUserId, stor
         data: { respondedAt: new Date(), status: parsed.data.decision },
         where: { id: approval.id },
       });
-      await store.task.update({
+      await runStore.update({
         data: { status: 'RUNNING' },
         where: { id: approval.taskId },
       });

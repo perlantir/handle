@@ -22,7 +22,17 @@ export interface TaskRouteStore {
   user: {
     upsert(args: unknown): Promise<unknown>;
   };
-  task: {
+  agentRun?: {
+    create(args: unknown): Promise<{ id: string }>;
+    findFirst(args: unknown): Promise<unknown | null>;
+  };
+  conversation?: {
+    create(args: unknown): Promise<{ id: string }>;
+  };
+  project?: {
+    upsert(args: unknown): Promise<{ id: string }>;
+  };
+  task?: {
     create(args: unknown): Promise<{ id: string }>;
     findFirst(args: unknown): Promise<unknown | null>;
   };
@@ -58,6 +68,25 @@ async function defaultBackendForTask(store: TaskRouteStore) {
   return row.defaultBackend === "local" ? "local" : "e2b";
 }
 
+function backendToDb(value: "e2b" | "local") {
+  return value === "local" ? "LOCAL" : "E2B";
+}
+
+function taskStatusFromRun(status: string | undefined) {
+  if (status === "COMPLETED") return "STOPPED";
+  if (status === "FAILED" || status === "CANCELLED") return "ERROR";
+  if (status === "WAITING") return "WAITING";
+  return "RUNNING";
+}
+
+function backendFromRun(value: string | undefined) {
+  return value === "LOCAL" || value === "local" ? "local" : "e2b";
+}
+
+function titleFromGoal(goal: string) {
+  return goal.trim().slice(0, 80) || "New conversation";
+}
+
 export function createTasksRouter({
   getUserId = getAuthenticatedUserId,
   runAgent = defaultRunAgent,
@@ -86,19 +115,55 @@ export function createTasksRouter({
 
       const backend = parsed.data.backend ?? (await defaultBackendForTask(store));
 
-      const task = await store.task.create({
-        data: {
-          backend,
-          goal: parsed.data.goal,
-          messages: {
-            create: { content: parsed.data.goal, role: "USER" },
+      let task: { id: string };
+
+      if (store.agentRun && store.project && store.conversation) {
+        const project = await store.project.upsert({
+          create: {
+            defaultBackend: backendToDb(backend),
+            id: "default-project",
+            name: "Personal",
           },
-          ...(parsed.data.providerOverride
-            ? { providerOverride: parsed.data.providerOverride }
-            : {}),
-          userId,
-        },
-      });
+          update: {},
+          where: { id: "default-project" },
+        });
+        const conversation = await store.conversation.create({
+          data: {
+            messages: {
+              create: { content: parsed.data.goal, role: "USER" },
+            },
+            projectId: project.id,
+            title: titleFromGoal(parsed.data.goal),
+          },
+        });
+        task = await store.agentRun.create({
+          data: {
+            backend: backendToDb(backend),
+            conversationId: conversation.id,
+            goal: parsed.data.goal,
+            ...(parsed.data.providerOverride
+              ? { providerId: parsed.data.providerOverride }
+              : {}),
+            status: "RUNNING",
+          },
+        });
+      } else if (store.task) {
+        task = await store.task.create({
+          data: {
+            backend,
+            goal: parsed.data.goal,
+            messages: {
+              create: { content: parsed.data.goal, role: "USER" },
+            },
+            ...(parsed.data.providerOverride
+              ? { providerOverride: parsed.data.providerOverride }
+              : {}),
+            userId,
+          },
+        });
+      } else {
+        throw new Error("Task route store is not configured");
+      }
 
       if (!parsed.data.skipAgent || process.env.NODE_ENV === "production") {
         const runOptions = {
@@ -128,12 +193,65 @@ export function createTasksRouter({
       const userId = getUserId(req);
       if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-      const task = await store.task.findFirst({
-        include: { messages: { orderBy: { createdAt: "asc" } } },
-        where: { id: req.params.id, userId },
-      });
+      const task =
+        store.agentRun
+          ? await store.agentRun.findFirst({
+              include: {
+                conversation: {
+                  include: {
+                    messages: { orderBy: { createdAt: "asc" } },
+                    project: true,
+                  },
+                },
+              },
+              where: { id: req.params.id },
+            })
+          : store.task
+            ? await store.task.findFirst({
+                include: { messages: { orderBy: { createdAt: "asc" } } },
+                where: { id: req.params.id, userId },
+              })
+            : null;
 
       if (!task) return res.status(404).json({ error: "Task not found" });
+
+      if ("conversation" in (task as Record<string, unknown>)) {
+        const run = task as {
+          backend?: string;
+          conversation?: {
+            messages?: Array<{
+              content: string;
+              createdAt?: Date;
+              id: string;
+              role: string;
+            }>;
+          };
+          goal: string;
+          id: string;
+          modelName?: string | null;
+          providerId?: string | null;
+          status?: string;
+          startedAt?: Date;
+          updatedAt?: Date;
+        };
+        return res.json({
+          backend: backendFromRun(run.backend),
+          createdAt: run.startedAt?.toISOString(),
+          goal: run.goal,
+          id: run.id,
+          messages:
+            run.conversation?.messages?.map((message) => ({
+              content: message.content,
+              createdAt: message.createdAt?.toISOString(),
+              id: message.id,
+              role: message.role,
+            })) ?? [],
+          providerId: run.providerId ?? null,
+          providerModel: run.modelName ?? null,
+          status: taskStatusFromRun(run.status),
+          updatedAt: run.updatedAt?.toISOString(),
+        });
+      }
 
       return res.json(task);
     }),

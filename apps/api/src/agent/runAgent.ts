@@ -76,12 +76,37 @@ interface TaskStore {
   message: {
     create(args: unknown): Promise<unknown>;
   };
-  task: {
+  agentRun?: {
+    findUnique(args: unknown): Promise<AgentRunContext | null>;
+    update(args: unknown): Promise<unknown>;
+  };
+  task?: {
     findUnique(
       args: unknown,
     ): Promise<{ backend: string | null; providerOverride: string | null } | null>;
     update(args: unknown): Promise<unknown>;
   };
+}
+
+interface ProjectContext {
+  browserMode: string | null;
+  customScopePath: string | null;
+  defaultBackend: string | null;
+  defaultModel: string | null;
+  defaultProvider: string | null;
+  id: string;
+  workspaceScope: string | null;
+}
+
+interface AgentRunContext {
+  backend: string | null;
+  conversationId: string;
+  conversation?: {
+    messages?: Array<{ content: string; role: string }>;
+    project?: ProjectContext | null;
+  } | null;
+  providerId: string | null;
+  modelName: string | null;
 }
 
 interface SafetySettingsStore {
@@ -159,7 +184,110 @@ function normalizeProviderOverride(value: string | null | undefined) {
 }
 
 function normalizeBackend(value: string | null | undefined) {
-  return value === "local" ? "local" : "e2b";
+  return value === "local" || value === "LOCAL" ? "local" : "e2b";
+}
+
+function backendToDb(value: "e2b" | "local") {
+  return value === "local" ? "LOCAL" : "E2B";
+}
+
+function runStatusToDb(status: "RUNNING" | "WAITING" | "STOPPED" | "ERROR") {
+  if (status === "STOPPED") return "COMPLETED";
+  if (status === "ERROR") return "FAILED";
+  return status;
+}
+
+async function loadRunContext(store: TaskStore, taskId: string) {
+  if (store.agentRun) {
+    return store.agentRun.findUnique({
+      include: {
+        conversation: {
+          include: {
+            messages: { orderBy: { createdAt: "asc" } },
+            project: true,
+          },
+        },
+      },
+      where: { id: taskId },
+    });
+  }
+
+  if (!store.task) return null;
+  const task = await store.task.findUnique({
+    select: { backend: true, providerOverride: true },
+    where: { id: taskId },
+  });
+  if (!task) return null;
+
+  return {
+    backend: task.backend,
+    conversationId: taskId,
+    conversation: null,
+    modelName: null,
+    providerId: task.providerOverride,
+  };
+}
+
+async function updateRun(store: TaskStore, taskId: string, data: Record<string, unknown>) {
+  if (store.agentRun) {
+    const nextData = { ...data };
+    if (typeof nextData.status === "string") {
+      nextData.status = runStatusToDb(
+        nextData.status as "RUNNING" | "WAITING" | "STOPPED" | "ERROR",
+      );
+      if (nextData.status === "COMPLETED" || nextData.status === "FAILED") {
+        nextData.completedAt = new Date();
+      }
+    }
+    if (typeof nextData.backend === "string") {
+      nextData.backend = backendToDb(normalizeBackend(nextData.backend));
+    }
+    await store.agentRun.update({ data: nextData, where: { id: taskId } });
+    return;
+  }
+
+  if (store.task) {
+    const legacyData = { ...data };
+    delete legacyData.result;
+    await store.task.update({ data: legacyData, where: { id: taskId } });
+  }
+}
+
+async function createAssistantMessage(
+  store: TaskStore,
+  taskId: string,
+  context: AgentRunContext | null,
+  content: string,
+  provider?: ProviderInstance,
+) {
+  if (store.agentRun && context?.conversationId) {
+    await store.message.create({
+      data: {
+        agentRunId: taskId,
+        content,
+        conversationId: context.conversationId,
+        modelName: provider?.config.primaryModel,
+        providerId: provider?.id,
+        role: "ASSISTANT",
+      },
+    });
+    return;
+  }
+
+  await store.message.create({
+    data: { content, role: "ASSISTANT", taskId },
+  });
+}
+
+function conversationHistory(context: AgentRunContext | null) {
+  return (
+    context?.conversation?.messages
+      ?.filter((message) => message.content.trim().length > 0)
+      .map((message) => ({
+        content: redactSecrets(message.content),
+        role: message.role.toLowerCase(),
+      })) ?? []
+  );
 }
 
 function localSandboxPlaceholder(taskId: string): E2BSandboxLike {
@@ -258,35 +386,40 @@ export function createAgentRunner({
 
     let backend: ExecutionBackend | null = null;
     let sandbox: E2BSandboxLike | null = null;
+    let runContext: AgentRunContext | null = null;
 
     try {
       emitEvent({ type: "status_update", status: "RUNNING", taskId });
 
-      const task = await store.task.findUnique({
-        select: { backend: true, providerOverride: true },
-        where: { id: taskId },
-      });
+      runContext = await loadRunContext(store, taskId);
+      if (!runContext) throw new Error("Agent run not found");
+
+      const project = runContext.conversation?.project ?? null;
       const taskOverride =
         options.providerOverride ??
-        normalizeProviderOverride(task?.providerOverride);
-      const selectedBackend = options.backend ?? normalizeBackend(task?.backend);
+        normalizeProviderOverride(runContext.providerId) ??
+        normalizeProviderOverride(project?.defaultProvider);
+      const selectedBackend =
+        options.backend ??
+        normalizeBackend(runContext.backend ?? project?.defaultBackend);
 
       await providerRegistry.initialize();
-      const activeModelOptions = taskOverride
-        ? { taskId, taskOverride }
-        : { taskId };
+      const modelOverride = runContext.modelName ?? project?.defaultModel ?? undefined;
+      const activeModelOptions = {
+        taskId,
+        ...(modelOverride ? { modelOverride } : {}),
+        ...(taskOverride ? { taskOverride } : {}),
+      };
       const { model, provider } =
         await providerRegistry.getActiveModel(activeModelOptions);
       logger.info(
         { providerId: provider.id, model: provider.config.primaryModel },
         "Using provider for task",
       );
-      await store.task.update({
-        data: {
-          providerId: provider.id,
-          providerModel: provider.config.primaryModel,
-        },
-        where: { id: taskId },
+      await updateRun(store, taskId, {
+        backend: selectedBackend,
+        modelName: provider.config.primaryModel,
+        providerId: provider.id,
       });
 
       try {
@@ -345,7 +478,10 @@ export function createAgentRunner({
       );
       if (selectedBackend === "local") {
         backend = createLocalBackend(taskId, {
-          browserMode: await loadBrowserMode(store),
+          browserMode:
+            project?.browserMode === "ACTUAL_CHROME"
+              ? "actual-chrome"
+              : await loadBrowserMode(store),
         });
         await backend.initialize(taskId);
         sandbox = localSandboxPlaceholder(taskId);
@@ -367,10 +503,7 @@ export function createAgentRunner({
         sandbox = e2bBackend.getSandbox();
       }
       if (!sandbox) throw new Error("Execution backend did not expose context");
-      await store.task.update({
-        data: { sandboxId: sandbox.sandboxId },
-        where: { id: taskId },
-      });
+      await updateRun(store, taskId, { sandboxId: sandbox.sandboxId });
 
       const trustedDomains = await loadTrustedDomains(store);
 
@@ -390,12 +523,10 @@ export function createAgentRunner({
           ),
         );
 
-        await store.message.create({
-          data: { content: finalMessage, role: "ASSISTANT", taskId },
-        });
-        await store.task.update({
-          data: { status: "STOPPED" },
-          where: { id: taskId },
+        await createAssistantMessage(store, taskId, runContext, finalMessage, provider);
+        await updateRun(store, taskId, {
+          result: finalMessage,
+          status: "STOPPED",
         });
         emitEvent({
           type: "message",
@@ -412,7 +543,7 @@ export function createAgentRunner({
         { llm: model },
       );
       const stream = await agent.streamEvents(
-        { chat_history: [], input: redactSecrets(goal) },
+        { chat_history: conversationHistory(runContext), input: redactSecrets(goal) },
         { version: "v2" },
       );
       let finalAnswer = "";
@@ -441,12 +572,10 @@ export function createAgentRunner({
         finalResult.message ||
         (finalResult.success ? "Task completed." : "Task failed.");
 
-      await store.message.create({
-        data: { content: finalMessage, role: "ASSISTANT", taskId },
-      });
-      await store.task.update({
-        data: { status: finalStatus },
-        where: { id: taskId },
+      await createAssistantMessage(store, taskId, runContext, finalMessage, provider);
+      await updateRun(store, taskId, {
+        result: finalMessage,
+        status: finalStatus,
       });
 
       emitEvent({
@@ -475,8 +604,7 @@ export function createAgentRunner({
         err instanceof Error ? err.message : String(err),
       );
 
-      await store.task
-        .update({ data: { status: "ERROR" }, where: { id: taskId } })
+      await updateRun(store, taskId, { status: "ERROR" })
         .catch((updateErr) => {
           logger.warn(
             { err: updateErr, taskId },

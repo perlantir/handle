@@ -13,7 +13,7 @@ export function isSmokeAgentEnabled() {
 export async function runSmokeAgent(taskId: string, goal: string) {
   emitTaskEvent({ type: "status_update", status: "RUNNING", taskId });
 
-  await prisma.task.update({
+  await prisma.agentRun.update({
     data: { sandboxId: "smoke-sandbox" },
     where: { id: taskId },
   });
@@ -66,11 +66,22 @@ export async function runSmokeAgent(taskId: string, goal: string) {
 
   const finalMessage = "Smoke task completed and emitted a tool call.";
 
-  await prisma.message.create({
-    data: { content: finalMessage, role: "ASSISTANT", taskId },
+  const run = await prisma.agentRun.findUnique({
+    select: { conversationId: true },
+    where: { id: taskId },
   });
-  await prisma.task.update({
-    data: { status: "STOPPED" },
+  if (!run) throw new Error("Smoke agent run not found");
+
+  await prisma.message.create({
+    data: {
+      agentRunId: taskId,
+      content: finalMessage,
+      conversationId: run.conversationId,
+      role: "ASSISTANT",
+    },
+  });
+  await prisma.agentRun.update({
+    data: { completedAt: new Date(), result: finalMessage, status: "COMPLETED" },
     where: { id: taskId },
   });
 
