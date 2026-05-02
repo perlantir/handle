@@ -2,9 +2,11 @@ import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { Sandbox as E2BDesktopSandbox } from "@e2b/desktop";
 import { config as loadDotenv } from "dotenv";
-import { createBrowserSession } from "../../apps/api/src/execution/browserSession.ts";
+import {
+  createBrowserDesktopSandbox,
+  createBrowserSession,
+} from "../../apps/api/src/execution/browserSession.ts";
 
 const ROOT = new URL("../..", import.meta.url);
 const ROOT_PATH = fileURLToPath(ROOT);
@@ -52,7 +54,7 @@ try {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
 
   console.log("[browser-tools] creating E2B Desktop sandbox");
-  sandbox = await E2BDesktopSandbox.create({
+  sandbox = await createBrowserDesktopSandbox({
     resolution: [1280, 800],
     timeoutMs: 300_000,
   });

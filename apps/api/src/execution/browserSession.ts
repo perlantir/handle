@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
+import { Sandbox as E2BDesktopSandbox } from "@e2b/desktop";
 import { logger } from "../lib/logger";
 import { redactSecrets } from "../lib/redact";
 
@@ -15,6 +16,10 @@ export interface BrowserSessionSandbox {
   };
 }
 
+export interface BrowserSessionSandboxHandle extends BrowserSessionSandbox {
+  kill(): Promise<void>;
+}
+
 export interface BrowserSessionLogger {
   error(payload: Record<string, unknown>, message: string): void;
   info(payload: Record<string, unknown>, message: string): void;
@@ -28,6 +33,11 @@ export interface BrowserSessionCreateOptions {
   sandbox: BrowserSessionSandbox;
   userAgent?: string;
   viewport?: { height: number; width: number };
+}
+
+export interface BrowserDesktopSandboxCreateOptions {
+  resolution?: [number, number];
+  timeoutMs?: number;
 }
 
 export interface BrowserNavigateResult {
@@ -691,4 +701,10 @@ export function createBrowserSession(options: BrowserSessionCreateOptions): Brow
     userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
     viewport: options.viewport ?? DEFAULT_VIEWPORT,
   });
+}
+
+export async function createBrowserDesktopSandbox(
+  options: BrowserDesktopSandboxCreateOptions = {},
+): Promise<BrowserSessionSandboxHandle> {
+  return E2BDesktopSandbox.create(options);
 }
