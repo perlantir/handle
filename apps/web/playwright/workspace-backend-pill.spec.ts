@@ -172,17 +172,25 @@ test.describe("Workspace backend pill", () => {
     const { requests } = await mockTaskApis(page);
     await signIn(page);
 
-    await expect(page.getByRole("group", { name: "Task backend" })).toBeVisible();
+    await expect(
+      page.getByRole("group", { name: "Task backend" }),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "Local" })).toBeVisible();
 
-    await page
-      .getByPlaceholder("What would you like to do?")
-      .fill("Use local backend");
-    await page.getByRole("button", { name: "Start task" }).click();
+    const composerInput = page.getByPlaceholder("What would you like to do?");
+    const startButton = page.getByRole("button", { name: "Start task" });
+
+    await composerInput.click();
+    await composerInput.pressSequentially("Use local backend");
+    await expect(composerInput).toHaveValue("Use local backend");
+    await expect(startButton).toBeEnabled();
+    await startButton.click();
 
     await expect(page).toHaveURL(/\/tasks\/task-local-ui$/);
     await expect(page.getByText("Local").first()).toBeVisible();
-    await expect(page.getByText("Anthropic · claude-opus-4-7").first()).toBeVisible();
+    await expect(
+      page.getByText("Anthropic · claude-opus-4-7").first(),
+    ).toBeVisible();
     expect(
       requests.find(
         (request) =>

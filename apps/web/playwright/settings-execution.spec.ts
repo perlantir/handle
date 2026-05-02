@@ -107,12 +107,21 @@ async function openSettings(page: Page) {
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 }
 
+async function openSettingsSection(page: Page, section: string) {
+  const navButton = page.getByRole("button", {
+    name: new RegExp(`^${section}$`),
+  });
+  await expect(navButton).toBeVisible();
+  await navButton.click();
+  await expect(navButton).toHaveAttribute("aria-current", "page");
+}
+
 test.describe("Settings Execution", () => {
   test("renders, saves, and opens the workspace folder", async ({ page }) => {
     const { requests } = await mockSettingsApi(page);
     await openSettings(page);
 
-    await page.getByRole("button", { name: "Execution" }).click();
+    await openSettingsSection(page, "Execution");
 
     await expect(page.getByText("Default backend")).toBeVisible();
     await expect(page.getByLabel("E2B Cloud")).toBeChecked();
