@@ -68,7 +68,7 @@ describe("projects routes", () => {
     await request(app)
       .post("/api/projects")
       .send({
-        customScopePath: "/Users/perlantir/Projects/handle",
+        customScopePath: process.cwd(),
         defaultBackend: "LOCAL",
         name: "Handle",
         workspaceScope: "CUSTOM_FOLDER",
@@ -76,6 +76,7 @@ describe("projects routes", () => {
       .expect(201);
     expect(store.project.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        customScopePath: process.cwd(),
         defaultBackend: "LOCAL",
         name: "Handle",
         workspaceScope: "CUSTOM_FOLDER",
@@ -87,7 +88,36 @@ describe("projects routes", () => {
       .send({ name: "Renamed", workspaceScope: "FULL_ACCESS" })
       .expect(200);
     expect(store.project.update).toHaveBeenCalledWith({
-      data: expect.objectContaining({ name: "Renamed", workspaceScope: "FULL_ACCESS" }),
+      data: expect.objectContaining({
+        customScopePath: null,
+        name: "Renamed",
+        workspaceScope: "FULL_ACCESS",
+      }),
+      where: { id: "default-project" },
+    });
+  });
+
+  it("rejects missing specific folder paths and accepts Desktop scope", async () => {
+    const store = createStore();
+    const { app } = createApp(store);
+
+    await request(app)
+      .put("/api/projects/default-project")
+      .send({ workspaceScope: "CUSTOM_FOLDER" })
+      .expect(400)
+      .expect((response) => {
+        expect(response.body.error).toMatch(/Specific folder path/);
+      });
+
+    await request(app)
+      .put("/api/projects/default-project")
+      .send({ workspaceScope: "DESKTOP" })
+      .expect(200);
+    expect(store.project.update).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({
+        customScopePath: null,
+        workspaceScope: "DESKTOP",
+      }),
       where: { id: "default-project" },
     });
   });

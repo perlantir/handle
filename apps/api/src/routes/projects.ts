@@ -1,4 +1,7 @@
 import { Router } from "express";
+import { promises as fs } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 import { z } from "zod";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
 import { runAgent as defaultRunAgent } from "../agent/runAgent";
@@ -15,7 +18,7 @@ const projectSchema = z.object({
   defaultProvider: z.string().refine(isProviderId).nullable().optional(),
   name: z.string().min(1).max(120).optional(),
   workspaceScope: z
-    .enum(["DEFAULT_WORKSPACE", "CUSTOM_FOLDER", "FULL_ACCESS"])
+    .enum(["DEFAULT_WORKSPACE", "CUSTOM_FOLDER", "DESKTOP", "FULL_ACCESS"])
     .optional(),
 });
 
@@ -81,6 +84,64 @@ function titleFromContent(content: string) {
   return content.trim().slice(0, 80) || "New conversation";
 }
 
+function expandHomePath(path: string) {
+  if (path === "~") return homedir();
+  if (path.startsWith("~/")) return join(homedir(), path.slice(2));
+  return path;
+}
+
+async function validateSpecificFolderPath(path: string) {
+  const resolved = resolve(expandHomePath(path));
+  if (!isAbsolute(resolved)) {
+    return { error: "Specific folder path must be absolute", resolved };
+  }
+
+  try {
+    const stat = await fs.stat(resolved);
+    if (!stat.isDirectory()) {
+      return { error: "Specific folder path must be an existing directory", resolved };
+    }
+  } catch (err) {
+    logger.info({ err, path: resolved }, "Project custom folder validation failed");
+    return { error: "Specific folder path does not exist", resolved };
+  }
+
+  return { resolved };
+}
+
+async function projectInputFromRequest(
+  input: z.infer<typeof projectSchema>,
+  options: { existingCustomScopePath?: string | null } = {},
+) {
+  const data = { ...input };
+  const nextScope = data.workspaceScope;
+  const candidatePath =
+    data.customScopePath ?? options.existingCustomScopePath ?? null;
+
+  if (nextScope === "CUSTOM_FOLDER") {
+    if (!candidatePath) {
+      return {
+        error: "Specific folder path is required when workspace scope is Specific folder",
+      };
+    }
+
+    const validation = await validateSpecificFolderPath(candidatePath);
+    if (validation.error) {
+      return {
+        error: validation.error,
+        resolvedPath: validation.resolved,
+      };
+    }
+    data.customScopePath = validation.resolved;
+  }
+
+  if (nextScope === "DEFAULT_WORKSPACE" || nextScope === "DESKTOP" || nextScope === "FULL_ACCESS") {
+    data.customScopePath = null;
+  }
+
+  return { data };
+}
+
 async function ensureDefaultProject(store: ProjectRouteStore) {
   return store.project.upsert({
     create: {
@@ -127,8 +188,16 @@ export function createProjectsRouter({
           .json({ error: "Invalid request", details: parsed.error.flatten() });
       }
 
+      const normalized = await projectInputFromRequest(parsed.data);
+      if (normalized.error) {
+        return res.status(400).json({
+          error: normalized.error,
+          ...(normalized.resolvedPath ? { path: normalized.resolvedPath } : {}),
+        });
+      }
+
       const project = await store.project.create({
-        data: parsed.data,
+        data: normalized.data,
       });
       return res.status(201).json({ project });
     }),
@@ -147,8 +216,42 @@ export function createProjectsRouter({
           .json({ error: "Invalid request", details: parsed.error.flatten() });
       }
 
+      logger.info(
+        {
+          fields: Object.keys(parsed.data),
+          projectId: req.params.projectId,
+          workspaceScope: parsed.data.workspaceScope,
+        },
+        "Project update requested",
+      );
+      const current = await store.project.findUnique({
+        where: { id: req.params.projectId },
+      }) as { customScopePath?: string | null } | null;
+      if (!current) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+
+      const normalized = await projectInputFromRequest(parsed.data, {
+        existingCustomScopePath: current.customScopePath ?? null,
+      });
+      if (normalized.error) {
+        logger.info(
+          {
+            error: normalized.error,
+            path: normalized.resolvedPath,
+            projectId: req.params.projectId,
+            workspaceScope: parsed.data.workspaceScope,
+          },
+          "Project update rejected",
+        );
+        return res.status(400).json({
+          error: normalized.error,
+          ...(normalized.resolvedPath ? { path: normalized.resolvedPath } : {}),
+        });
+      }
+
       const project = await store.project.update({
-        data: parsed.data,
+        data: normalized.data,
         where: { id: req.params.projectId },
       });
       return res.json({ project });

@@ -73,6 +73,7 @@ enum TaskStatus {
 enum ScopeType {
   DEFAULT_WORKSPACE
   CUSTOM_FOLDER
+  DESKTOP
   FULL_ACCESS
 }
 

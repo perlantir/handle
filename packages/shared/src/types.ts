@@ -167,7 +167,7 @@ export interface CreateTaskResponse {
   taskId: string;
 }
 
-export type WorkspaceScope = 'DEFAULT_WORKSPACE' | 'CUSTOM_FOLDER' | 'FULL_ACCESS';
+export type WorkspaceScope = 'DEFAULT_WORKSPACE' | 'CUSTOM_FOLDER' | 'DESKTOP' | 'FULL_ACCESS';
 
 export type BackendType = 'E2B' | 'LOCAL';
 

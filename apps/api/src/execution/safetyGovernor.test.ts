@@ -253,6 +253,29 @@ describe('SafetyGovernor project scopes', () => {
     });
   });
 
+  it('treats Desktop as its own project scope', async () => {
+    const homeDir = join(tempRoot, 'home');
+    const desktopDir = join(homeDir, 'Desktop');
+    await fs.mkdir(desktopDir, { recursive: true });
+    const governor = new SafetyGovernor({
+      auditLogPath,
+      homeDir,
+      projectId: 'project-desktop',
+      taskId: 'task-safety-test',
+      workspaceDir,
+      workspaceScope: 'DESKTOP',
+    });
+
+    await expect(governor.checkFileWrite(join(desktopDir, 'ok.txt'))).resolves.toMatchObject({
+      decision: 'allow',
+    });
+    await expect(governor.checkFileWrite(join(workspaceDir, 'outside-desktop.txt'))).resolves.toMatchObject({
+      decision: 'approve',
+      matchedPattern: 'outside-scope',
+    });
+  });
+
+
   it('adds project scope fields to audit entries', async () => {
     const governor = new SafetyGovernor({
       auditLogPath,

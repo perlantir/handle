@@ -40,8 +40,8 @@ export interface SafetyGovernorOptions {
   workspaceScope?: WorkspaceScope | LowercaseWorkspaceScope | null;
 }
 
-export type WorkspaceScope = 'DEFAULT_WORKSPACE' | 'CUSTOM_FOLDER' | 'FULL_ACCESS';
-type LowercaseWorkspaceScope = 'default-workspace' | 'custom-folder' | 'full-access';
+export type WorkspaceScope = 'DEFAULT_WORKSPACE' | 'CUSTOM_FOLDER' | 'DESKTOP' | 'FULL_ACCESS';
+type LowercaseWorkspaceScope = 'default-workspace' | 'custom-folder' | 'desktop' | 'full-access';
 
 interface ForbiddenPathRule {
   label: string;
@@ -222,6 +222,8 @@ export class SafetyGovernor {
     this.scopeRoot =
       this.workspaceScope === 'FULL_ACCESS'
         ? null
+        : this.workspaceScope === 'DESKTOP'
+          ? resolve(this.homeDir, 'Desktop')
         : this.workspaceScope === 'CUSTOM_FOLDER' && this.customScopePath
           ? this.customScopePath
           : this.workspaceDir;
@@ -341,7 +343,7 @@ export class SafetyGovernor {
     ) {
       return {
         decision: 'allow',
-        reason: `Path is inside ${this.workspaceScope === 'CUSTOM_FOLDER' ? 'custom folder' : 'workspace'} scope: ${resolvedTarget}`,
+        reason: `Path is inside ${scopeLabel(this.workspaceScope)} scope: ${resolvedTarget}`,
         resolvedTarget,
       };
     }
@@ -495,6 +497,13 @@ export class SafetyGovernor {
 
 function normalizeWorkspaceScope(value: SafetyGovernorOptions['workspaceScope']): WorkspaceScope {
   if (value === 'CUSTOM_FOLDER' || value === 'custom-folder') return 'CUSTOM_FOLDER';
+  if (value === 'DESKTOP' || value === 'desktop') return 'DESKTOP';
   if (value === 'FULL_ACCESS' || value === 'full-access') return 'FULL_ACCESS';
   return 'DEFAULT_WORKSPACE';
+}
+
+function scopeLabel(scope: WorkspaceScope) {
+  if (scope === 'CUSTOM_FOLDER') return 'specific folder';
+  if (scope === 'DESKTOP') return 'desktop';
+  return 'workspace';
 }

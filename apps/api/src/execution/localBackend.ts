@@ -55,7 +55,7 @@ export interface LocalBackendOptions {
   requestApproval?: LocalApprovalRequester;
   safetyGovernor?: SafetyGovernor;
   workspaceDir?: string;
-  workspaceScope?: WorkspaceScope | 'default-workspace' | 'custom-folder' | 'full-access' | null;
+  workspaceScope?: WorkspaceScope | 'default-workspace' | 'custom-folder' | 'desktop' | 'full-access' | null;
 }
 
 const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
