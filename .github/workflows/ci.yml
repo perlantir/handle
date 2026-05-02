@@ -61,7 +61,7 @@ jobs:
         run: pnpm test
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
 
       - name: Settings API proxy smoke
         run: pnpm smoke:settings-api-proxy
