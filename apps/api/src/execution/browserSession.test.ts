@@ -67,7 +67,8 @@ describe("browserSession", () => {
 
     expect(result.title).toBe("Hacker News");
     expect(result.screenshot.equals(image)).toBe(true);
-    expect(calls[0]).toContain("browser-use playwright");
+    expect(calls[0]).toContain("python3 -m pip install --quiet --disable-pip-version-check playwright");
+    expect(calls[0]).not.toContain("browser-use");
     expect(calls[0]).toContain("python3 -m playwright install chromium");
     expect(calls[2]).toContain("export DISPLAY=':0'");
     expect(calls[2]).toContain("HANDLE_BROWSER_VIEWPORT_WIDTH='1280'");
@@ -80,7 +81,7 @@ describe("browserSession", () => {
     let installCalls = 0;
     let shutdownCalls = 0;
     const { sandbox } = sandboxWithRunner((command) => {
-      if (command.includes("browser-use playwright")) {
+      if (command.includes("--disable-pip-version-check playwright")) {
         installCalls += 1;
         return ok();
       }

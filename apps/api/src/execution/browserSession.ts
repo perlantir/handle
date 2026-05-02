@@ -564,7 +564,7 @@ export class E2BBrowserSession implements BrowserSession {
 
     const result = await this.options.sandbox.commands.run(
       [
-        "python3 -m pip install --quiet --disable-pip-version-check browser-use playwright",
+        "python3 -m pip install --quiet --disable-pip-version-check playwright",
         "python3 -m playwright install chromium",
       ].join(" && "),
     );
