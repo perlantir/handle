@@ -573,10 +573,23 @@ export class E2BBrowserSession implements BrowserSession {
 
     const command = [
       "set -eu",
+      "echo \"Browser runtime PATH=$PATH\"",
+      "if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then",
+      "  echo \"Node.js runtime missing; installing Node.js 20 via apt\"",
+      "  apt-get update",
+      "  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg",
+      "  mkdir -p /etc/apt/keyrings",
+      "  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg",
+      "  echo \"deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main\" > /etc/apt/sources.list.d/nodesource.list",
+      "  apt-get update",
+      "  DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs",
+      "fi",
+      "node --version",
+      "npm --version",
       `mkdir -p ${shellSingleQuote(NODE_RUNTIME_PATH)}`,
       `cd ${shellSingleQuote(NODE_RUNTIME_PATH)}`,
       "[ -f package.json ] || npm init -y >/dev/null 2>&1",
-      "npm install --silent --no-audit --no-fund playwright",
+      "npm install --no-audit --no-fund playwright",
       "npx playwright install chromium",
     ].join("\n");
 

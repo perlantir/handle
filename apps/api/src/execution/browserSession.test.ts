@@ -70,9 +70,11 @@ describe("browserSession", () => {
 
     expect(result.title).toBe("Hacker News");
     expect(result.screenshot.equals(image)).toBe(true);
+    expect(calls[0]).toContain("Node.js runtime missing; installing Node.js 20 via apt");
+    expect(calls[0]).toContain("https://deb.nodesource.com/node_20.x");
     expect(calls[0]).toContain("mkdir -p '/tmp/handle-browser-runtime'");
     expect(calls[0]).toContain("cd '/tmp/handle-browser-runtime'");
-    expect(calls[0]).toContain("npm install --silent --no-audit --no-fund playwright");
+    expect(calls[0]).toContain("npm install --no-audit --no-fund playwright");
     expect(calls[0]).not.toContain("browser-use");
     expect(calls[0]).not.toContain("pip install");
     expect(calls[0]).toContain("npx playwright install chromium");
@@ -97,7 +99,7 @@ describe("browserSession", () => {
     let installCalls = 0;
     let shutdownCalls = 0;
     const { sandbox } = sandboxWithRunner((command) => {
-      if (command.includes("npm install --silent --no-audit --no-fund playwright")) {
+      if (command.includes("npm install --no-audit --no-fund playwright")) {
         installCalls += 1;
         return ok();
       }
