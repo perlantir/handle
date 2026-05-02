@@ -16,6 +16,7 @@
     "smoke:e2e-canonical": "node scripts/smoke/e2e-task.mjs --canonical",
     "smoke:e2e-providers": "node scripts/smoke/e2e-providers.mjs",
     "smoke:e2e-task": "node scripts/smoke/e2e-task.mjs",
+    "smoke:browser-tools": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/browser-tools.mjs",
     "smoke:desktop-sandbox": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/desktop-sandbox.mjs",
     "smoke:computer-use-task": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/computer-use-task.mjs",
     "smoke:settings-api-proxy": "node scripts/smoke/settings-api-proxy.mjs",
