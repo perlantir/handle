@@ -5,8 +5,8 @@ import {
 import { ChatOpenAI } from "@langchain/openai";
 import {
   AgentExecutor,
-  createOpenAIToolsAgent,
-  type CreateOpenAIToolsAgentParams,
+  createToolCallingAgent,
+  type CreateToolCallingAgentParams,
 } from "langchain/agents";
 import { configureLangSmithTracing } from "../lib/langsmith";
 import { logger } from "../lib/logger";
@@ -41,7 +41,7 @@ export function createOpenAIChatModel({
 }
 
 interface CreatePhase1AgentOptions {
-  llm?: CreateOpenAIToolsAgentParams["llm"];
+  llm?: CreateToolCallingAgentParams["llm"];
 }
 
 export async function createPhase1Agent(
@@ -56,7 +56,14 @@ export async function createPhase1Agent(
     ["human", "{input}"],
     new MessagesPlaceholder("agent_scratchpad"),
   ]);
-  const agent = await createOpenAIToolsAgent({ llm, tools, prompt });
+  const agent = createToolCallingAgent({
+    llm,
+    prompt,
+    // Provider content blocks can stream in vendor-specific shapes.
+    // Parse one complete AIMessage before deciding on the next action.
+    streamRunnable: false,
+    tools,
+  });
 
   return new AgentExecutor({
     agent,

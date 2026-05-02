@@ -61,7 +61,22 @@ jobs:
         run: pnpm test
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
+
+      - name: Settings API proxy smoke
+        run: pnpm smoke:settings-api-proxy
+        env:
+          HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_WEB_BASE_URL: http://127.0.0.1:3000
+
+      - name: Settings Providers UI smoke
+        run: pnpm smoke:settings-providers-ui
+        env:
+          HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_API_BASE_URL: http://127.0.0.1:3001
+          NEXT_PUBLIC_HANDLE_TEST_AUTH_BYPASS: "1"
+          NEXT_PUBLIC_HANDLE_WEB_BASE_URL: http://127.0.0.1:3000
 
       - name: Web sign-in smoke
         run: |

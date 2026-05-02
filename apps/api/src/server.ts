@@ -14,6 +14,7 @@ import {
 import { getLogFilePath, logger } from "./lib/logger";
 import { approvalsRouter } from "./routes/approvals";
 import { healthRouter } from "./routes/health";
+import { settingsRouter } from "./routes/settings";
 import { streamRouter } from "./routes/stream";
 import { tasksRouter } from "./routes/tasks";
 
@@ -46,6 +47,7 @@ export async function createServer() {
     app.use("/api", clerkMiddleware(), requireClerkAuth);
   }
   app.use("/api/approvals", approvalsRouter);
+  app.use("/api/settings", settingsRouter);
   app.use("/api/tasks", tasksRouter);
   app.use("/api/tasks", streamRouter);
   app.use("/api", (_req, res) => {

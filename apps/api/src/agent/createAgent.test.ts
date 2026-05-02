@@ -1,8 +1,49 @@
+import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { AIMessage } from "@langchain/core/messages";
+import type { ChatResult } from "@langchain/core/outputs";
 import { FakeStreamingChatModel } from "@langchain/core/utils/testing";
 import { describe, expect, it } from "vitest";
 import { createPhase1Agent } from "./createAgent";
 import type { E2BSandboxLike } from "../execution/types";
+
+function structuredText(text: string) {
+  return [{ type: "text", text }];
+}
+
+class SequentialToolChatModel extends BaseChatModel {
+  private index = 0;
+
+  constructor(private readonly responses: AIMessage[]) {
+    super({});
+  }
+
+  _llmType() {
+    return "sequential-tool-chat";
+  }
+
+  bindTools() {
+    return this;
+  }
+
+  async _generate(): Promise<ChatResult> {
+    const message =
+      this.responses[Math.min(this.index, this.responses.length - 1)];
+    if (!message) throw new Error("SequentialToolChatModel has no responses");
+    this.index += 1;
+
+    return {
+      generations: [
+        {
+          message,
+          text:
+            typeof message.content === "string"
+              ? message.content
+              : JSON.stringify(message.content),
+        },
+      ],
+    };
+  }
+}
 
 const sandbox: E2BSandboxLike = {
   sandboxId: "sandbox-agent-test",
@@ -62,4 +103,67 @@ describe("createPhase1Agent", () => {
 
     expect(result.output).toContain("[[HANDLE_RESULT:SUCCESS]]");
   });
+
+  it.each([
+    "openai",
+    "anthropic",
+    "kimi",
+    "openrouter",
+    "local",
+    "openai-chatgpt-oauth",
+  ])(
+    "runs a %s-compatible structured tool call through the unified agent",
+    async () => {
+      const writes: Array<{ content: string; path: string }> = [];
+      const llm = new SequentialToolChatModel([
+        new AIMessage({
+          content: structuredText("I will write the file now."),
+          tool_calls: [
+            {
+              args: {
+                content: "provider compatibility test",
+                path: "/tmp/provider.txt",
+              },
+              id: "call_file_write",
+              name: "file_write",
+            },
+          ],
+        }),
+        new AIMessage({
+          content: structuredText("Wrote the file.\n[[HANDLE_RESULT:SUCCESS]]"),
+        }),
+      ]);
+      const executor = await createPhase1Agent(
+        {
+          sandbox: {
+            ...sandbox,
+            files: {
+              ...sandbox.files,
+              async write(path, content) {
+                writes.push({ content, path });
+                return {};
+              },
+            },
+          },
+          taskId: "task-agent-provider-compat-test",
+        },
+        { llm },
+      );
+
+      const result = await executor.invoke({
+        chat_history: [],
+        input: "Write /tmp/provider.txt.",
+      });
+
+      expect(writes).toEqual([
+        {
+          content: "provider compatibility test",
+          path: "/tmp/provider.txt",
+        },
+      ]);
+      expect(JSON.stringify(result.output)).toContain(
+        "[[HANDLE_RESULT:SUCCESS]]",
+      );
+    },
+  );
 });

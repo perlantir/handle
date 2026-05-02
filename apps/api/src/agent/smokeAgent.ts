@@ -18,7 +18,7 @@ export async function runSmokeAgent(taskId: string, goal: string) {
     where: { id: taskId },
   });
 
-  await delay(1_500);
+  await delay(5_000);
   emitTaskEvent({
     type: "plan_update",
     steps: [

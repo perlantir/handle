@@ -1,39 +1,48 @@
-import 'dotenv/config';
-import { expireStalePendingApprovals } from './approvals/staleApprovals';
-import { createServer } from './server';
-import { initBuildInfo } from './lib/buildInfo';
-import { getDisplayLogFilePath, logger } from './lib/logger';
+import "dotenv/config";
+import { expireStalePendingApprovals } from "./approvals/staleApprovals";
+import { createServer } from "./server";
+import { initBuildInfo } from "./lib/buildInfo";
+import { getDisplayLogFilePath, logger } from "./lib/logger";
+import { stopChatGptOAuthProxy } from "./providers/openaiChatgptProxy";
 
 async function main() {
   await initBuildInfo();
   await expireStalePendingApprovals();
 
-  const port = Number.parseInt(process.env.HANDLE_API_PORT ?? '3001', 10);
-  const host = process.env.HANDLE_API_HOST ?? '127.0.0.1';
+  const port = Number.parseInt(process.env.HANDLE_API_PORT ?? "3001", 10);
+  const host = process.env.HANDLE_API_HOST ?? "127.0.0.1";
   const app = await createServer();
 
   const server = app.listen(port, host, () => {
-    console.log(`[Handle API] listening on http://${host}:${port} - log: ${getDisplayLogFilePath()}`);
-    logger.info({ host, port }, 'Handle API listening');
+    console.log(
+      `[Handle API] listening on http://${host}:${port} - log: ${getDisplayLogFilePath()}`,
+    );
+    logger.info({ host, port }, "Handle API listening");
   });
 
   const shutdown = (signal: NodeJS.Signals) => {
-    logger.info({ signal }, 'Shutdown signal received');
-    server.close((err) => {
-      if (err) {
-        logger.error({ err }, 'HTTP server shutdown failed');
-        process.exitCode = 1;
-      }
+    logger.info({ signal }, "Shutdown signal received");
+    void stopChatGptOAuthProxy()
+      .catch((err) =>
+        logger.error({ err }, "ChatGPT OAuth proxy shutdown failed"),
+      )
+      .finally(() => {
+        server.close((err) => {
+          if (err) {
+            logger.error({ err }, "HTTP server shutdown failed");
+            process.exitCode = 1;
+          }
 
-      process.exit();
-    });
+          process.exit();
+        });
+      });
   };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 main().catch((err) => {
-  logger.fatal({ err }, 'Fatal startup error');
+  logger.fatal({ err }, "Fatal startup error");
   process.exit(1);
 });

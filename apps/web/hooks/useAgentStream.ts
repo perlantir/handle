@@ -50,6 +50,8 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
       return { ...state, finalMessage: event.content };
     case 'plan_update':
       return { ...state, planSteps: event.steps };
+    case 'provider_fallback':
+      return state;
     case 'status_update':
       return {
         ...state,
