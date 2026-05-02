@@ -107,7 +107,7 @@ test.describe("Workspace UI regressions", () => {
     await page.goto(`/tasks/${taskId}`);
 
     await expect(page.locator("header h1")).toHaveText("Personal");
-    await expect(page.getByRole("button", { name: "Chat" })).toHaveClass(/bg-bg-surface/);
+    await expect(page.getByRole("button", { exact: true, name: "Chat" })).toHaveClass(/bg-bg-surface/);
     await expect(page.getByText("[[HANDLE_RESULT:SUCCESS]]")).toHaveCount(0);
     await expect(page.getByText("Done", { exact: true })).toHaveCount(1);
 

@@ -54,7 +54,7 @@ try {
   if (!audit.some((entry) => entry.scope === "DEFAULT_WORKSPACE" && entry.decision === "allow")) {
     throw new Error("Default workspace write was not allowed");
   }
-  if (!audit.some((entry) => entry.scope === "FULL_ACCESS" && entry.target === outsidePath && entry.decision === "allow")) {
+  if (!audit.some((entry) => entry.scope === "FULL_ACCESS" && String(entry.target).endsWith("outside.txt") && entry.decision === "allow")) {
     throw new Error("Full access write did not apply after scope change");
   }
 

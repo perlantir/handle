@@ -27,7 +27,7 @@ try {
       backend: "LOCAL",
       conversationId: conversation.id,
       goal: "Remember this sentence",
-      status: "STOPPED",
+      status: "COMPLETED",
     },
   });
 
