@@ -1,4 +1,8 @@
-import { prisma } from "../../apps/api/src/lib/prisma";
+import { config as loadDotenv } from "dotenv";
+
+const ROOT = new URL("../..", import.meta.url);
+loadDotenv({ path: new URL(".env", ROOT) });
+const { prisma } = await import("../../apps/api/src/lib/prisma");
 
 const suffix = Date.now();
 const project = await prisma.project.create({

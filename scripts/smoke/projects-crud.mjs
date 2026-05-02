@@ -1,4 +1,8 @@
-import { prisma } from "../../apps/api/src/lib/prisma";
+import { config as loadDotenv } from "dotenv";
+
+const ROOT = new URL("../..", import.meta.url);
+loadDotenv({ path: new URL(".env", ROOT) });
+const { prisma } = await import("../../apps/api/src/lib/prisma");
 
 const suffix = Date.now();
 const projectName = `Smoke Project ${suffix}`;
@@ -31,6 +35,6 @@ try {
 
   console.log("[projects-crud] PASS");
 } finally {
-  await prisma.project.delete({ where: { id: project.id } }).catch(() => undefined);
+  await prisma.project.deleteMany({ where: { id: project.id } }).catch(() => undefined);
   await prisma.$disconnect();
 }
