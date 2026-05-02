@@ -121,22 +121,25 @@ export function ProjectDefaultsSettings() {
               value={draft.workspaceScope ?? "DEFAULT_WORKSPACE"}
             >
               <option value="DEFAULT_WORKSPACE">Default workspace</option>
-              <option value="CUSTOM_FOLDER">Custom folder</option>
+              <option value="CUSTOM_FOLDER">Specific folder</option>
+              <option value="DESKTOP">Desktop</option>
               <option value="FULL_ACCESS">Full access</option>
             </select>
           </label>
 
-          <label className="grid gap-1.5">
-            <span className="text-[12.5px] font-medium text-text-secondary">Custom folder path</span>
-            <input
-              className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 font-mono text-[12px] text-text-primary outline-none"
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, customScopePath: event.target.value || null }))
-              }
-              placeholder="/Users/perlantir/Projects/handle"
-              value={draft.customScopePath ?? ""}
-            />
-          </label>
+          {draft.workspaceScope === "CUSTOM_FOLDER" && (
+            <label className="grid gap-1.5">
+              <span className="text-[12.5px] font-medium text-text-secondary">Specific folder path</span>
+              <input
+                className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 font-mono text-[12px] text-text-primary outline-none"
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, customScopePath: event.target.value || null }))
+                }
+                placeholder="/Users/perlantir/Projects/handle"
+                value={draft.customScopePath ?? ""}
+              />
+            </label>
+          )}
 
           <label className="grid gap-1.5">
             <span className="text-[12.5px] font-medium text-text-secondary">Default backend</span>

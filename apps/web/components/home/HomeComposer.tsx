@@ -33,6 +33,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
   const [loadingBackend, setLoadingBackend] = useState(true);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [providers, setProviders] = useState<SettingsProvider[]>([]);
+  const [customScopePath, setCustomScopePath] = useState("");
   const [selectedModelKey, setSelectedModelKey] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -81,6 +82,28 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    setCustomScopePath(activeProject?.customScopePath ?? "");
+  }, [activeProject?.customScopePath, activeProject?.id]);
+
+  function updateProjectState(project: ProjectSummary) {
+    setProjects((current) =>
+      current.map((item) => (item.id === project.id ? project : item)),
+    );
+  }
+
+  async function saveProjectPatch(input: Parameters<typeof updateProject>[0]["input"]) {
+    if (!activeProject) return null;
+    const token = await getToken();
+    const updated = await updateProject({
+      input,
+      projectId: activeProject.id,
+      token,
+    });
+    updateProjectState(updated);
+    return updated;
+  }
 
   async function handleSubmit(goal: string) {
     if (!activeProject) {
@@ -133,22 +156,22 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
             onChange={async (event) => {
               if (!activeProject) return;
               const workspaceScope = event.target.value as ProjectSummary["workspaceScope"];
-              const token = await getToken();
-              const updated = await updateProject({
-                input: { workspaceScope },
-                projectId: activeProject.id,
-                token,
-              });
-              setProjects((current) =>
-                current.map((project) =>
-                  project.id === updated.id ? updated : project,
-                ),
-              );
+              setError(null);
+              if (workspaceScope === "CUSTOM_FOLDER") {
+                updateProjectState({ ...activeProject, workspaceScope });
+                return;
+              }
+              try {
+                await saveProjectPatch({ workspaceScope });
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not update project scope");
+              }
             }}
             value={activeProject?.workspaceScope ?? "DEFAULT_WORKSPACE"}
           >
             <option value="DEFAULT_WORKSPACE">Default workspace</option>
-            <option value="CUSTOM_FOLDER">Custom folder</option>
+            <option value="CUSTOM_FOLDER">Specific folder</option>
+            <option value="DESKTOP">Desktop</option>
             <option value="FULL_ACCESS">Full access</option>
           </select>
           {activeProject?.workspaceScope === "FULL_ACCESS" && (
@@ -179,7 +202,15 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
                 )}
                 disabled={loadingBackend || submitting}
                 key={option.value}
-                onClick={() => setBackend(option.value as ExecutionBackend)}
+                onClick={() => {
+                  const nextBackend = option.value as ExecutionBackend;
+                  setBackend(nextBackend);
+                  void saveProjectPatch({
+                    defaultBackend: nextBackend === "local" ? "LOCAL" : "E2B",
+                  }).catch((err) => {
+                    setError(err instanceof Error ? err.message : "Could not update backend");
+                  });
+                }}
                 type="button"
               >
                 {option.label}
@@ -196,6 +227,33 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
         submitDisabled={!value.trim()}
         value={value}
       />
+      {activeProject?.workspaceScope === "CUSTOM_FOLDER" && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            aria-label="Specific folder path"
+            className="h-8 min-w-[320px] flex-1 rounded-pill border border-border-subtle bg-bg-surface px-3 font-mono text-[11.5px] text-text-primary outline-none"
+            onChange={(event) => setCustomScopePath(event.target.value)}
+            placeholder="/Users/perlantir/Projects/handle"
+            value={customScopePath}
+          />
+          <button
+            className="h-8 rounded-pill border border-border-subtle bg-bg-surface px-3 text-[11.5px] font-medium text-text-primary hover:bg-bg-subtle"
+            disabled={submitting || !customScopePath.trim()}
+            onClick={() => {
+              setError(null);
+              void saveProjectPatch({
+                customScopePath: customScopePath.trim(),
+                workspaceScope: "CUSTOM_FOLDER",
+              }).catch((err) => {
+                setError(err instanceof Error ? err.message : "Could not save folder path");
+              });
+            }}
+            type="button"
+          >
+            Save folder
+          </button>
+        </div>
+      )}
       <div className="mt-2 flex justify-end">
         <label className="inline-flex items-center gap-2 rounded-pill border border-border-subtle bg-bg-surface px-3 py-1.5 text-[11.5px] text-text-secondary">
           <span>Model</span>
@@ -203,7 +261,20 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
             aria-label="Model"
             className="max-w-[240px] bg-transparent text-text-primary outline-none"
             disabled={submitting || enabledProviders.length === 0}
-            onChange={(event) => setSelectedModelKey(event.target.value)}
+            onChange={(event) => {
+              const nextKey = event.target.value;
+              setSelectedModelKey(nextKey);
+              const [providerId, ...modelParts] = nextKey.split(":");
+              const modelName = modelParts.join(":");
+              if (providerId && modelName) {
+                void saveProjectPatch({
+                  defaultModel: modelName,
+                  defaultProvider: providerId,
+                }).catch((err) => {
+                  setError(err instanceof Error ? err.message : "Could not update model");
+                });
+              }
+            }}
             value={selectedModelKey}
           >
             {enabledProviders.length === 0 && <option>No configured models</option>}
