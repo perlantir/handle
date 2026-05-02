@@ -51,6 +51,7 @@ export interface E2BCommandRunOptions {
 export interface E2BFilesystemLike {
   list(path: string): Promise<unknown[]>;
   read(path: string, opts: { format: 'text' }): Promise<string>;
+  remove?(path: string): Promise<unknown>;
   write(path: string, data: string): Promise<unknown>;
 }
 
