@@ -50,6 +50,13 @@ model SafetySettings {
   updatedAt      DateTime @default(now()) @updatedAt
 }
 
+model ExecutionSettings {
+  id             String   @id @default("global")
+  defaultBackend String   @default("e2b")
+  cleanupPolicy  String   @default("keep-all")
+  updatedAt      DateTime @default(now()) @updatedAt
+}
+
 enum TaskStatus {
   RUNNING
   WAITING

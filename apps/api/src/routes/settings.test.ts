@@ -13,6 +13,7 @@ import type {
 import {
   createSettingsRouter,
   type CreateSettingsRouterOptions,
+  type ExecutionSettingsRow,
   type KeychainLike,
   type ProviderConfigRow,
   type SettingsRouteStore,
@@ -57,6 +58,36 @@ function store(rows: ProviderConfigRow[]): SettingsRouteStore {
   };
 }
 
+function executionSettingsStore(
+  overrides: Partial<ExecutionSettingsRow> = {},
+): SettingsRouteStore {
+  let record: ExecutionSettingsRow = {
+    cleanupPolicy: "keep-all",
+    defaultBackend: "e2b",
+    id: "global",
+    updatedAt: new Date("2026-05-02T12:00:00.000Z"),
+    ...overrides,
+  };
+  const providerStore = store([row({ id: "openai" })]);
+
+  return {
+    ...providerStore,
+    executionSettings: {
+      findUnique: vi.fn(async () => record),
+      update: vi.fn(async (args: unknown) => {
+        const { data } = args as { data: Partial<ExecutionSettingsRow> };
+        record = { ...record, ...data };
+        return record;
+      }),
+      upsert: vi.fn(async (args: unknown) => {
+        const { create } = args as { create: ExecutionSettingsRow };
+        record = record ?? create;
+        return record;
+      }),
+    },
+  };
+}
+
 function provider(
   config: ProviderConfig,
   model: BaseChatModel,
@@ -76,6 +107,7 @@ interface CreateAppOptions {
   createProvider?: (config: ProviderConfig) => ProviderInstance;
   getUserId?: () => string | null;
   keychain?: KeychainLike;
+  openPathInFinder?: CreateSettingsRouterOptions["openPathInFinder"];
   store?: SettingsRouteStore;
 }
 
@@ -85,6 +117,7 @@ function createApp({
   createProvider,
   getUserId = () => "user-test",
   keychain,
+  openPathInFinder,
   store: routeStore = store([row({ id: "openai" })]),
 }: CreateAppOptions = {}) {
   const app = express();
@@ -96,6 +129,7 @@ function createApp({
   };
   if (createProvider) routerOptions.createProvider = createProvider;
   if (keychain) routerOptions.keychain = keychain;
+  if (openPathInFinder) routerOptions.openPathInFinder = openPathInFinder;
 
   app.use(express.json());
   app.use("/api/settings", createSettingsRouter(routerOptions));
@@ -118,6 +152,64 @@ const expectedKeyFormats: Record<ProviderId, string> = {
     "sk- or sk-proj- followed by 20+ letters, numbers, underscores, or dashes",
   openrouter: "sk-or- followed by 20+ letters, numbers, underscores, or dashes",
 };
+
+describe("settings execution route", () => {
+  it("returns the execution settings with the workspace base directory", async () => {
+    const routeStore = executionSettingsStore({
+      defaultBackend: "local",
+    });
+
+    const response = await request(createApp({ store: routeStore }))
+      .get("/api/settings/execution")
+      .expect(200);
+
+    expect(response.body.execution).toMatchObject({
+      cleanupPolicy: "keep-all",
+      defaultBackend: "local",
+      workspaceBaseDir: expect.stringContaining("Documents/Handle/workspaces"),
+    });
+    expect(routeStore.executionSettings?.upsert).toHaveBeenCalled();
+  });
+
+  it("updates the default execution backend", async () => {
+    const routeStore = executionSettingsStore();
+
+    const response = await request(createApp({ store: routeStore }))
+      .put("/api/settings/execution")
+      .send({ defaultBackend: "local" })
+      .expect(200);
+
+    expect(response.body.execution).toMatchObject({
+      cleanupPolicy: "keep-all",
+      defaultBackend: "local",
+    });
+    expect(routeStore.executionSettings?.update).toHaveBeenCalledWith({
+      data: { defaultBackend: "local" },
+      where: { id: "global" },
+    });
+  });
+
+  it("opens the workspace folder via injectable opener", async () => {
+    const openPathInFinder = vi.fn().mockResolvedValue(undefined);
+
+    const response = await request(
+      createApp({
+        openPathInFinder,
+        store: executionSettingsStore(),
+      }),
+    )
+      .post("/api/settings/execution/open-workspace")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      opened: true,
+      path: expect.stringContaining("Documents/Handle/workspaces"),
+    });
+    expect(openPathInFinder).toHaveBeenCalledWith(
+      expect.stringContaining("Documents/Handle/workspaces"),
+    );
+  });
+});
 
 function mockKeychain(readBack = "unused-key") {
   return {

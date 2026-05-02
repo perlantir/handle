@@ -1,4 +1,7 @@
 import { Router } from "express";
+import { spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
 import {
@@ -28,6 +31,8 @@ import {
 } from "../providers/types";
 
 const TEST_PROMPT = "Hello, respond with OK.";
+const GLOBAL_SETTINGS_ID = "global";
+const WORKSPACE_BASE_DIR = join(homedir(), "Documents", "Handle", "workspaces");
 
 const updateProviderSchema = z
   .object({
@@ -46,6 +51,16 @@ const updateProviderSchema = z
 const setKeySchema = z.object({
   apiKey: z.string(),
 });
+
+const updateExecutionSettingsSchema = z
+  .object({
+    cleanupPolicy: z.literal("keep-all").optional(),
+    defaultBackend: z.enum(["e2b", "local"]).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one execution setting is required.",
+  });
 
 const apiKeyFormatDescriptions: Record<ProviderId, string> = {
   anthropic: "sk-ant- followed by 20+ letters, numbers, underscores, or dashes",
@@ -90,7 +105,19 @@ export interface ProviderConfigRow {
   updatedAt?: Date | string;
 }
 
+export interface ExecutionSettingsRow {
+  cleanupPolicy: string;
+  defaultBackend: string;
+  id: string;
+  updatedAt?: Date | string;
+}
+
 export interface SettingsRouteStore {
+  executionSettings?: {
+    findUnique(args: unknown): Promise<ExecutionSettingsRow | null>;
+    update(args: unknown): Promise<ExecutionSettingsRow>;
+    upsert(args: unknown): Promise<ExecutionSettingsRow>;
+  };
   providerConfig: {
     findMany(args: unknown): Promise<ProviderConfigRow[]>;
     findUnique(args: unknown): Promise<ProviderConfigRow | null>;
@@ -104,12 +131,15 @@ export interface KeychainLike {
   setCredential(account: string, value: string): Promise<void>;
 }
 
+export type OpenPathInFinder = (path: string) => Promise<void>;
+
 export interface CreateSettingsRouterOptions {
   chatgptOAuthProxy?: Pick<ChatGptOAuthProxyManager, "stop">;
   chatgptOAuthService?: ChatGptOAuthService;
   createProvider?: (config: ProviderConfig) => ProviderInstance;
   getUserId?: typeof getAuthenticatedUserId;
   keychain?: KeychainLike;
+  openPathInFinder?: OpenPathInFinder;
   store?: SettingsRouteStore;
 }
 
@@ -200,6 +230,45 @@ function serializeProvider(row: ProviderConfigRow) {
   };
 }
 
+function normalizeExecutionSettings(row: ExecutionSettingsRow) {
+  return {
+    cleanupPolicy: row.cleanupPolicy === "keep-all" ? "keep-all" : "keep-all",
+    defaultBackend: row.defaultBackend === "local" ? "local" : "e2b",
+    updatedAt: row.updatedAt ?? null,
+    workspaceBaseDir: WORKSPACE_BASE_DIR,
+  };
+}
+
+async function defaultOpenPathInFinder(path: string) {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("open", [path], {
+      stdio: "ignore",
+    });
+
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`open exited with code ${code ?? "unknown"}`));
+    });
+  });
+}
+
+async function ensureExecutionSettings(store: SettingsRouteStore) {
+  if (!store.executionSettings) {
+    throw new Error("Execution settings store is unavailable.");
+  }
+
+  return store.executionSettings.upsert({
+    create: {
+      cleanupPolicy: "keep-all",
+      defaultBackend: "e2b",
+      id: GLOBAL_SETTINGS_ID,
+    },
+    update: {},
+    where: { id: GLOBAL_SETTINGS_ID },
+  });
+}
+
 async function hasProviderApiKey(
   providerId: ProviderId,
   keychain: KeychainLike,
@@ -251,11 +320,74 @@ export function createSettingsRouter({
     getCredential: defaultGetCredential,
     setCredential: defaultSetCredential,
   },
+  openPathInFinder = defaultOpenPathInFinder,
   store = prisma,
 }: CreateSettingsRouterOptions = {}) {
   const router = Router();
   const chatgptOAuth =
     chatgptOAuthService ?? createChatGptOAuthService({ keychain });
+
+  router.get(
+    "/execution",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const row = await ensureExecutionSettings(store);
+
+      return res.json({ execution: normalizeExecutionSettings(row) });
+    }),
+  );
+
+  router.put(
+    "/execution",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const parsed = updateExecutionSettingsSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      await ensureExecutionSettings(store);
+      if (!store.executionSettings) {
+        throw new Error("Execution settings store is unavailable.");
+      }
+
+      const row = await store.executionSettings.update({
+        data: parsed.data,
+        where: { id: GLOBAL_SETTINGS_ID },
+      });
+
+      return res.json({ execution: normalizeExecutionSettings(row) });
+    }),
+  );
+
+  router.post(
+    "/execution/open-workspace",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      try {
+        await openPathInFinder(WORKSPACE_BASE_DIR);
+        return res.json({ opened: true, path: WORKSPACE_BASE_DIR });
+      } catch (err) {
+        logger.error(
+          { err, path: WORKSPACE_BASE_DIR },
+          "Open workspace folder failed",
+        );
+        return res.status(500).json({
+          error: errorMessage(err),
+          opened: false,
+          path: WORKSPACE_BASE_DIR,
+        });
+      }
+    }),
+  );
 
   router.get(
     "/providers",
