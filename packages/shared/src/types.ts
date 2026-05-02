@@ -76,6 +76,18 @@ export interface ProviderFallbackEvent {
   taskId: string;
 }
 
+export interface BrowserScreenshotEvent {
+  type: 'browser_screenshot';
+  taskId: string;
+  callId?: string;
+  imageBase64: string;
+  width: number;
+  height: number;
+  byteCount: number;
+  timestamp: string;
+  source: 'browser_tools' | 'computer_use';
+}
+
 export type SSEEvent =
   | ThoughtEvent
   | ToolCallEvent
@@ -85,6 +97,7 @@ export type SSEEvent =
   | AssistantMessageEvent
   | AgentErrorEvent
   | ApprovalRequestEvent
+  | BrowserScreenshotEvent
   | PlanUpdateEvent
   | ProviderFallbackEvent;
 

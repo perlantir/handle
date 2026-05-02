@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { awaitApproval } from "../approvals/approvalWaiter";
 import { createBrowserSession, type BrowserSession } from "../execution/browserSession";
+import { emitBrowserScreenshotEvent } from "../lib/browserScreenshotEvents";
 import { emitTaskEvent } from "../lib/eventBus";
 import { redactSecrets } from "../lib/redact";
 import type { ToolDefinition, ToolExecutionContext } from "./toolRegistry";
@@ -36,6 +37,8 @@ const goBackInput = z.object({
 });
 
 type BrowserToolInput = z.infer<typeof navigateInput>;
+const BROWSER_SCREENSHOT_WIDTH = 1280;
+const BROWSER_SCREENSHOT_HEIGHT = 800;
 
 function emitBrowserToolCall(
   context: ToolExecutionContext,
@@ -111,6 +114,19 @@ function screenshotStream(image: Buffer) {
   return `[screenshot]${image.toString("base64")}[/screenshot]`;
 }
 
+function emitBrowserScreenshot(context: ToolExecutionContext, callId: string, image?: Buffer) {
+  if (!image) return;
+
+  emitBrowserScreenshotEvent({
+    callId,
+    height: BROWSER_SCREENSHOT_HEIGHT,
+    image,
+    source: "browser_tools",
+    taskId: context.taskId,
+    width: BROWSER_SCREENSHOT_WIDTH,
+  });
+}
+
 function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : String(err);
 }
@@ -146,6 +162,7 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
             `Navigation complete. Title: "${result.title}". Screenshot bytes: ${result.screenshot.byteLength}`,
           );
           emitBrowserToolStream(context, callId, screenshotStream(result.screenshot));
+          emitBrowserScreenshot(context, callId, result.screenshot);
           const output = `Navigated to ${result.url}. Title: "${result.title}".`;
           emitBrowserToolResult(context, callId, output);
           return output;
@@ -168,8 +185,10 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
 
         try {
           const result = await getBrowserSession(context).click(parsed.selector, {
+            includeScreenshot: true,
             ...(parsed.timeoutMs ? { timeoutMs: parsed.timeoutMs } : {}),
           });
+          emitBrowserScreenshot(context, callId, result.screenshot);
           const output = `Clicked ${parsed.selector}. Current URL: ${result.url}. Title: "${result.title}".`;
           emitBrowserToolResult(context, callId, output);
           return output;
@@ -200,8 +219,10 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
 
         try {
           const result = await getBrowserSession(context).type(parsed.selector, parsed.text, {
+            includeScreenshot: true,
             ...(parsed.timeoutMs ? { timeoutMs: parsed.timeoutMs } : {}),
           });
+          emitBrowserScreenshot(context, callId, result.screenshot);
           const output = `Typed ${parsed.text.length} characters into ${parsed.selector}. Current URL: ${result.url}.`;
           emitBrowserToolResult(context, callId, output);
           return output;
@@ -262,6 +283,7 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
             `Browser screenshot captured: ${image.byteLength} bytes`,
           );
           emitBrowserToolStream(context, callId, screenshotStream(image));
+          emitBrowserScreenshot(context, callId, image);
           const output = `Captured browser screenshot (${image.byteLength} bytes).`;
           emitBrowserToolResult(context, callId, output);
           return output;
@@ -312,6 +334,7 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
 
         try {
           const result = await getBrowserSession(context).scroll(parsed.direction, amount);
+          emitBrowserScreenshot(context, callId, result.screenshot);
           const output = `Scrolled ${parsed.direction} by ${amount}px. Current URL: ${result.url}.`;
           emitBrowserToolResult(context, callId, output);
           return output;

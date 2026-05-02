@@ -3,6 +3,7 @@ import type { SSEEvent } from "@handle/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserSession } from "../execution/browserSession";
 import type { E2BSandboxLike } from "../execution/types";
+import { resetBrowserScreenshotThrottleForTest } from "../lib/browserScreenshotEvents";
 import { subscribeToTask } from "../lib/eventBus";
 import { createBrowserToolDefinitions } from "./browserTools";
 import type { ToolExecutionContext } from "./toolRegistry";
@@ -13,6 +14,7 @@ afterEach(() => {
   while (unsubscribers.length) {
     unsubscribers.pop()?.();
   }
+  resetBrowserScreenshotThrottleForTest();
 });
 
 function sandbox(): E2BSandboxLike {
@@ -104,6 +106,7 @@ describe("browserTools", () => {
       "tool_stream",
       "tool_stream",
       "tool_stream",
+      "browser_screenshot",
       "tool_result",
     ]);
     expect(events[0]).toMatchObject({
@@ -113,6 +116,7 @@ describe("browserTools", () => {
     expect(events.some((event) => event.type === "tool_stream" && event.content.includes("[screenshot]"))).toBe(
       true,
     );
+    expect(events.some((event) => event.type === "browser_screenshot" && event.byteCount === 6)).toBe(true);
   });
 
   it("extracts text through the browser session and reports byte count", async () => {

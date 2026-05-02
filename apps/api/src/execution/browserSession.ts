@@ -461,7 +461,7 @@ export class E2BBrowserSession implements BrowserSession {
   async scroll(direction: "up" | "down", amount = 600) {
     const result = await this.runAction(
       "scroll",
-      { amount, direction },
+      { amount, direction, includeScreenshot: true },
       { idempotent: true, target: direction },
     );
     return this.actionResult(result);

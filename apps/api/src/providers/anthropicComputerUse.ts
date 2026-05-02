@@ -13,6 +13,7 @@ import type {
 import type { Buffer } from "node:buffer";
 import { createDesktopSandbox } from "../execution/desktopSandbox";
 import type { DesktopSandboxHandle } from "../execution/desktopSandbox";
+import { emitBrowserScreenshotEvent } from "../lib/browserScreenshotEvents";
 import { getCredential as defaultGetCredential } from "../lib/keychain";
 import { logger } from "../lib/logger";
 
@@ -60,6 +61,7 @@ export interface RunAnthropicComputerUseTaskOptions {
   resolution?: [number, number];
   sandbox?: DesktopSandboxHandle;
   system?: string;
+  taskId?: string;
   taskLabel?: string;
 }
 
@@ -222,16 +224,22 @@ export async function executeAnthropicComputerToolUse({
   );
 
   try {
-    if (action === "screenshot") {
+    async function captureActionScreenshot(actionName: string) {
       const image = await sandbox.screenshot();
       const artifact = {
-        action,
+        action: actionName,
         byteCount: image.byteLength,
         image,
         iteration,
         toolUseId: toolUse.id,
       };
       await onScreenshot?.(artifact);
+      return artifact;
+    }
+
+    if (action === "screenshot") {
+      const artifact = await captureActionScreenshot(action);
+      const { image } = artifact;
 
       log.info(
         {
@@ -268,6 +276,7 @@ export async function executeAnthropicComputerToolUse({
     if (action === "left_click" || action === "click") {
       const [x, y] = coordinate(input);
       await sandbox.click(x, y);
+      await captureActionScreenshot(action);
       return actionCompleteToolResult(toolUse.id, startedAt, log, {
         action,
         iteration,
@@ -282,6 +291,7 @@ export async function executeAnthropicComputerToolUse({
     if (action === "type") {
       const text = textInput(input);
       await sandbox.type(text);
+      await captureActionScreenshot(action);
       return actionCompleteToolResult(toolUse.id, startedAt, log, {
         action,
         charCount: text.length,
@@ -295,6 +305,7 @@ export async function executeAnthropicComputerToolUse({
     if (action === "key") {
       const key = keyInput(input);
       await sandbox.key(key);
+      await captureActionScreenshot(action);
       return actionCompleteToolResult(toolUse.id, startedAt, log, {
         action,
         iteration,
@@ -365,6 +376,7 @@ export async function runAnthropicComputerUseTask({
   resolution = [1024, 768],
   sandbox: providedSandbox,
   system = "You are controlling a sandboxed Linux desktop through the computer tool. In Phase 3 step 2, bash and text editor tools are intentionally not wired. Use only computer_20251124 actions: screenshot, left_click, type, and key. After each action, inspect the screenshot result before deciding whether to continue.",
+  taskId,
   taskLabel = "computer-use-task",
 }: RunAnthropicComputerUseTaskOptions): Promise<AnthropicComputerUseTaskResult> {
   const startedAt = Date.now();
@@ -455,6 +467,16 @@ export async function runAnthropicComputerUseTask({
             log,
             onScreenshot: async (artifact) => {
               screenshots.push(artifact);
+              if (taskId) {
+                emitBrowserScreenshotEvent({
+                  callId: artifact.toolUseId,
+                  height: resolution[1],
+                  image: artifact.image,
+                  source: "computer_use",
+                  taskId,
+                  width: resolution[0],
+                });
+              }
               await onScreenshot?.(artifact);
             },
             sandbox: activeSandbox,

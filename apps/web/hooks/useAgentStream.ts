@@ -44,6 +44,8 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
   switch (event.type) {
     case 'approval_request':
       return { ...state, pendingApproval: { ...event.request, approvalId: event.approvalId } };
+    case 'browser_screenshot':
+      return state;
     case 'error':
       return { ...state, error: event.message, status: 'ERROR' };
     case 'message':
