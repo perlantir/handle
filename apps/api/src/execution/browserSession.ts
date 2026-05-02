@@ -314,6 +314,20 @@ function commandFailureMessage(label: string, result: { error?: string; stderr?:
   return `${label} failed: ${redactSecrets(body)}`;
 }
 
+function hasHealthyBrowserServerOutput(stdout: string | undefined) {
+  if (!stdout) return false;
+  return stdout
+    .split(/\r?\n/)
+    .some((line) => {
+      try {
+        const payload = JSON.parse(line.trim()) as { ok?: unknown };
+        return payload.ok === true;
+      } catch {
+        return false;
+      }
+    });
+}
+
 export class E2BBrowserSession implements BrowserSession {
   private destroyed = false;
   private ready = false;
@@ -708,6 +722,19 @@ export class E2BBrowserSession implements BrowserSession {
     const result = await this.options.sandbox.commands.run(command);
 
     if (typeof result.exitCode === "number" && result.exitCode !== 0) {
+      if (hasHealthyBrowserServerOutput(result.stdout)) {
+        this.options.logger.warn?.(
+          {
+            exitCode: result.exitCode,
+            sandboxId: this.sandboxId,
+            stderr: redactSecrets(result.stderr ?? ""),
+            stdout: redactSecrets(result.stdout ?? ""),
+          },
+          "Browser server start returned nonzero after healthy readiness response",
+        );
+        return;
+      }
+
       throw new Error(commandFailureMessage("Browser server start", result));
     }
   }

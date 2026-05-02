@@ -53,6 +53,14 @@ describe("browserSession", () => {
   it("installs Playwright with npm, writes the Node server script through files, and launches headed Chromium", async () => {
     const image = Buffer.from("png-bytes");
     const { calls, sandbox } = sandboxWithRunner((command) => {
+      if (command.includes("setsid -f")) {
+        return {
+          exitCode: 1,
+          stderr: "curl: (7) Failed to connect before readiness",
+          stdout: JSON.stringify({ ok: true, title: "", url: "about:blank" }),
+        };
+      }
+
       if (command.includes('const path = "/action"')) {
         return actionResponse({
           screenshot: image.toString("base64"),
