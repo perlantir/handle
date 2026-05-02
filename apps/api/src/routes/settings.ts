@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { spawn } from "node:child_process";
+import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -13,6 +14,7 @@ import { asyncHandler } from "../lib/http";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
+import { defaultLocalBrowserProfileDir } from "../execution/localBrowser";
 import { chatGptOAuthFailureMessage } from "../providers/openaiChatgptAuth";
 import {
   createChatGptOAuthService,
@@ -33,6 +35,7 @@ import {
 const TEST_PROMPT = "Hello, respond with OK.";
 const GLOBAL_SETTINGS_ID = "global";
 const WORKSPACE_BASE_DIR = join(homedir(), "Documents", "Handle", "workspaces");
+const ACTUAL_CHROME_ENDPOINT = "http://127.0.0.1:9222";
 
 const updateProviderSchema = z
   .object({
@@ -61,6 +64,12 @@ const updateExecutionSettingsSchema = z
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one execution setting is required.",
   });
+
+const updateBrowserSettingsSchema = z
+  .object({
+    mode: z.enum(["separate-profile", "actual-chrome"]),
+  })
+  .strict();
 
 const apiKeyFormatDescriptions: Record<ProviderId, string> = {
   anthropic: "sk-ant- followed by 20+ letters, numbers, underscores, or dashes",
@@ -112,7 +121,17 @@ export interface ExecutionSettingsRow {
   updatedAt?: Date | string;
 }
 
+export interface BrowserSettingsRow {
+  id: string;
+  mode: string;
+  updatedAt?: Date | string;
+}
+
 export interface SettingsRouteStore {
+  browserSettings?: {
+    update(args: unknown): Promise<BrowserSettingsRow>;
+    upsert(args: unknown): Promise<BrowserSettingsRow>;
+  };
   executionSettings?: {
     findUnique(args: unknown): Promise<ExecutionSettingsRow | null>;
     update(args: unknown): Promise<ExecutionSettingsRow>;
@@ -132,6 +151,10 @@ export interface KeychainLike {
 }
 
 export type OpenPathInFinder = (path: string) => Promise<void>;
+export type ResetBrowserProfile = (path: string) => Promise<void>;
+export type TestActualChromeConnection = (
+  endpoint: string,
+) => Promise<{ connected: boolean; detail: string | null }>;
 
 export interface CreateSettingsRouterOptions {
   chatgptOAuthProxy?: Pick<ChatGptOAuthProxyManager, "stop">;
@@ -140,7 +163,9 @@ export interface CreateSettingsRouterOptions {
   getUserId?: typeof getAuthenticatedUserId;
   keychain?: KeychainLike;
   openPathInFinder?: OpenPathInFinder;
+  resetBrowserProfile?: ResetBrowserProfile;
   store?: SettingsRouteStore;
+  testActualChromeConnection?: TestActualChromeConnection;
 }
 
 const DESCRIPTIONS: Record<ProviderId, string> = {
@@ -239,6 +264,15 @@ function normalizeExecutionSettings(row: ExecutionSettingsRow) {
   };
 }
 
+function normalizeBrowserSettings(row: BrowserSettingsRow) {
+  return {
+    actualChromeEndpoint: ACTUAL_CHROME_ENDPOINT,
+    mode: row.mode === "actual-chrome" ? "actual-chrome" : "separate-profile",
+    profileDir: defaultLocalBrowserProfileDir(),
+    updatedAt: row.updatedAt ?? null,
+  };
+}
+
 async function defaultOpenPathInFinder(path: string) {
   await new Promise<void>((resolve, reject) => {
     const child = spawn("open", [path], {
@@ -253,6 +287,36 @@ async function defaultOpenPathInFinder(path: string) {
   });
 }
 
+async function defaultResetBrowserProfile(path: string) {
+  await fs.rm(path, { force: true, recursive: true });
+}
+
+async function defaultTestActualChromeConnection(endpoint: string) {
+  try {
+    const response = await fetch(`${endpoint.replace(/\/$/, "")}/json/version`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(2_500),
+    });
+    if (!response.ok) {
+      return {
+        connected: false,
+        detail: `Chrome debug endpoint returned ${response.status}`,
+      };
+    }
+
+    const body = (await response.json().catch(() => null)) as {
+      Browser?: string;
+      webSocketDebuggerUrl?: string;
+    } | null;
+    return {
+      connected: Boolean(body?.webSocketDebuggerUrl),
+      detail: body?.Browser ?? "Chrome debug endpoint reachable",
+    };
+  } catch (err) {
+    return { connected: false, detail: errorMessage(err) };
+  }
+}
+
 async function ensureExecutionSettings(store: SettingsRouteStore) {
   if (!store.executionSettings) {
     throw new Error("Execution settings store is unavailable.");
@@ -263,6 +327,21 @@ async function ensureExecutionSettings(store: SettingsRouteStore) {
       cleanupPolicy: "keep-all",
       defaultBackend: "e2b",
       id: GLOBAL_SETTINGS_ID,
+    },
+    update: {},
+    where: { id: GLOBAL_SETTINGS_ID },
+  });
+}
+
+async function ensureBrowserSettings(store: SettingsRouteStore) {
+  if (!store.browserSettings) {
+    throw new Error("Browser settings store is unavailable.");
+  }
+
+  return store.browserSettings.upsert({
+    create: {
+      id: GLOBAL_SETTINGS_ID,
+      mode: "separate-profile",
     },
     update: {},
     where: { id: GLOBAL_SETTINGS_ID },
@@ -321,7 +400,9 @@ export function createSettingsRouter({
     setCredential: defaultSetCredential,
   },
   openPathInFinder = defaultOpenPathInFinder,
+  resetBrowserProfile = defaultResetBrowserProfile,
   store = prisma,
+  testActualChromeConnection = defaultTestActualChromeConnection,
 }: CreateSettingsRouterOptions = {}) {
   const router = Router();
   const chatgptOAuth =
@@ -386,6 +467,80 @@ export function createSettingsRouter({
           path: WORKSPACE_BASE_DIR,
         });
       }
+    }),
+  );
+
+  router.get(
+    "/browser",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const row = await ensureBrowserSettings(store);
+
+      return res.json({ browser: normalizeBrowserSettings(row) });
+    }),
+  );
+
+  router.put(
+    "/browser",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const parsed = updateBrowserSettingsSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      await ensureBrowserSettings(store);
+      if (!store.browserSettings) {
+        throw new Error("Browser settings store is unavailable.");
+      }
+
+      const row = await store.browserSettings.update({
+        data: parsed.data,
+        where: { id: GLOBAL_SETTINGS_ID },
+      });
+
+      return res.json({ browser: normalizeBrowserSettings(row) });
+    }),
+  );
+
+  router.post(
+    "/browser/reset-profile",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const profileDir = defaultLocalBrowserProfileDir();
+      try {
+        await resetBrowserProfile(profileDir);
+        return res.json({ profileDir, reset: true });
+      } catch (err) {
+        logger.error({ err, profileDir }, "Reset browser profile failed");
+        return res.status(500).json({
+          error: errorMessage(err),
+          profileDir,
+          reset: false,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/browser/test-actual-chrome",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const result = await testActualChromeConnection(ACTUAL_CHROME_ENDPOINT);
+      return res.json({
+        ...result,
+        endpoint: ACTUAL_CHROME_ENDPOINT,
+      });
     }),
   );
 

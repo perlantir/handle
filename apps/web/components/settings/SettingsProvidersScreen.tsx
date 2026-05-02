@@ -31,6 +31,7 @@ import {
   type SettingsProvider,
   type SettingsProviderId,
 } from "@/lib/settingsProviders";
+import { BrowserSettings } from "./BrowserSettings";
 import { ExecutionSettings } from "./ExecutionSettings";
 
 type OpenAIAuthChoice = "apiKey" | "both" | "chatgpt-oauth";
@@ -86,7 +87,7 @@ const providerMeta: Record<
   },
 };
 
-type SettingsSection = "Execution" | "Providers";
+type SettingsSection = "Browser" | "Execution" | "Providers";
 
 const settingsNav: Array<{
   disabled?: boolean;
@@ -95,7 +96,7 @@ const settingsNav: Array<{
 }> = [
   { label: "Providers", section: "Providers" },
   { label: "Execution", section: "Execution" },
-  { disabled: true, label: "Browser" },
+  { label: "Browser", section: "Browser" },
   { disabled: true, label: "Profile" },
   { disabled: true, label: "Approvals & trust" },
   { disabled: true, label: "Memory" },
@@ -527,6 +528,7 @@ export function SettingsProvidersScreen() {
           </header>
 
           {activeSection === "Execution" ? <ExecutionSettings /> : null}
+          {activeSection === "Browser" ? <BrowserSettings /> : null}
 
           {activeSection === "Providers" && loading ? (
             <div className="flex items-center gap-2 text-[12.5px] text-text-tertiary">

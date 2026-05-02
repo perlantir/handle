@@ -12,6 +12,7 @@ import type {
 } from "../providers/types";
 import {
   createSettingsRouter,
+  type BrowserSettingsRow,
   type CreateSettingsRouterOptions,
   type ExecutionSettingsRow,
   type KeychainLike,
@@ -88,6 +89,30 @@ function executionSettingsStore(
   };
 }
 
+function browserSettingsStore(
+  overrides: Partial<BrowserSettingsRow> = {},
+): SettingsRouteStore {
+  let record: BrowserSettingsRow = {
+    id: "global",
+    mode: "separate-profile",
+    updatedAt: new Date("2026-05-02T12:00:00.000Z"),
+    ...overrides,
+  };
+  const providerStore = store([row({ id: "openai" })]);
+
+  return {
+    ...providerStore,
+    browserSettings: {
+      update: vi.fn(async (args: unknown) => {
+        const { data } = args as { data: Partial<BrowserSettingsRow> };
+        record = { ...record, ...data };
+        return record;
+      }),
+      upsert: vi.fn(async () => record),
+    },
+  };
+}
+
 function provider(
   config: ProviderConfig,
   model: BaseChatModel,
@@ -108,7 +133,9 @@ interface CreateAppOptions {
   getUserId?: () => string | null;
   keychain?: KeychainLike;
   openPathInFinder?: CreateSettingsRouterOptions["openPathInFinder"];
+  resetBrowserProfile?: CreateSettingsRouterOptions["resetBrowserProfile"];
   store?: SettingsRouteStore;
+  testActualChromeConnection?: CreateSettingsRouterOptions["testActualChromeConnection"];
 }
 
 function createApp({
@@ -118,7 +145,9 @@ function createApp({
   getUserId = () => "user-test",
   keychain,
   openPathInFinder,
+  resetBrowserProfile,
   store: routeStore = store([row({ id: "openai" })]),
+  testActualChromeConnection,
 }: CreateAppOptions = {}) {
   const app = express();
   const routerOptions: CreateSettingsRouterOptions = {
@@ -130,6 +159,10 @@ function createApp({
   if (createProvider) routerOptions.createProvider = createProvider;
   if (keychain) routerOptions.keychain = keychain;
   if (openPathInFinder) routerOptions.openPathInFinder = openPathInFinder;
+  if (resetBrowserProfile) routerOptions.resetBrowserProfile = resetBrowserProfile;
+  if (testActualChromeConnection) {
+    routerOptions.testActualChromeConnection = testActualChromeConnection;
+  }
 
   app.use(express.json());
   app.use("/api/settings", createSettingsRouter(routerOptions));
@@ -207,6 +240,86 @@ describe("settings execution route", () => {
     });
     expect(openPathInFinder).toHaveBeenCalledWith(
       expect.stringContaining("Documents/Handle/workspaces"),
+    );
+  });
+});
+
+describe("settings browser route", () => {
+  it("returns browser settings with profile and actual Chrome endpoint", async () => {
+    const routeStore = browserSettingsStore({ mode: "actual-chrome" });
+
+    const response = await request(createApp({ store: routeStore }))
+      .get("/api/settings/browser")
+      .expect(200);
+
+    expect(response.body.browser).toMatchObject({
+      actualChromeEndpoint: "http://127.0.0.1:9222",
+      mode: "actual-chrome",
+      profileDir: expect.stringContaining(".config/handle/chrome-profile"),
+    });
+    expect(routeStore.browserSettings?.upsert).toHaveBeenCalled();
+  });
+
+  it("updates browser mode", async () => {
+    const routeStore = browserSettingsStore();
+
+    const response = await request(createApp({ store: routeStore }))
+      .put("/api/settings/browser")
+      .send({ mode: "actual-chrome" })
+      .expect(200);
+
+    expect(response.body.browser).toMatchObject({
+      mode: "actual-chrome",
+    });
+    expect(routeStore.browserSettings?.update).toHaveBeenCalledWith({
+      data: { mode: "actual-chrome" },
+      where: { id: "global" },
+    });
+  });
+
+  it("resets the separate profile through an injectable resetter", async () => {
+    const resetBrowserProfile = vi.fn().mockResolvedValue(undefined);
+
+    const response = await request(
+      createApp({
+        resetBrowserProfile,
+        store: browserSettingsStore(),
+      }),
+    )
+      .post("/api/settings/browser/reset-profile")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      profileDir: expect.stringContaining(".config/handle/chrome-profile"),
+      reset: true,
+    });
+    expect(resetBrowserProfile).toHaveBeenCalledWith(
+      expect.stringContaining(".config/handle/chrome-profile"),
+    );
+  });
+
+  it("tests actual Chrome connection through an injectable checker", async () => {
+    const testActualChromeConnection = vi.fn().mockResolvedValue({
+      connected: true,
+      detail: "Chrome/147",
+    });
+
+    const response = await request(
+      createApp({
+        store: browserSettingsStore(),
+        testActualChromeConnection,
+      }),
+    )
+      .post("/api/settings/browser/test-actual-chrome")
+      .expect(200);
+
+    expect(response.body).toEqual({
+      connected: true,
+      detail: "Chrome/147",
+      endpoint: "http://127.0.0.1:9222",
+    });
+    expect(testActualChromeConnection).toHaveBeenCalledWith(
+      "http://127.0.0.1:9222",
     );
   });
 });

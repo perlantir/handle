@@ -57,6 +57,12 @@ model ExecutionSettings {
   updatedAt      DateTime @default(now()) @updatedAt
 }
 
+model BrowserSettings {
+  id        String   @id @default("global")
+  mode      String   @default("separate-profile")
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
 enum TaskStatus {
   RUNNING
   WAITING
