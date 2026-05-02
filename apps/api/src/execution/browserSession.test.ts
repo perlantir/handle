@@ -88,7 +88,7 @@ describe("browserSession", () => {
     expect(calls[1]).toContain("HANDLE_BROWSER_VIEWPORT_HEIGHT='800'");
     expect(calls[1]).toContain("cd '/tmp/handle-browser-runtime'");
     expect(calls[1]).toContain(
-      "nohup '/tmp/handle-browser-runtime/node/bin/node' '/tmp/handle-browser-runtime/handle-browser-server.mjs'",
+      "setsid -f '/tmp/handle-browser-runtime/node/bin/node' '/tmp/handle-browser-runtime/handle-browser-server.mjs'",
     );
     expect(calls[2]).toContain("'/tmp/handle-browser-runtime/node/bin/node' --input-type=module");
     expect(calls[2]).toContain('const payload = JSON.parse("{\\"action\\":\\"navigate\\"');
