@@ -167,6 +167,16 @@ async function createTask() {
   return body.taskId;
 }
 
+async function getTaskWorkspaceDir(taskId) {
+  const response = await apiFetch(`/api/tasks/${taskId}`);
+  if (!response.ok) {
+    throw new Error(`/api/tasks/${taskId} returned ${response.status}`);
+  }
+
+  const body = await response.json();
+  return join(WORKSPACE_BASE_DIR, body.projectId ?? taskId);
+}
+
 function isSafeSmokeApproval(event, workspaceDir) {
   const request = event.request ?? {};
   if (request.type !== "shell_exec" || typeof request.command !== "string") {
@@ -198,12 +208,11 @@ async function approveSmokeRequest(event) {
   }
 }
 
-async function waitForTaskEvents(taskId) {
+async function waitForTaskEvents(taskId, workspaceDir) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
   const events = [];
   let finalStatus = null;
-  const workspaceDir = join(WORKSPACE_BASE_DIR, taskId);
 
   try {
     const response = await apiFetch(`/api/tasks/${taskId}/stream`, {
@@ -282,8 +291,7 @@ async function readAuditEntries(taskId) {
     .filter((entry) => entry.taskId === taskId);
 }
 
-async function assertLocalWorkspace(taskId, events) {
-  const workspaceDir = join(WORKSPACE_BASE_DIR, taskId);
+async function assertLocalWorkspace(taskId, workspaceDir, events) {
   const scriptPath = join(workspaceDir, "primes.py");
   const script = await fs.readFile(scriptPath, "utf8");
   if (!script.includes("prime")) {
@@ -367,12 +375,14 @@ try {
 
   const taskId = await createTask();
   console.log(`[local-agent-integration] task ${taskId} created`);
-  const { events, finalStatus } = await waitForTaskEvents(taskId);
+  const workspaceDir = await getTaskWorkspaceDir(taskId);
+  console.log(`[local-agent-integration] workspace target ${workspaceDir}`);
+  const { events, finalStatus } = await waitForTaskEvents(taskId, workspaceDir);
   if (finalStatus !== "STOPPED") {
     throw new Error(`Task ended with ${finalStatus}, expected STOPPED`);
   }
 
-  const result = await assertLocalWorkspace(taskId, events);
+  const result = await assertLocalWorkspace(taskId, workspaceDir, events);
   console.log("[local-agent-integration] PASS");
   console.log(`[local-agent-integration] workspace: ${result.workspaceDir}`);
   console.log(`[local-agent-integration] script: ${result.scriptPath}`);
