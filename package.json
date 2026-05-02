@@ -25,6 +25,7 @@
     "smoke:local-backend-basic": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/local-backend-basic.mjs",
     "smoke:local-backend-audit-log": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/local-backend-audit-log.mjs",
     "smoke:local-backend-safety": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/local-backend-safety.mjs",
+    "smoke:local-agent-integration": "node scripts/smoke/local-agent-integration.mjs",
     "smoke:local-browser-actual-chrome": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/local-browser-actual-chrome.mjs",
     "smoke:local-browser-separate-profile": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/local-browser-separate-profile.mjs",
     "smoke:local-rate-limit": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/local-rate-limit.mjs",
