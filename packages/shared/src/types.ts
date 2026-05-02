@@ -145,10 +145,12 @@ export interface TaskMessage {
 
 export interface TaskDetailResponse {
   backend?: 'e2b' | 'local';
+  conversationId?: string;
   createdAt?: string;
   goal: string;
   id: string;
   messages: TaskMessage[];
+  projectId?: string;
   providerId?: string | null;
   providerModel?: string | null;
   status: TaskStatus;
