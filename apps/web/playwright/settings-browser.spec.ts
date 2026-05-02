@@ -31,6 +31,16 @@ async function mockSettingsApi(page: Page) {
   const requests: RecordedRequest[] = [];
   const browser = { ...browserFixture };
 
+  await page.route("**/api/projects**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/projects") {
+      await jsonRoute(route, 200, { projects: [] });
+      return;
+    }
+
+    await jsonRoute(route, 200, { conversations: [] });
+  });
+
   await page.route("**/api/settings/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
