@@ -18,8 +18,8 @@ import { createBrowserToolDefinitions } from "./browserTools";
 import { createComputerUseToolDefinitions } from "./computerUseTools";
 import { createPhase1ToolDefinitions } from "./tools";
 import {
-  PHASE_1_SYSTEM_PROMPT,
-  PHASE_3_SYSTEM_PROMPT,
+  buildHandleSystemPrompt,
+  buildPhase1SystemPrompt,
   SYSTEM_PROMPT_VERSION,
 } from "./prompts";
 
@@ -56,8 +56,12 @@ export async function createPhase1Agent(
 ) {
   const tools = createLangChainTools(createPhase1ToolDefinitions(), context);
   const llm = options.llm ?? createOpenAIChatModel();
+  const systemPrompt = buildPhase1SystemPrompt({
+    backendId: context.backend.id,
+    workspaceDir: context.backend.getWorkspaceDir(),
+  });
   const prompt = ChatPromptTemplate.fromMessages([
-    ["system", PHASE_1_SYSTEM_PROMPT],
+    ["system", systemPrompt],
     new MessagesPlaceholder("chat_history"),
     ["human", "{input}"],
     new MessagesPlaceholder("agent_scratchpad"),
@@ -93,8 +97,12 @@ export async function createHandleAgent(
     context,
   );
   const llm = options.llm ?? createOpenAIChatModel();
+  const systemPrompt = buildHandleSystemPrompt({
+    backendId: context.backend.id,
+    workspaceDir: context.backend.getWorkspaceDir(),
+  });
   const prompt = ChatPromptTemplate.fromMessages([
-    ["system", PHASE_3_SYSTEM_PROMPT],
+    ["system", systemPrompt],
     new MessagesPlaceholder("chat_history"),
     ["human", "{input}"],
     new MessagesPlaceholder("agent_scratchpad"),

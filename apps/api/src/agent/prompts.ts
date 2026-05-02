@@ -1,7 +1,14 @@
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v7";
+import type { BackendId } from "../execution/types";
 
-export const PHASE_1_SYSTEM_PROMPT = `
-You are Handle, an autonomous AI agent operating in a sandboxed Linux environment.
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v8";
+
+interface PromptRuntimeContext {
+  backendId?: BackendId;
+  workspaceDir?: string;
+}
+
+const CORE_SYSTEM_PROMPT = `
+You are Handle, an autonomous AI agent operating in the active execution backend.
 You complete tasks iteratively by analyzing the user's goal, making a plan, executing
 tools, observing results, and continuing until the goal is met.
 
@@ -73,15 +80,42 @@ tools, observing results, and continuing until the goal is met.
 - The marker must not contain JSON, curly braces, or additional formatting.
 - Do not include the marker until you are finished using tools.
 </completion_contract>
+`.trim();
 
-<sandbox_environment>
+function e2bEnvironmentPrompt() {
+  return `
+<execution_environment>
+- Backend: E2B Cloud sandbox
 - OS: Ubuntu 22.04
 - User: user
 - Home: /home/user
 - Pre-installed: Python 3.10, Node.js 20, common Linux tools
 - Working directory: /home/user by default, but tools can write anywhere in the sandbox
-</sandbox_environment>
+- Use /home/user for task files unless the user asks for a specific path.
+</execution_environment>
+`.trim();
+}
 
+function localEnvironmentPrompt(workspaceDir: string) {
+  return `
+<execution_environment>
+- Backend: Local Mac
+- OS: macOS on the user's actual machine
+- Workspace: ${workspaceDir}
+- All file operations must use absolute paths that start with this workspace path
+  unless the user explicitly asks to touch a different path and approval is granted.
+- Write scripts, data files, and generated artifacts inside the workspace.
+- Run shell commands from the workspace. Prefer relative paths or absolute paths
+  under the workspace.
+- Do not use /home/user, /tmp, or Linux-only paths for task artifacts unless the
+  user explicitly asks for them. This is not an E2B Ubuntu sandbox.
+- Local host-affecting actions are checked by SafetyGovernor and may be denied or
+  require approval. If a local path is denied, recover by using the workspace path.
+</execution_environment>
+`.trim();
+}
+
+const AVAILABLE_PHASE_1_TOOLS = `
 <available_tools>
 - shell_exec: Run a bash command. Streams stdout/stderr in real time.
 - file_write: Write content to a file at an absolute path.
@@ -92,8 +126,20 @@ tools, observing results, and continuing until the goal is met.
 System prompt version: ${SYSTEM_PROMPT_VERSION}
 `.trim();
 
-export const PHASE_3_SYSTEM_PROMPT = `
-${PHASE_1_SYSTEM_PROMPT}
+export function buildPhase1SystemPrompt({
+  backendId = "e2b",
+  workspaceDir = "/home/user",
+}: PromptRuntimeContext = {}) {
+  return `
+${CORE_SYSTEM_PROMPT}
+
+${backendId === "local" ? localEnvironmentPrompt(workspaceDir) : e2bEnvironmentPrompt()}
+
+${AVAILABLE_PHASE_1_TOOLS}
+`.trim();
+}
+
+const PHASE_3_BROWSER_AND_COMPUTER_USE_PROMPT = `
 
 <phase_3_browser_and_computer_use>
 - Use browser_* tools for web browsing, browser screenshots, DOM extraction,
@@ -129,3 +175,14 @@ ${PHASE_1_SYSTEM_PROMPT}
 
 Phase 3 prompt version: ${SYSTEM_PROMPT_VERSION}
 `.trim();
+
+export function buildHandleSystemPrompt(context: PromptRuntimeContext = {}) {
+  return `
+${buildPhase1SystemPrompt(context)}
+
+${PHASE_3_BROWSER_AND_COMPUTER_USE_PROMPT}
+`.trim();
+}
+
+export const PHASE_1_SYSTEM_PROMPT = buildPhase1SystemPrompt();
+export const PHASE_3_SYSTEM_PROMPT = buildHandleSystemPrompt();
