@@ -1,4 +1,5 @@
 import type { ApprovalPayload } from '@handle/shared';
+import { spawn } from 'node:child_process';
 import { promises as defaultFs } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -51,6 +52,7 @@ export interface LocalBackendOptions {
 }
 
 const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
+const SHELL_RATE_LIMIT_PER_SECOND = 10;
 
 function defaultWorkspaceDir(taskId: string) {
   return join(homedir(), 'Documents', 'Handle', 'workspaces', taskId);
@@ -82,6 +84,7 @@ export class LocalBackend implements ExecutionBackend {
   private readonly fs: LocalBackendFilesystem;
   private readonly requestApproval: LocalApprovalRequester;
   private readonly safetyGovernor: SafetyGovernor;
+  private readonly shellCallTimestamps: number[] = [];
   private readonly taskId: string;
   private readonly workspaceDir: string;
 
@@ -156,8 +159,55 @@ export class LocalBackend implements ExecutionBackend {
     await this.fs.rm(resolvedPath, { force: true, recursive: true });
   }
 
-  async shellExec(_command: string, _opts: ExecutionCommandOptions): Promise<ExecutionCommandResult> {
-    throw new Error('LocalBackend.shellExec is implemented in Phase 4 step 6');
+  async shellExec(command: string, opts: ExecutionCommandOptions): Promise<ExecutionCommandResult> {
+    this.checkShellRateLimit();
+
+    const result = this.safetyGovernor.checkShellExec(command);
+    await this.enforceShellDecision(result);
+
+    return new Promise<ExecutionCommandResult>((resolvePromise, reject) => {
+      const child = spawn('bash', ['-c', command], {
+        cwd: opts.cwd ?? this.workspaceDir,
+        env: { ...process.env, HANDLE_TASK_ID: this.taskId },
+      });
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+      let timeout: NodeJS.Timeout | null = null;
+
+      if (opts.timeoutMs) {
+        timeout = setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGKILL');
+        }, opts.timeoutMs);
+      }
+
+      child.stdout?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        stdout += text;
+        void opts.onStdout(text);
+      });
+
+      child.stderr?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        stderr += text;
+        void opts.onStderr(text);
+      });
+
+      child.on('error', (err) => {
+        if (timeout) clearTimeout(timeout);
+        reject(err);
+      });
+
+      child.on('exit', (code) => {
+        if (timeout) clearTimeout(timeout);
+        resolvePromise({
+          exitCode: code ?? (timedOut ? 124 : 1),
+          stderr,
+          stdout,
+        });
+      });
+    });
   }
 
   async browserSession(): Promise<BrowserSession> {
@@ -189,6 +239,51 @@ export class LocalBackend implements ExecutionBackend {
     }
 
     return result.resolvedTarget;
+  }
+
+  private async enforceShellDecision(result: SafetyCheckResult) {
+    if (result.decision === 'deny') {
+      await this.audit('shell_exec', result, 'deny');
+      throw new Error(result.reason);
+    }
+
+    if (result.decision === 'approve') {
+      const startedAt = Date.now();
+      const decision = await this.requestApproval(
+        this.taskId,
+        {
+          command: result.resolvedTarget,
+          reason: `Run command: ${result.resolvedTarget}?`,
+          type: 'shell_exec',
+        },
+        { timeoutMs: this.approvalTimeoutMs },
+      );
+      const approved = decision === 'approved';
+      await this.audit('shell_exec', result, 'approve', {
+        approvalDurationMs: Date.now() - startedAt,
+        approved,
+      });
+
+      if (!approved) {
+        throw new Error(decision === 'timeout' ? 'Approval timed out' : 'User denied approval');
+      }
+      return;
+    }
+
+    await this.audit('shell_exec', result, 'allow');
+  }
+
+  private checkShellRateLimit() {
+    const now = Date.now();
+    while (this.shellCallTimestamps.length > 0 && now - this.shellCallTimestamps[0]! >= 1000) {
+      this.shellCallTimestamps.shift();
+    }
+
+    if (this.shellCallTimestamps.length >= SHELL_RATE_LIMIT_PER_SECOND) {
+      throw new Error('Shell execution rate limit exceeded; max 10 commands per second per task.');
+    }
+
+    this.shellCallTimestamps.push(now);
   }
 
   private async audit(

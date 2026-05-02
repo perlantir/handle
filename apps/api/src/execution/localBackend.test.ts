@@ -226,3 +226,134 @@ describe('LocalBackend file operations', () => {
     );
   });
 });
+
+describe('LocalBackend shell execution', () => {
+  it('runs safe shell commands, streams output, and logs allow', async () => {
+    const backend = new LocalBackend('task-local-shell-test', {
+      auditLogPath,
+      workspaceDir,
+    });
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+
+    await backend.initialize();
+    const command = 'node -e "process.stdout.write(\'hello\'),process.stderr.write(\'warn\')"';
+    const result = await backend.shellExec(command, {
+      onStderr: (line) => {
+        stderr.push(line);
+      },
+      onStdout: (line) => {
+        stdout.push(line);
+      },
+    });
+
+    expect(result).toEqual({ exitCode: 0, stderr: 'warn', stdout: 'hello' });
+    expect(stdout.join('')).toBe('hello');
+    expect(stderr.join('')).toBe('warn');
+    const audit = (await fs.readFile(auditLogPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    expect(audit.at(-1)).toMatchObject({
+      action: 'shell_exec',
+      decision: 'allow',
+      target: command,
+    });
+  });
+
+  it('requests approval for command chains before execution', async () => {
+    const requestApproval = vi.fn(async () => 'approved' as const);
+    const backend = new LocalBackend('task-local-shell-approval-test', {
+      auditLogPath,
+      requestApproval,
+      workspaceDir,
+    });
+
+    await backend.initialize();
+    const result = await backend.shellExec('echo hello && echo bye', {
+      onStderr: () => {},
+      onStdout: () => {},
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('hello');
+    expect(result.stdout).toContain('bye');
+    expect(requestApproval).toHaveBeenCalledWith(
+      'task-local-shell-approval-test',
+      expect.objectContaining({
+        command: 'echo hello && echo bye',
+        type: 'shell_exec',
+      }),
+      { timeoutMs: 300000 },
+    );
+    const audit = (await fs.readFile(auditLogPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    expect(audit.at(-1)).toMatchObject({
+      action: 'shell_exec',
+      approved: true,
+      decision: 'approve',
+      matchedPattern: 'pipe-or-chain',
+    });
+  });
+
+  it('denies forbidden shell commands before spawning', async () => {
+    const backend = new LocalBackend('task-local-shell-deny-test', {
+      auditLogPath,
+      workspaceDir,
+    });
+
+    await backend.initialize();
+    await expect(
+      backend.shellExec('sudo echo nope', {
+        onStderr: () => {},
+        onStdout: () => {},
+      }),
+    ).rejects.toThrow('sudo is forbidden');
+
+    const audit = (await fs.readFile(auditLogPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    expect(audit.at(-1)).toMatchObject({
+      action: 'shell_exec',
+      decision: 'deny',
+      matchedPattern: 'sudo',
+    });
+  });
+
+  it('kills commands that exceed timeoutMs', async () => {
+    const backend = new LocalBackend('task-local-shell-timeout-test', {
+      auditLogPath,
+      workspaceDir,
+    });
+
+    await backend.initialize();
+    const result = await backend.shellExec('sleep 2', {
+      onStderr: () => {},
+      onStdout: () => {},
+      timeoutMs: 50,
+    });
+
+    expect(result.exitCode).toBe(124);
+  });
+
+  it('rate-limits shell execution to 10 calls per second per task at request time', async () => {
+    const backend = new LocalBackend('task-local-shell-rate-test', {
+      auditLogPath,
+      workspaceDir,
+    });
+    await backend.initialize();
+
+    const results = await Promise.allSettled(
+      Array.from({ length: 50 }, (_, index) =>
+        backend.shellExec(`echo ${index}`, {
+          onStderr: () => {},
+          onStdout: () => {},
+        }),
+      ),
+    );
+
+    const rejected = results.filter((result) => result.status === 'rejected');
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    expect(fulfilled).toHaveLength(10);
+    expect(rejected.length).toBeGreaterThan(0);
+    expect(rejected[0]).toMatchObject({
+      reason: expect.objectContaining({
+        message: 'Shell execution rate limit exceeded; max 10 commands per second per task.',
+      }),
+    });
+  });
+});
