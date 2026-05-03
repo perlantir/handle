@@ -91,6 +91,29 @@ describe("session memory", () => {
     );
   });
 
+  it("stores assistant messages only in the conversation session", async () => {
+    const fakeClient = client();
+
+    await appendMessageToZep(
+      {
+        content: "Got it — teal it is!",
+        conversationId: "conversation-1",
+        project: { id: "project-1", memoryScope: "GLOBAL_AND_PROJECT" },
+        role: "ASSISTANT",
+      },
+      fakeClient as never,
+    );
+
+    expect(fakeClient.ensureSession).toHaveBeenCalledTimes(1);
+    expect(fakeClient.ensureSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "conv_conversation-1" }),
+    );
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledTimes(1);
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "conv_conversation-1" }),
+    );
+  });
+
   it("redacts secrets before writing memory messages", async () => {
     const fakeClient = client();
 

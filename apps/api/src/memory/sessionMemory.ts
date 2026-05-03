@@ -126,7 +126,7 @@ export async function appendMessageToZep(
     conversationId: context.conversationId,
     project: context.project,
     userId,
-  });
+  }).filter((session) => context.role === "USER" || session.source === "conversation");
   for (const session of sessions) {
     await client.ensureSession({
       metadata: {
