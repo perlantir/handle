@@ -35,9 +35,9 @@ export interface StoredTrajectoryStep extends TrajectoryStepRecord {
 export interface TrajectoryStore {
   agentRunTrajectory?: {
     findMany?(args: unknown): Promise<unknown[]>;
-    findUnique(args: unknown): Promise<unknown | null>;
-    update(args: unknown): Promise<unknown>;
-    upsert(args: unknown): Promise<unknown>;
+    findUnique?(args: unknown): Promise<unknown | null>;
+    update?(args: unknown): Promise<unknown>;
+    upsert?(args: unknown): Promise<unknown>;
   } | undefined;
   trajectoryTemplate?: {
     create?(args: unknown): Promise<unknown>;
@@ -59,7 +59,7 @@ export async function initializeTrajectory({
   goal: string;
   store?: TrajectoryStore;
 }) {
-  if (!store.agentRunTrajectory) return;
+  if (!store.agentRunTrajectory?.upsert) return;
   await store.agentRunTrajectory.upsert({
     create: {
       agentRunId,
@@ -87,7 +87,7 @@ export async function recordTrajectoryStep({
   step: TrajectoryStepRecord;
   store?: TrajectoryStore;
 }) {
-  if (!store.agentRunTrajectory) return;
+  if (!store.agentRunTrajectory?.findUnique || !store.agentRunTrajectory.update) return;
 
   try {
     const existing = await store.agentRunTrajectory.findUnique({
@@ -122,7 +122,7 @@ export async function completeTrajectory({
   outcomeReason?: string;
   store?: TrajectoryStore;
 }) {
-  if (!store.agentRunTrajectory) return;
+  if (!store.agentRunTrajectory?.findUnique || !store.agentRunTrajectory.update) return;
 
   try {
     const existing = await store.agentRunTrajectory.findUnique({

@@ -6,6 +6,7 @@ import type {
   ConversationSummary,
   CreateTaskResponse,
   MemoryFactSummary,
+  ProcedureTemplateSummary,
   PendingApproval,
   ProjectSummary,
   SendConversationMessageResponse,
@@ -117,6 +118,22 @@ export async function deleteMemorySession({
     const message = await parseApiError(response, 'Failed to delete memory');
     throw new Error(message);
   }
+}
+
+export async function listProcedureTemplates({
+  token,
+}: AuthenticatedRequestInput): Promise<ProcedureTemplateSummary[]> {
+  const response = await fetch(`${apiBaseUrl}/api/memory/procedures`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load procedures');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { procedures?: ProcedureTemplateSummary[] };
+  return body.procedures ?? [];
 }
 
 export async function listActions({

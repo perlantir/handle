@@ -17,6 +17,10 @@ import {
   type MemoryFact,
 } from "../memory/sessionMemory";
 import {
+  findSimilarSuccessfulTrajectories,
+  formatProceduralMemoryContext,
+} from "../memory/proceduralMemory";
+import {
   completeTrajectory,
   failureReasonFromError,
   initializeTrajectory,
@@ -709,7 +713,20 @@ export function createAgentRunner({
         );
         return "";
       });
-      const memoryContext = [formatMemoryContext(recalledMemory), actionContext]
+      const proceduralContext = await findSimilarSuccessfulTrajectories({
+        goal,
+        projectId: project?.id ?? null,
+        store,
+      })
+        .then(formatProceduralMemoryContext)
+        .catch((err) => {
+          logger.warn(
+            { err, projectId: project?.id ?? null, taskId },
+            "Procedural memory recall failed; continuing without procedural context",
+          );
+          return "";
+        });
+      const memoryContext = [formatMemoryContext(recalledMemory), proceduralContext, actionContext]
         .filter((item) => item.trim().length > 0)
         .join("\n\n");
 

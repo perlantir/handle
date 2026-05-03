@@ -135,6 +135,17 @@ export interface MemoryFactSummary {
   validAt?: string | null;
 }
 
+export interface ProcedureTemplateSummary {
+  id: string;
+  name: string;
+  pattern: unknown;
+  successRate: number;
+  usageCount: number;
+  createdFromIds: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export type ActionOutcomeType =
   | 'browser_navigated'
   | 'file_created'

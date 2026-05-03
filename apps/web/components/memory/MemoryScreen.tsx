@@ -1,19 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { MemoryFactSummary, ProjectSummary } from "@handle/shared";
-import { Brain, Circle, List, Network, Search, Trash2 } from "lucide-react";
+import type { MemoryFactSummary, ProcedureTemplateSummary, ProjectSummary } from "@handle/shared";
+import { Brain, Circle, List, Network, Search, Trash2, Workflow } from "lucide-react";
 import { PillButton } from "@/components/design-system";
-import { deleteMemorySession, listMemoryFacts, listProjects } from "@/lib/api";
+import { deleteMemorySession, listMemoryFacts, listProcedureTemplates, listProjects } from "@/lib/api";
 import { useHandleAuth } from "@/lib/handleAuth";
 import { cn } from "@/lib/utils";
 
 type ScopeTab = "all" | "global" | string;
-type ViewMode = "graph" | "list";
+type ViewMode = "graph" | "list" | "procedures";
 
 export function MemoryScreen() {
   const { getToken, isLoaded } = useHandleAuth();
   const [facts, setFacts] = useState<MemoryFactSummary[]>([]);
+  const [procedures, setProcedures] = useState<ProcedureTemplateSummary[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<ScopeTab>("all");
@@ -36,19 +37,22 @@ export function MemoryScreen() {
         token,
         ...(scope !== "all" && scope !== "global" ? { projectId: scope } : {}),
       } as const;
-      const [loadedProjects, memory] = await Promise.all([
+      const [loadedProjects, memory, loadedProcedures] = await Promise.all([
         listProjects({ token }).catch(() => []),
         listMemoryFacts(memoryInput),
+        listProcedureTemplates({ token }).catch(() => []),
       ]);
       if (cancelled) return;
       setProjects(loadedProjects);
       setFacts(memory.facts);
+      setProcedures(loadedProcedures);
       setStatus(memory.status);
       setLoading(false);
     }
     void load().catch(() => {
       if (!cancelled) {
         setFacts([]);
+        setProcedures([]);
         setStatus({ status: "offline", detail: "Memory API unavailable" });
         setLoading(false);
       }
@@ -67,6 +71,16 @@ export function MemoryScreen() {
       ),
     );
   }, [facts, query]);
+
+  const filteredProcedures = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return procedures;
+    return procedures.filter((procedure) =>
+      [procedure.name, JSON.stringify(procedure.pattern)].some((value) =>
+        value.toLowerCase().includes(needle),
+      ),
+    );
+  }, [procedures, query]);
 
   async function deleteFact(fact: MemoryFactSummary) {
     if (!window.confirm(`Delete memory namespace "${fact.sourceLabel}"?`)) return;
@@ -122,6 +136,7 @@ export function MemoryScreen() {
             <div className="flex rounded-[8px] border border-border-subtle bg-bg-canvas p-1">
               <IconTab active={view === "list"} icon={<List className="h-4 w-4" />} label="List" onClick={() => setView("list")} />
               <IconTab active={view === "graph"} icon={<Network className="h-4 w-4" />} label="Graph" onClick={() => setView("graph")} />
+              <IconTab active={view === "procedures"} icon={<Workflow className="h-4 w-4" />} label="Procedures" onClick={() => setView("procedures")} />
             </div>
           </div>
 
@@ -132,7 +147,9 @@ export function MemoryScreen() {
             </div>
           )}
 
-          {view === "list" ? (
+          {view === "procedures" ? (
+            <ProceduresTable loading={loading} procedures={filteredProcedures} />
+          ) : view === "list" ? (
             <MemoryTable facts={filteredFacts} loading={loading} onDelete={deleteFact} onSelect={setSelected} />
           ) : (
             <MemoryGraph facts={filteredFacts} onSelect={setSelected} />
@@ -264,6 +281,48 @@ function MemoryGraph({ facts, onSelect }: { facts: MemoryFactSummary[]; onSelect
   );
 }
 
+function ProceduresTable({
+  loading,
+  procedures,
+}: {
+  loading: boolean;
+  procedures: ProcedureTemplateSummary[];
+}) {
+  if (loading) return <div className="text-[13px] text-text-secondary">Loading procedures...</div>;
+  if (procedures.length === 0) {
+    return <div className="text-[13px] text-text-secondary">No procedural memory templates found.</div>;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-[8px] border border-border-subtle bg-bg-canvas">
+      <div className="grid grid-cols-[1fr_110px_110px_160px] border-b border-border-subtle px-4 py-2 text-[11px] uppercase tracking-[0.04em] text-text-muted">
+        <div>Procedure</div>
+        <div>Usage</div>
+        <div>Success</div>
+        <div>Updated</div>
+      </div>
+      {procedures.map((procedure) => (
+        <div
+          className="grid grid-cols-[1fr_110px_110px_160px] items-start border-b border-border-subtle px-4 py-3 text-[13px] last:border-b-0"
+          key={procedure.id}
+        >
+          <div className="min-w-0 pr-4">
+            <div className="font-medium text-text-primary">{procedure.name}</div>
+            <div className="mt-1 max-h-16 overflow-hidden text-[12px] leading-[17px] text-text-secondary">
+              {formatProcedurePattern(procedure.pattern)}
+            </div>
+          </div>
+          <div className="text-text-secondary">{procedure.usageCount}</div>
+          <div className="text-text-secondary">{Math.round(procedure.successRate * 100)}%</div>
+          <div className="text-text-secondary">
+            {procedure.updatedAt ? new Date(procedure.updatedAt).toLocaleString() : "Unknown"}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DetailPanel({ fact }: { fact: MemoryFactSummary | null }) {
   if (!fact) {
     return <div className="text-[13px] leading-[19px] text-text-muted">Select a memory fact to inspect details.</div>;
@@ -292,6 +351,19 @@ function DetailPanel({ fact }: { fact: MemoryFactSummary | null }) {
       </div>
     </div>
   );
+}
+
+function formatProcedurePattern(pattern: unknown) {
+  if (!Array.isArray(pattern)) return "Pattern unavailable";
+  return pattern
+    .slice(0, 4)
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
+      const record = item as { subgoal?: unknown; toolName?: unknown };
+      return `${String(record.subgoal ?? "Step")} (${String(record.toolName ?? "tool")})`;
+    })
+    .filter(Boolean)
+    .join(" -> ");
 }
 
 function formatDate(value: string) {

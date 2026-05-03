@@ -39,6 +39,25 @@ async function mockMemoryApi(page: Page) {
       status: { provider: "self-hosted", status: "online" },
     });
   });
+  await page.route("**/api/memory/procedures", async (route) => {
+    await jsonRoute(route, 200, {
+      procedures: [
+        {
+          createdAt: "2026-05-03T00:00:00.000Z",
+          createdFromIds: ["run-1", "run-2"],
+          id: "procedure-1",
+          name: "Procedure: python script",
+          pattern: [
+            { subgoal: "Created script.py", toolName: "file_write" },
+            { subgoal: "Ran script.py", toolName: "shell_exec" },
+          ],
+          successRate: 1,
+          updatedAt: "2026-05-03T00:00:00.000Z",
+          usageCount: 2,
+        },
+      ],
+    });
+  });
   return { deletes };
 }
 
@@ -54,6 +73,9 @@ test.describe("Memory page", () => {
     await expect(page.getByText(/since/).first()).toBeVisible();
     await page.getByRole("button", { name: "Graph" }).click();
     await expect(page.getByText("Global").first()).toBeVisible();
+    await page.getByRole("button", { name: "Procedures" }).click();
+    await expect(page.getByText("Procedure: python script")).toBeVisible();
+    await expect(page.getByText("Created script.py")).toBeVisible();
   });
 
   test("deletes a memory namespace from the list", async ({ page }) => {
