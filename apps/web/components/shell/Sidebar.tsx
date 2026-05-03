@@ -3,8 +3,17 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { ConversationSummary, ProjectSummary } from '@handle/shared';
-import { Calendar, Check, Folder, Home, Pencil, Plug, Plus, Settings, Sparkles, X } from 'lucide-react';
-import { createProject, listConversations, listProjects, pickProjectFolder, updateProject } from '@/lib/api';
+import { Calendar, Check, Folder, Home, MoreHorizontal, Pencil, Plug, Plus, Settings, Sparkles, Trash2, X } from 'lucide-react';
+import {
+  createProject,
+  deleteConversation,
+  deleteProject,
+  listConversations,
+  listProjects,
+  pickProjectFolder,
+  updateConversation,
+  updateProject,
+} from '@/lib/api';
 import { Modal, PillButton } from '@/components/design-system';
 import { useHandleAuth } from '@/lib/handleAuth';
 import { cn } from '@/lib/utils';
@@ -23,11 +32,14 @@ export function Sidebar() {
   const { getToken, isLoaded } = useHandleAuth();
   const searchParams = useSearchParams();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [conversationsByProject, setConversationsByProject] = useState<Record<string, ConversationSummary[]>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProjectDraft>(() => defaultProjectDraft());
+  const [openMenu, setOpenMenu] = useState<{ id: string; type: 'conversation' | 'project' } | null>(null);
+  const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null);
+  const [conversationRenameValue, setConversationRenameValue] = useState('');
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
@@ -38,39 +50,33 @@ export function Sidebar() {
     let cancelled = false;
 
     getToken()
-      .then((token) => listProjects({ token }))
-      .then((loadedProjects) => {
-        if (!cancelled) setProjects(loadedProjects);
+      .then(async (token) => {
+        const loadedProjects = await listProjects({ token });
+        const conversations = await Promise.all(
+          loadedProjects.map(async (project) => [
+            project.id,
+            await listConversations({ projectId: project.id, token }).catch(() => []),
+          ] as const),
+        );
+        return { conversations: Object.fromEntries(conversations), loadedProjects };
+      })
+      .then(({ conversations, loadedProjects }) => {
+        if (!cancelled) {
+          setProjects(loadedProjects);
+          setConversationsByProject(conversations);
+        }
       })
       .catch(() => {
-        if (!cancelled) setProjects([]);
+        if (!cancelled) {
+          setProjects([]);
+          setConversationsByProject({});
+        }
       });
 
     return () => {
       cancelled = true;
     };
   }, [getToken, isLoaded]);
-
-  useEffect(() => {
-    if (!isLoaded || !activeProjectId) {
-      setConversations([]);
-      return;
-    }
-    let cancelled = false;
-
-    getToken()
-      .then((token) => listConversations({ projectId: activeProjectId, token }))
-      .then((loadedConversations) => {
-        if (!cancelled) setConversations(loadedConversations);
-      })
-      .catch(() => {
-        if (!cancelled) setConversations([]);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeProjectId, getToken, isLoaded]);
 
   async function handleCreateProject() {
     setCreating(true);
@@ -89,6 +95,7 @@ export function Sidebar() {
       }
       const project = await createProject({ input, token });
       setProjects((current) => [...current, project]);
+      setConversationsByProject((current) => ({ ...current, [project.id]: [] }));
       setCreateOpen(false);
       setDraft(defaultProjectDraft());
       window.location.href = `/?projectId=${project.id}`;
@@ -118,6 +125,57 @@ export function Sidebar() {
     setRenamingProjectId(null);
   }
 
+  async function saveConversationRename(conversation: ConversationSummary) {
+    const title = conversationRenameValue.trim();
+    if (!title || title === conversation.title) {
+      setRenamingConversationId(null);
+      return;
+    }
+
+    const token = await getToken();
+    const updated = await updateConversation({
+      conversationId: conversation.id,
+      title,
+      token,
+    });
+    setConversationsByProject((current) => ({
+      ...current,
+      [conversation.projectId]: (current[conversation.projectId] ?? []).map((item) =>
+        item.id === updated.id ? { ...item, ...updated } : item,
+      ),
+    }));
+    setRenamingConversationId(null);
+  }
+
+  async function removeProject(project: ProjectSummary) {
+    if (!window.confirm(`Delete project "${project.name}" and all of its chats?`)) return;
+    const token = await getToken();
+    await deleteProject({ projectId: project.id, token });
+    setProjects((current) => current.filter((item) => item.id !== project.id));
+    setConversationsByProject((current) => {
+      const next = { ...current };
+      delete next[project.id];
+      return next;
+    });
+    setOpenMenu(null);
+    if (project.id === activeProjectId) {
+      const nextProject = projects.find((item) => item.id !== project.id);
+      window.location.href = nextProject ? `/?projectId=${nextProject.id}` : '/';
+    }
+  }
+
+  async function removeConversation(conversation: ConversationSummary) {
+    const title = conversation.title ?? 'New conversation';
+    if (!window.confirm(`Delete chat "${title}"?`)) return;
+    const token = await getToken();
+    await deleteConversation({ conversationId: conversation.id, token });
+    setConversationsByProject((current) => ({
+      ...current,
+      [conversation.projectId]: (current[conversation.projectId] ?? []).filter((item) => item.id !== conversation.id),
+    }));
+    setOpenMenu(null);
+  }
+
   return (
     <aside className="flex w-[244px] shrink-0 flex-col border-r border-border-subtle bg-bg-canvas">
       <div className="flex h-16 items-center px-6">
@@ -142,8 +200,10 @@ export function Sidebar() {
             </button>
           </div>
           <div className="flex flex-col gap-1">
-            {projects.map((project) => (
-              <div key={project.id}>
+            {projects.map((project) => {
+              const projectConversations = conversationsByProject[project.id] ?? [];
+              return (
+              <div key={project.id} className="relative">
                 {renamingProjectId === project.id ? (
                   <form
                     className="flex items-center gap-1 rounded-[8px] bg-bg-subtle px-2 py-1.5"
@@ -171,51 +231,148 @@ export function Sidebar() {
                       <X className="h-3.5 w-3.5" />
                     </button>
                   </form>
-                ) : project.id === activeProjectId ? (
-                  <button
-                    className={cn(
-                      'group flex w-full items-center gap-2 rounded-[8px] bg-bg-subtle px-3 py-2 text-left text-[12.5px] text-text-primary',
-                      project.permissionMode === 'FULL_ACCESS' && 'text-status-waiting',
-                    )}
-                    onClick={() => {
-                      setRenamingProjectId(project.id);
-                      setRenameValue(project.name);
-                    }}
-                    type="button"
-                  >
-                    <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                    <Pencil className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
-                  </button>
                 ) : (
-                  <a
-                    className={cn(
-                      'block truncate rounded-[8px] px-3 py-2 text-[12.5px] text-text-secondary transition-colors duration-fast hover:bg-bg-subtle hover:text-text-primary',
-                      project.permissionMode === 'FULL_ACCESS' && 'text-status-waiting',
+                  <div className="group flex items-center gap-1">
+                    <a
+                      className={cn(
+                        'min-w-0 flex-1 truncate rounded-[8px] px-3 py-2 text-[12.5px] transition-colors duration-fast hover:bg-bg-subtle hover:text-text-primary',
+                        project.id === activeProjectId ? 'bg-bg-subtle text-text-primary' : 'text-text-secondary',
+                        project.permissionMode === 'FULL_ACCESS' && 'text-status-waiting',
+                      )}
+                      href={`/?projectId=${project.id}`}
+                    >
+                      {project.name}
+                    </a>
+                    <button
+                      aria-label={`Project actions for ${project.name}`}
+                      className="flex h-7 w-7 items-center justify-center rounded-pill text-text-tertiary opacity-70 hover:bg-bg-subtle hover:text-text-primary group-hover:opacity-100"
+                      onClick={() =>
+                        setOpenMenu((current) =>
+                          current?.type === 'project' && current.id === project.id
+                            ? null
+                            : { id: project.id, type: 'project' },
+                        )
+                      }
+                      type="button"
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                    {openMenu?.type === 'project' && openMenu.id === project.id && (
+                      <div className="absolute right-1 top-8 z-20 grid min-w-[132px] gap-1 rounded-[8px] border border-border-subtle bg-bg-surface p-1 shadow-lg">
+                        <button
+                          className="flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-text-secondary hover:bg-bg-subtle hover:text-text-primary"
+                          onClick={() => {
+                            setOpenMenu(null);
+                            setRenamingProjectId(project.id);
+                            setRenameValue(project.name);
+                          }}
+                          type="button"
+                        >
+                          <Pencil className="h-3 w-3" />
+                          Rename
+                        </button>
+                        <button
+                          className="flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-status-error hover:bg-bg-subtle"
+                          onClick={() => void removeProject(project)}
+                          type="button"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete
+                        </button>
+                      </div>
                     )}
-                    href={`/?projectId=${project.id}`}
-                  >
-                    {project.name}
-                  </a>
+                  </div>
                 )}
-                {project.id === activeProjectId && conversations.length > 0 && (
+                {projectConversations.length > 0 && (
                   <div className="ml-3 mt-1 flex flex-col gap-0.5 border-l border-border-subtle pl-2">
-                    {conversations.slice(0, 5).map((conversation) => (
-                      <a
-                        className="truncate rounded-[6px] px-2 py-1 text-[11.5px] text-text-tertiary hover:bg-bg-subtle hover:text-text-secondary"
-                        href={
-                          conversation.latestAgentRunId
-                            ? `/tasks/${conversation.latestAgentRunId}`
-                            : `/?projectId=${project.id}&conversationId=${conversation.id}`
-                        }
-                        key={conversation.id}
-                      >
-                        {conversation.title ?? 'New conversation'}
-                      </a>
+                    {projectConversations.map((conversation) => (
+                      <div className="group/conversation relative flex items-center gap-1" key={conversation.id}>
+                        {renamingConversationId === conversation.id ? (
+                          <form
+                            className="flex min-w-0 flex-1 items-center gap-1 rounded-[6px] bg-bg-subtle px-2 py-1"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void saveConversationRename(conversation);
+                            }}
+                          >
+                            <input
+                              aria-label="Chat title"
+                              autoFocus
+                              className="min-w-0 flex-1 bg-transparent text-[11.5px] text-text-primary outline-none"
+                              onChange={(event) => setConversationRenameValue(event.target.value)}
+                              value={conversationRenameValue}
+                            />
+                            <button aria-label="Save chat title" className="text-status-success" type="submit">
+                              <Check className="h-3 w-3" />
+                            </button>
+                            <button
+                              aria-label="Cancel chat rename"
+                              className="text-text-tertiary"
+                              onClick={() => setRenamingConversationId(null)}
+                              type="button"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </form>
+                        ) : (
+                          <>
+                            <a
+                              className="min-w-0 flex-1 truncate rounded-[6px] px-2 py-1 text-[11.5px] text-text-tertiary hover:bg-bg-subtle hover:text-text-secondary"
+                              href={
+                                conversation.latestAgentRunId
+                                  ? `/tasks/${conversation.latestAgentRunId}`
+                                  : `/?projectId=${project.id}&conversationId=${conversation.id}`
+                              }
+                            >
+                              {conversation.title ?? 'New conversation'}
+                            </a>
+                            <button
+                              aria-label={`Chat actions for ${conversation.title ?? 'New conversation'}`}
+                              className="flex h-6 w-6 items-center justify-center rounded-pill text-text-tertiary opacity-0 hover:bg-bg-subtle hover:text-text-primary group-hover/conversation:opacity-100"
+                              onClick={() =>
+                                setOpenMenu((current) =>
+                                  current?.type === 'conversation' && current.id === conversation.id
+                                    ? null
+                                    : { id: conversation.id, type: 'conversation' },
+                                )
+                              }
+                              type="button"
+                            >
+                              <MoreHorizontal className="h-3 w-3" />
+                            </button>
+                            {openMenu?.type === 'conversation' && openMenu.id === conversation.id && (
+                              <div className="absolute right-0 top-6 z-20 grid min-w-[124px] gap-1 rounded-[8px] border border-border-subtle bg-bg-surface p-1 shadow-lg">
+                                <button
+                                  className="flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-text-secondary hover:bg-bg-subtle hover:text-text-primary"
+                                  onClick={() => {
+                                    setOpenMenu(null);
+                                    setRenamingConversationId(conversation.id);
+                                    setConversationRenameValue(conversation.title ?? 'New conversation');
+                                  }}
+                                  type="button"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                  Rename
+                                </button>
+                                <button
+                                  className="flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-status-error hover:bg-bg-subtle"
+                                  onClick={() => void removeConversation(conversation)}
+                                  type="button"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </nav>

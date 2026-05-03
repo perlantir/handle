@@ -12,11 +12,13 @@ function createStore(): ProjectRouteStore {
     },
     conversation: {
       create: vi.fn().mockResolvedValue({ id: "conversation-test" }),
+      delete: vi.fn().mockResolvedValue({}),
       findFirst: vi.fn().mockResolvedValue({
         id: "conversation-test",
         project: { defaultBackend: "LOCAL" },
       }),
       findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn().mockResolvedValue({ id: "conversation-test", title: "Renamed chat" }),
     },
     message: {
       create: vi.fn().mockResolvedValue({ id: "message-test" }),
@@ -219,5 +221,26 @@ describe("projects routes", () => {
         title: "Follow-up",
       }),
     ]);
+  });
+
+  it("renames and deletes conversations for sidebar chat management", async () => {
+    const store = createStore();
+    const { app } = createApp(store);
+
+    const rename = await request(app)
+      .put("/api/conversations/conversation-test")
+      .send({ title: "Renamed chat" })
+      .expect(200);
+
+    expect(rename.body.conversation).toEqual({ id: "conversation-test", title: "Renamed chat" });
+    expect(store.conversation.update).toHaveBeenCalledWith({
+      data: { title: "Renamed chat" },
+      where: { id: "conversation-test" },
+    });
+
+    await request(app).delete("/api/conversations/conversation-test").expect(204);
+    expect(store.conversation.delete).toHaveBeenCalledWith({
+      where: { id: "conversation-test" },
+    });
   });
 });

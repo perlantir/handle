@@ -226,6 +226,21 @@ export async function updateProject({
   return body.project;
 }
 
+export async function deleteProject({
+  projectId,
+  token,
+}: AuthenticatedRequestInput & { projectId: string }): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/projects/${projectId}`, {
+    headers: authHeaders(token),
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to delete project');
+    throw new Error(message);
+  }
+}
+
 export async function listConversations({
   projectId,
   token,
@@ -262,6 +277,42 @@ export async function createConversation({
   const body = (await response.json()) as { conversation?: ConversationSummary };
   if (!body.conversation) throw new Error('Conversation create returned no conversation');
   return body.conversation;
+}
+
+export async function updateConversation({
+  conversationId,
+  title,
+  token,
+}: AuthenticatedRequestInput & { conversationId: string; title: string }): Promise<ConversationSummary> {
+  const response = await fetch(`${apiBaseUrl}/api/conversations/${conversationId}`, {
+    body: JSON.stringify({ title }),
+    headers: authHeaders(token),
+    method: 'PUT',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to rename chat');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { conversation?: ConversationSummary };
+  if (!body.conversation) throw new Error('Conversation update returned no conversation');
+  return body.conversation;
+}
+
+export async function deleteConversation({
+  conversationId,
+  token,
+}: AuthenticatedRequestInput & { conversationId: string }): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/conversations/${conversationId}`, {
+    headers: authHeaders(token),
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to delete chat');
+    throw new Error(message);
+  }
 }
 
 export async function listMessages({

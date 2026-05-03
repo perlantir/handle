@@ -34,6 +34,10 @@ const createConversationSchema = z.object({
   title: z.string().min(1).max(160).optional(),
 });
 
+const updateConversationSchema = z.object({
+  title: z.string().min(1).max(160),
+});
+
 const sendMessageSchema = z.object({
   backend: z.enum(["e2b", "local"]).optional(),
   content: z.string().min(1).max(10_000),
@@ -51,8 +55,10 @@ export interface ProjectRouteStore {
   };
   conversation: {
     create(args: unknown): Promise<{ id: string }>;
+    delete(args: unknown): Promise<unknown>;
     findFirst(args: unknown): Promise<unknown | null>;
     findMany(args: unknown): Promise<unknown[]>;
+    update(args: unknown): Promise<unknown>;
   };
   message: {
     create(args: unknown): Promise<{ id: string }>;
@@ -388,6 +394,40 @@ export function createProjectsRouter({
         where: { conversationId: req.params.conversationId },
       });
       return res.json({ messages });
+    }),
+  );
+
+  router.put(
+    "/conversations/:conversationId",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const parsed = updateConversationSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      const conversation = await store.conversation.update({
+        data: { title: parsed.data.title },
+        where: { id: req.params.conversationId },
+      });
+      return res.json({ conversation });
+    }),
+  );
+
+  router.delete(
+    "/conversations/:conversationId",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      await store.conversation.delete({
+        where: { id: req.params.conversationId },
+      });
+      return res.status(204).end();
     }),
   );
 

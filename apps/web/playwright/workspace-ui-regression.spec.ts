@@ -78,6 +78,10 @@ async function mockWorkspace(page: Page, taskId: string) {
     });
   });
 
+  await page.route("**/api/projects/*/conversations", async (route) => {
+    await jsonRoute(route, 200, { conversations: [] });
+  });
+
   await page.route("**/api/settings/providers", async (route) => {
     await jsonRoute(route, 200, {
       providers: [
@@ -170,6 +174,134 @@ async function mockHomeProjectControls(page: Page) {
   return { requests };
 }
 
+async function mockSidebarManagement(page: Page) {
+  const requests: Array<{ body: unknown; method: string; path: string }> = [];
+  let projects = [
+    {
+      browserMode: "SEPARATE_PROFILE",
+      customScopePath: null as string | null,
+      defaultBackend: "LOCAL",
+      id: "project-alpha",
+      name: "Personal",
+      permissionMode: "ASK",
+      workspaceScope: "DEFAULT_WORKSPACE",
+    },
+    {
+      browserMode: "SEPARATE_PROFILE",
+      customScopePath: null as string | null,
+      defaultBackend: "E2B",
+      id: "project-beta",
+      name: "Website Work",
+      permissionMode: "ASK",
+      workspaceScope: "DEFAULT_WORKSPACE",
+    },
+  ];
+  let conversations: Record<string, Array<{ id: string; latestAgentRunId: string | null; projectId: string; title: string }>> = {
+    "project-alpha": [
+      { id: "chat-alpha", latestAgentRunId: "run-alpha", projectId: "project-alpha", title: "Prime numbers" },
+      { id: "chat-beta", latestAgentRunId: "run-beta", projectId: "project-alpha", title: "HN scraper" },
+    ],
+    "project-beta": [
+      { id: "chat-gamma", latestAgentRunId: "run-gamma", projectId: "project-beta", title: "Landing page" },
+    ],
+  };
+
+  await page.route("**/api/settings/execution", async (route) => {
+    await jsonRoute(route, 200, {
+      execution: {
+        cleanupPolicy: "keep-all",
+        defaultBackend: "local",
+        updatedAt: "2026-05-02T00:00:00.000Z",
+        workspaceBaseDir: "/Users/perlantir/Documents/Handle/workspaces",
+      },
+    });
+  });
+  await page.route("**/api/settings/providers", async (route) => {
+    await jsonRoute(route, 200, { providers: [] });
+  });
+  await page.route("**/api/projects**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    const rawBody = request.postData();
+    const body = rawBody ? JSON.parse(rawBody) : null;
+    requests.push({ body, method, path });
+
+    const conversationMatch = path.match(/^\/api\/projects\/([^/]+)\/conversations$/);
+    if (method === "GET" && conversationMatch?.[1]) {
+      await jsonRoute(route, 200, { conversations: conversations[conversationMatch[1]] ?? [] });
+      return;
+    }
+
+    const projectMatch = path.match(/^\/api\/projects\/([^/]+)$/);
+    if (method === "PUT" && projectMatch?.[1]) {
+      projects = projects.map((project) =>
+        project.id === projectMatch[1] ? { ...project, ...(body as Partial<(typeof projects)[number]>) } : project,
+      );
+      await jsonRoute(route, 200, { project: projects.find((project) => project.id === projectMatch[1]) });
+      return;
+    }
+    if (method === "DELETE" && projectMatch?.[1]) {
+      projects = projects.filter((project) => project.id !== projectMatch[1]);
+      delete conversations[projectMatch[1]];
+      await route.fulfill({ status: 204 });
+      return;
+    }
+
+    if (method === "GET" && path === "/api/projects") {
+      await jsonRoute(route, 200, { projects });
+      return;
+    }
+
+    await jsonRoute(route, 404, { error: "Unexpected project route" });
+  });
+
+  await page.route("**/api/conversations/*", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    const rawBody = request.postData();
+    const body = rawBody ? JSON.parse(rawBody) : null;
+    requests.push({ body, method, path });
+    const conversationId = path.split("/").at(-1);
+    if (!conversationId) {
+      await jsonRoute(route, 404, { error: "Missing conversation id" });
+      return;
+    }
+
+    if (method === "PUT") {
+      let updated = null;
+      conversations = Object.fromEntries(
+        Object.entries(conversations).map(([projectId, items]) => [
+          projectId,
+          items.map((conversation) => {
+            if (conversation.id !== conversationId) return conversation;
+            updated = { ...conversation, title: body.title };
+            return updated;
+          }),
+        ]),
+      );
+      await jsonRoute(route, 200, { conversation: updated });
+      return;
+    }
+
+    if (method === "DELETE") {
+      conversations = Object.fromEntries(
+        Object.entries(conversations).map(([projectId, items]) => [
+          projectId,
+          items.filter((conversation) => conversation.id !== conversationId),
+        ]),
+      );
+      await route.fulfill({ status: 204 });
+      return;
+    }
+
+    await jsonRoute(route, 404, { error: "Unexpected conversation route" });
+  });
+
+  return { requests };
+}
+
 test.describe("Workspace UI regressions", () => {
   test("keeps Chat selected, dedupes final message, shows project title, and resizes panes", async ({
     page,
@@ -236,5 +368,46 @@ test.describe("Project control regressions", () => {
         method: "PUT",
         path: "/api/projects/project-ui",
       });
+  });
+
+  test("shows all project chat titles and supports project/chat rename and delete menus", async ({ page }) => {
+    const { requests } = await mockSidebarManagement(page);
+    page.on("dialog", (dialog) => void dialog.accept());
+
+    await page.goto("/?projectId=project-alpha");
+
+    await expect(page.getByText("Personal")).toBeVisible();
+    await expect(page.getByText("Website Work")).toBeVisible();
+    await expect(page.getByText("Prime numbers")).toBeVisible();
+    await expect(page.getByText("HN scraper")).toBeVisible();
+    await expect(page.getByText("Landing page")).toBeVisible();
+
+    await page.getByLabel("Project actions for Personal").click();
+    await page.getByRole("button", { exact: true, name: "Rename" }).click();
+    await page.getByRole("textbox", { name: "Project name" }).fill("Renamed Personal");
+    await page.getByLabel("Save project name").click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({ body: { name: "Renamed Personal" }, method: "PUT", path: "/api/projects/project-alpha" });
+
+    await page.getByLabel("Chat actions for Prime numbers").click();
+    await page.getByRole("button", { exact: true, name: "Rename" }).click();
+    await page.getByRole("textbox", { name: "Chat title" }).fill("Prime checklist");
+    await page.getByLabel("Save chat title").click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({ body: { title: "Prime checklist" }, method: "PUT", path: "/api/conversations/chat-alpha" });
+
+    await page.getByLabel("Chat actions for HN scraper").click();
+    await page.getByRole("button", { exact: true, name: "Delete" }).click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({ body: null, method: "DELETE", path: "/api/conversations/chat-beta" });
+
+    await page.getByLabel("Project actions for Website Work").click();
+    await page.getByRole("button", { exact: true, name: "Delete" }).click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({ body: null, method: "DELETE", path: "/api/projects/project-beta" });
   });
 });
