@@ -199,12 +199,64 @@ async function run() {
       role: "USER",
     });
     await delay(500);
-    const result = await forgetMemoryForProject({ project, scope: "project" });
-    assert(result.deletedSessions >= 2, `Expected both layers deleted, got ${result.deletedSessions}`);
+    const result = await forgetMemoryForProject({
+      project,
+      query: `User's favorite color is ${color}.`,
+      scope: "project",
+    });
+    assert(result.touchedSessions >= 2, `Expected both layers touched, got ${result.touchedSessions}`);
+    assert(result.deletedFacts >= 2, `Expected both facts deleted, got ${result.deletedFacts}`);
     const projectFacts = await factMessages(client, project);
     const globalFacts = await globalMessages(client);
     assert(!projectFacts.some((message) => message.content.includes(color)), "Project layer still has forgotten fact");
     assert(!globalFacts.some((message) => message.content.includes(color)), "Global layer still has forgotten fact");
+    return;
+  }
+
+  if (scenario === "forget-only-matches") {
+    const project = { id: `${scenario}-${suffix}`, memoryScope: "GLOBAL_AND_PROJECT" };
+    const facts = [
+      `My favorite color is teal-${suffix}`,
+      `Remember that my project is named Handle-${suffix}`,
+      `I drive a Honda Civic-${suffix}`,
+      `My favorite season is spring-${suffix}`,
+      `I prefer concise updates-${suffix}`,
+    ];
+    for (const [index, content] of facts.entries()) {
+      await appendMessageToZep({
+        content,
+        conversationId: `${scenario}-conversation-${suffix}-${index}`,
+        project,
+        role: "USER",
+      });
+    }
+    await delay(1000);
+    const result = await forgetMemoryForProject({
+      project,
+      query: `User drives a Honda Civic-${suffix}.`,
+      scope: "all",
+    });
+    assert(result.touchedSessions === 2, `Expected 2 touched sessions, got ${result.touchedSessions}`);
+    assert(result.deletedFacts === 2, `Expected one fact from each layer deleted, got ${result.deletedFacts}`);
+    const projectFacts = await factMessages(client, project);
+    const globalFacts = await globalMessages(client);
+    const allFacts = [...projectFacts, ...globalFacts].map((message) => message.content);
+    assert(!allFacts.some((content) => content.includes(`Honda Civic-${suffix}`)), `Forgotten car fact remains: ${JSON.stringify(allFacts)}`);
+    for (const expected of [
+      `teal-${suffix}`,
+      `Handle-${suffix}`,
+      `spring-${suffix}`,
+      `concise updates-${suffix}`,
+    ]) {
+      assert(
+        projectFacts.some((message) => message.content.includes(expected)),
+        `Project layer lost unrelated fact ${expected}: ${JSON.stringify(projectFacts.map((message) => message.content))}`,
+      );
+      assert(
+        globalFacts.some((message) => message.content.includes(expected)),
+        `Global layer lost unrelated fact ${expected}: ${JSON.stringify(globalFacts.map((message) => message.content))}`,
+      );
+    }
     return;
   }
 

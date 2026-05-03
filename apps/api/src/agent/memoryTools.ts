@@ -32,7 +32,7 @@ const forgetInput = z.object({
   scope: z
     .enum(["project", "global", "all"])
     .describe(
-      "Which memory namespace to delete. In GLOBAL_AND_PROJECT projects, Handle expands any value to both project and global namespaces so the fact is fully forgotten.",
+      "Which memory layer to search. In GLOBAL_AND_PROJECT projects, Handle expands any value to both project and global layers so the matching fact is fully forgotten.",
     ),
 });
 
@@ -177,7 +177,7 @@ export function createMemoryToolDefinitions(): ToolDefinition[] {
     {
       backendSupport: { e2b: true, local: true },
       description:
-        "Forget remembered information. This requires approval and currently deletes the selected memory namespace for the active project/global scope.",
+        "Forget remembered information. This requires approval and deletes only facts matching the query in the active project/global memory layer.",
       inputSchema: forgetInput,
       name: "memory_forget",
       requiresApproval: true,
@@ -212,14 +212,19 @@ export function createMemoryToolDefinitions(): ToolDefinition[] {
 
         const result = await forgetMemoryForProject({
           project: context.memoryProject,
+          query: parsed.query,
           scope: parsed.scope,
         });
-        const message = `Forgot memory namespace(s): ${result.deletedSessions}.`;
+        const message = `Forgot ${result.deletedFacts} fact(s).`;
         emitMemoryToolResult(context, callId, message);
         await appendActionLog({
           ...actionContext(context),
           description: `Forgot memory matching ${parsed.query}`,
-          metadata: { deletedSessions: result.deletedSessions, scope: parsed.scope },
+          metadata: {
+            deletedFacts: result.deletedFacts,
+            scope: parsed.scope,
+            touchedSessions: result.touchedSessions,
+          },
           outcomeType: "memory_forgotten",
           reversible: false,
           target: parsed.query,

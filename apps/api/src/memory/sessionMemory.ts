@@ -340,6 +340,10 @@ export async function getRelevantMemoryForTask(
     });
     if (!search.ok || !search.value) continue;
     const stored = await client.getSessionMemory({ sessionId: session.id });
+    const items =
+      search.value.length > 0
+        ? search.value
+        : fallbackStoredMemoryMatches(context.goal, stored.ok ? stored.value ?? [] : [], 6);
     const storedByContent =
       stored.ok && stored.value
         ? new Map(
@@ -350,7 +354,7 @@ export async function getRelevantMemoryForTask(
           )
         : new Map<string, ZepMemoryMessage>();
     results.push(
-      ...search.value.map((item) =>
+      ...items.map((item) =>
         memoryFactFromSearch(
           mergeSearchMetadataFromStoredMessage(item, storedByContent),
           session.source,
@@ -525,13 +529,14 @@ function containsRedactionMarker(content: string) {
 export async function forgetMemoryForProject(
   context: {
     project?: MemoryProjectContext | null | undefined;
+    query: string;
     scope?: "all" | "global" | "project";
     userId?: string | null | undefined;
   },
   client: HandleZepClient = getZepClient(),
 ) {
-  if (!context.project) return { deletedSessions: 0 };
-  if (effectiveMemoryScope(context.project) === "NONE") return { deletedSessions: 0 };
+  if (!context.project) return { deletedFacts: 0, touchedSessions: 0 };
+  if (effectiveMemoryScope(context.project) === "NONE") return { deletedFacts: 0, touchedSessions: 0 };
 
   const userId = context.userId ?? memoryUserId();
   const requestedScope =
@@ -547,12 +552,32 @@ export async function forgetMemoryForProject(
       session.source === scope,
   );
 
-  let deletedSessions = 0;
+  let deletedFacts = 0;
+  let touchedSessions = 0;
   for (const session of sessions) {
-    const result = await client.deleteSessionMemory({ sessionId: session.id });
-    if (result.ok) deletedSessions += 1;
+    const existing = await client.getSessionMemory({ sessionId: session.id });
+    if (!existing.ok || !existing.value || existing.value.length === 0) continue;
+
+    const remaining: ZepMemoryMessage[] = [];
+    let sessionDeletedFacts = 0;
+    for (const message of existing.value) {
+      if (memoryMatchesForgetQuery(message.content, context.query)) {
+        sessionDeletedFacts += 1;
+      } else {
+        remaining.push(message);
+      }
+    }
+    if (sessionDeletedFacts === 0) continue;
+
+    const deleteResult = await client.deleteSessionMemory({ sessionId: session.id });
+    if (!deleteResult.ok) continue;
+    if (remaining.length > 0) {
+      await client.addMemoryMessages({ messages: remaining, sessionId: session.id });
+    }
+    deletedFacts += sessionDeletedFacts;
+    touchedSessions += 1;
   }
-  return { deletedSessions };
+  return { deletedFacts, touchedSessions };
 }
 
 export function formatMemoryContext(facts: MemoryFact[]) {
@@ -574,6 +599,16 @@ function emitMemoryStatus(taskId: string, status: { detail?: string; provider: "
     ...(status.detail ? { detail: redactSecrets(status.detail) } : {}),
     timestamp: new Date().toISOString(),
   });
+}
+
+function memoryMatchesForgetQuery(content: string, query: string) {
+  const contentKey = normalizeMemoryContentKey(content);
+  const queryKey = normalizeMemoryContentKey(query);
+  if (!contentKey || !queryKey) return false;
+  if (contentKey === queryKey) return true;
+  if (queryKey.length >= 16 && contentKey.includes(queryKey)) return true;
+  if (contentKey.length >= 16 && queryKey.includes(contentKey)) return true;
+  return false;
 }
 
 function memoryFactFromSearch(
@@ -602,8 +637,8 @@ function mergeSearchMetadataFromStoredMessage(
   return {
     ...item,
     metadata: {
-      ...stored.metadata,
       ...item.metadata,
+      ...stored.metadata,
     },
   };
 }
@@ -616,6 +651,46 @@ function dedupeFacts(facts: MemoryFact[]) {
     seen.add(key);
     return true;
   });
+}
+
+function fallbackStoredMemoryMatches(
+  goal: string,
+  messages: ZepMemoryMessage[],
+  limit: number,
+): ZepMemorySearchResult[] {
+  const goalTokens = memorySearchTokens(goal);
+  if (goalTokens.size === 0) return [];
+  return messages
+    .map((message) => {
+      const contentTokens = memorySearchTokens(message.content);
+      const overlap = [...goalTokens].filter((token) => contentTokens.has(token)).length;
+      const bitemporalBoost =
+        goalTokens.has("live") &&
+        message.metadata?.bitemporalKey === "residence"
+          ? 1
+          : 0;
+      return { message, score: overlap + bitemporalBoost };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ message, score }) => ({
+      content: message.content,
+      ...(message.metadata ? { metadata: message.metadata } : {}),
+      role: message.role,
+      score: Math.min(1, score / Math.max(1, goalTokens.size)),
+    }));
+}
+
+function memorySearchTokens(value: string) {
+  return new Set(
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((token) => token.length > 2)
+      .flatMap((token) => (token.endsWith("s") ? [token, token.slice(0, -1)] : [token])),
+  );
 }
 
 function sanitizeId(value: string) {

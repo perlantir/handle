@@ -8,7 +8,7 @@ vi.mock("../approvals/approvalWaiter", () => ({
 vi.mock("../memory/sessionMemory", () => ({
   appendMessageToZep: vi.fn().mockResolvedValue({ ok: true }),
   effectiveMemoryScope: vi.fn((project) => project?.memoryScope ?? "GLOBAL_AND_PROJECT"),
-  forgetMemoryForProject: vi.fn().mockResolvedValue({ deletedSessions: 1 }),
+  forgetMemoryForProject: vi.fn().mockResolvedValue({ deletedFacts: 1, touchedSessions: 1 }),
   getRelevantMemoryForTask: vi.fn().mockResolvedValue([
     { content: "Favorite color is teal", source: "project" },
   ]),
@@ -160,10 +160,11 @@ describe("memory tools", () => {
     expect(forgetMemoryForProject).toHaveBeenCalledWith(
       expect.objectContaining({
         project: { id: "project-test", memoryScope: "GLOBAL_AND_PROJECT" },
+        query: "favorite color",
         scope: "project",
       }),
     );
-    expect(result).toContain("Forgot memory namespace");
+    expect(result).toContain("Forgot 1 fact");
   });
 
   it("returns a clear disabled message when memory context is unavailable", async () => {

@@ -341,35 +341,85 @@ describe("session memory", () => {
     ).resolves.toEqual([]);
   });
 
-  it("forgets all memory layers by default for global-and-project projects", async () => {
-    const fakeClient = client();
+  it("forgets only matching facts across all memory layers by default for global-and-project projects", async () => {
+    const fakeClient = client({
+      getSessionMemory: vi.fn(async ({ sessionId }: { sessionId: string }) => ({
+        ok: true,
+        value: [
+          {
+            content:
+              sessionId === "global_handle-local-user"
+                ? "User's favorite color is teal."
+                : "User's project is Handle.",
+            metadata: { source_type: "stated" },
+            role: "user",
+          },
+          {
+            content: "User drives a Honda Civic.",
+            metadata: { source_type: "stated" },
+            role: "user",
+          },
+        ],
+      })),
+    });
 
     await expect(
       forgetMemoryForProject(
-        { project: { id: "project-1", memoryScope: "GLOBAL_AND_PROJECT" } },
+        {
+          project: { id: "project-1", memoryScope: "GLOBAL_AND_PROJECT" },
+          query: "User drives a Honda Civic.",
+        },
         fakeClient as never,
       ),
-    ).resolves.toEqual({ deletedSessions: 2 });
+    ).resolves.toEqual({ deletedFacts: 2, touchedSessions: 2 });
     expect(fakeClient.deleteSessionMemory).toHaveBeenCalledWith({
       sessionId: "global_handle-local-user",
     });
     expect(fakeClient.deleteSessionMemory).toHaveBeenCalledWith({
       sessionId: "project_project-1",
     });
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith({
+      messages: [
+        expect.objectContaining({
+          content: "User's favorite color is teal.",
+        }),
+      ],
+      sessionId: "global_handle-local-user",
+    });
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith({
+      messages: [
+        expect.objectContaining({
+          content: "User's project is Handle.",
+        }),
+      ],
+      sessionId: "project_project-1",
+    });
   });
 
   it("forgets all memory layers for global-and-project projects even when the agent asks for project scope", async () => {
-    const fakeClient = client();
+    const fakeClient = client({
+      getSessionMemory: vi.fn().mockResolvedValue({
+        ok: true,
+        value: [
+          {
+            content: "User drives a Honda Civic.",
+            metadata: { source_type: "stated" },
+            role: "user",
+          },
+        ],
+      }),
+    });
 
     await expect(
       forgetMemoryForProject(
         {
           project: { id: "project-1", memoryScope: "GLOBAL_AND_PROJECT" },
+          query: "User drives a Honda Civic.",
           scope: "project",
         },
         fakeClient as never,
       ),
-    ).resolves.toEqual({ deletedSessions: 2 });
+    ).resolves.toEqual({ deletedFacts: 2, touchedSessions: 2 });
     expect(fakeClient.deleteSessionMemory).toHaveBeenCalledWith({
       sessionId: "global_handle-local-user",
     });

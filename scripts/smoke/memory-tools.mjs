@@ -13,7 +13,9 @@ function assert(condition, message) {
 
 const suffix = Date.now();
 const project = { id: `memory-tools-${suffix}`, memoryScope: "PROJECT_ONLY" };
-const fact = `Memory tools smoke fact ${suffix}`;
+const fact = `My favorite memory tools color is teal-${suffix}`;
+const expectedMarker = `teal-${suffix}`;
+const forgetQuery = `User's favorite memory tools color is ${expectedMarker}.`;
 
 console.log("[memory-tools] checking Zep connection");
 const status = await getZepClient().checkConnection();
@@ -30,24 +32,27 @@ await appendMessageToZep({
 
 console.log("[memory-tools] searching fact");
 const beforeForget = await retryRecall({
-  goal: fact,
+  goal: "favorite memory tools color",
   project,
   taskId: `memory-tools-run-${suffix}`,
 });
-assert(beforeForget.some((item) => item.content.includes(fact)), "Saved fact was not found");
+assert(
+  beforeForget.some((item) => item.content.includes(expectedMarker)),
+  `Saved fact was not found: ${JSON.stringify(beforeForget)}`,
+);
 
-console.log("[memory-tools] simulating approved forget and deleting project namespace");
-const forget = await forgetMemoryForProject({ project, scope: "project" });
-assert(forget.deletedSessions >= 1, "Forget did not delete a memory namespace");
+console.log("[memory-tools] simulating approved forget and deleting matching project fact");
+const forget = await forgetMemoryForProject({ project, query: forgetQuery, scope: "project" });
+assert(forget.deletedFacts >= 1, "Forget did not delete a matching memory fact");
 await delay(1000);
 
 console.log("[memory-tools] verifying fact is forgotten");
 const afterForget = await getRelevantMemoryForTask({
-  goal: fact,
+  goal: "favorite memory tools color",
   project,
   taskId: `memory-tools-after-forget-${suffix}`,
 });
-assert(!afterForget.some((item) => item.content.includes(fact)), "Forgotten fact is still searchable");
+assert(!afterForget.some((item) => item.content.includes(expectedMarker)), "Forgotten fact is still searchable");
 
 console.log("[memory-tools] PASS");
 
@@ -55,7 +60,7 @@ async function retryRecall(input, attempts = 6) {
   let last = [];
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     last = await getRelevantMemoryForTask(input);
-    if (last.some((item) => item.content.includes(fact))) return last;
+    if (last.some((item) => item.content.includes(expectedMarker))) return last;
     await delay(1000);
   }
   return last;
