@@ -41,7 +41,6 @@ function createApp(store: ProjectRouteStore, runAgent = vi.fn().mockResolvedValu
   app.use(
     "/api",
     createProjectsRouter({
-      appendMessageToMemory: vi.fn().mockResolvedValue({ ok: true }),
       getUserId: () => "user-test",
       runAgent,
       store,

@@ -161,6 +161,7 @@ describe("createAgentRunner", () => {
     expect(createAgent).toHaveBeenCalledWith(
       {
         backend,
+        memoryContext: "<memory_context>None recalled</memory_context>",
         recordTrajectoryStep: expect.any(Function),
         sandbox: testSandbox,
         taskId: "task-test",
@@ -357,6 +358,7 @@ describe("createAgentRunner", () => {
     expect(createAgent).toHaveBeenCalledWith(
       {
         backend: expect.objectContaining({ id: "e2b" }),
+        memoryContext: "<memory_context>None recalled</memory_context>",
         recordTrajectoryStep: expect.any(Function),
         sandbox: desktopSandbox,
         taskId: "task-desktop-test",
@@ -542,6 +544,7 @@ describe("createAgentRunner", () => {
     expect(createAgent).toHaveBeenCalledWith(
       {
         backend,
+        memoryContext: "<memory_context>None recalled</memory_context>",
         recordTrajectoryStep: expect.any(Function),
         sandbox: expect.objectContaining({ sandboxId: "local:task-local-test" }),
         taskId: "task-local-test",

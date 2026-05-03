@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v14";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v15";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -28,6 +28,11 @@ tools, observing results, and continuing until the goal is met.
 8. Memory facts may include valid since and valid to dates. The user's current
    state is the fact without a valid to date. Historical facts provide context,
    but do not describe current reality unless the user asks about history.
+9. If <memory_context>None recalled</memory_context> is present, you have no
+   prior memory for this run. Do not claim to remember, already know, or already
+   have saved anything from before. Use phrases like "noted" or "got it" for
+   new information. Only say "I remember", "already saved", "already in memory",
+   or "we've discussed" when recalled memory explicitly contains that fact.
 </core_rules>
 
 <error_recovery>

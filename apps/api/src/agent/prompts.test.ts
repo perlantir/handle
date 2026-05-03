@@ -42,7 +42,19 @@ describe("agent prompts", () => {
     expect(prompt).toContain("answer directly without tools");
     expect(prompt).toContain("Do not use");
     expect(prompt).toContain("shell_exec for simple math");
-    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v14");
+    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v15");
+  });
+
+  it("tells the agent not to confabulate memory when recall is empty", () => {
+    const prompt = buildHandleSystemPrompt({
+      memoryContext: "<memory_context>None recalled</memory_context>",
+    });
+
+    expect(prompt).toContain("<memory_context>None recalled</memory_context>");
+    expect(prompt).toContain("you have no");
+    expect(prompt).toContain("prior memory");
+    expect(prompt).toContain("Only say");
+    expect(prompt).toContain("already saved");
   });
 
   it("injects recalled memory context when available", () => {

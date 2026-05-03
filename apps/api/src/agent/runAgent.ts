@@ -692,12 +692,13 @@ export function createAgentRunner({
 
       const trustedDomains = await loadTrustedDomains(store);
       let recalledMemory: MemoryFact[] = [];
+      const memoryProjectForRun = normalizeMemoryProjectContext(project);
       try {
         recalledMemory = await getRelevantMemoryForTask({
           conversationId: runContext.conversationId,
           goal,
           memoryEnabled: currentMessageMemoryEnabled(runContext, goal),
-          project: normalizeMemoryProjectContext(project),
+          project: memoryProjectForRun,
           taskId,
         });
         logger.info(
@@ -726,6 +727,23 @@ export function createAgentRunner({
       } catch (err) {
         logger.warn({ err, taskId }, "Memory recall failed; continuing without memory");
       }
+      await appendMessageToZep({
+        content: goal,
+        conversationId: runContext.conversationId,
+        memoryEnabled: currentMessageMemoryEnabled(runContext, goal),
+        project: memoryProjectForRun,
+        role: "USER",
+      }).catch((err) => {
+        logger.warn(
+          {
+            conversationId: runContext?.conversationId,
+            err,
+            projectId: project?.id ?? null,
+            taskId,
+          },
+          "Failed to append current user message to memory after recall",
+        );
+      });
       const actionContext = await recentActionLogContext({
         conversationId: runContext.conversationId,
       }).catch((err) => {
@@ -827,7 +845,7 @@ export function createAgentRunner({
         return;
       }
 
-      const memoryProject = normalizeMemoryProjectContext(project);
+      const memoryProject = memoryProjectForRun;
       let trajectoryStepCount = 0;
       const agentContext = {
         backend,
