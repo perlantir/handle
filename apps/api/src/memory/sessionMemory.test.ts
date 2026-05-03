@@ -218,6 +218,49 @@ describe("session memory", () => {
     expect(formatMemoryContext(facts)).toContain("[stated, validity unknown] Favorite color is teal");
   });
 
+  it("enriches recalled facts with stored bitemporal metadata when search omits it", async () => {
+    const fakeClient = client({
+      getSessionMemory: vi.fn().mockResolvedValue({
+        ok: true,
+        value: [
+          {
+            content: "User lives in Austin.",
+            metadata: {
+              source_type: "stated",
+              valid_at: "2026-03-15T00:00:00.000Z",
+            },
+            role: "user",
+          },
+        ],
+      }),
+      searchMemory: vi.fn().mockResolvedValue({
+        ok: true,
+        value: [{ content: "User lives in Austin.", score: 0.91 }],
+      }),
+    });
+
+    const facts = await getRelevantMemoryForTask(
+      {
+        conversationId: "conversation-2",
+        goal: "Where do I live?",
+        project: { id: "project-1", memoryScope: "PROJECT_ONLY" },
+        taskId: "run-1",
+      },
+      fakeClient as never,
+    );
+
+    expect(facts).toEqual([
+      {
+        content: "User lives in Austin.",
+        score: 0.91,
+        source: "project",
+        sourceType: "stated",
+        validAt: "2026-03-15T00:00:00.000Z",
+      },
+    ]);
+    expect(formatMemoryContext(facts)).toContain("[stated, valid since 2026-03-15] User lives in Austin.");
+  });
+
   it("marks older contradictory residence facts historical", async () => {
     const fakeClient = client({
       getSessionMemory: vi.fn().mockResolvedValue({

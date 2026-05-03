@@ -297,8 +297,23 @@ export async function getRelevantMemoryForTask(
       sessionId: session.id,
     });
     if (!search.ok || !search.value) continue;
+    const stored = await client.getSessionMemory({ sessionId: session.id });
+    const storedByContent =
+      stored.ok && stored.value
+        ? new Map(
+            stored.value.map((message) => [
+              normalizeMemoryContentKey(message.content),
+              message,
+            ]),
+          )
+        : new Map<string, ZepMemoryMessage>();
     results.push(
-      ...search.value.map((item) => memoryFactFromSearch(item, session.source)),
+      ...search.value.map((item) =>
+        memoryFactFromSearch(
+          mergeSearchMetadataFromStoredMessage(item, storedByContent),
+          session.source,
+        ),
+      ),
     );
   }
 
@@ -517,6 +532,21 @@ function memoryFactFromSearch(
     fact.sourceType = item.metadata.source_type;
   }
   return fact;
+}
+
+function mergeSearchMetadataFromStoredMessage(
+  item: ZepMemorySearchResult,
+  storedByContent: Map<string, ZepMemoryMessage>,
+): ZepMemorySearchResult {
+  const stored = storedByContent.get(normalizeMemoryContentKey(item.content));
+  if (!stored?.metadata) return item;
+  return {
+    ...item,
+    metadata: {
+      ...stored.metadata,
+      ...item.metadata,
+    },
+  };
 }
 
 function dedupeFacts(facts: MemoryFact[]) {
