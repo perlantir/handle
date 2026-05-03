@@ -6,6 +6,7 @@ import {
   type ZepMemoryMessage,
   type ZepMemorySearchResult,
 } from "./zepClient";
+import { appendMemoryLog } from "./memoryLog";
 
 export type MemoryScope = "GLOBAL_AND_PROJECT" | "PROJECT_ONLY" | "NONE";
 
@@ -101,6 +102,7 @@ export async function appendMessageToZep(
   const userId = context.userId ?? memoryUserId();
   const validAt = normalizeIsoTimestamp(context.validAt) ?? new Date().toISOString();
   const inferredFact = inferBitemporalFact(context.content);
+  const startedAt = Date.now();
   const status = await client.checkConnection();
   if (status.status !== "online") {
     emitMemoryStatus(context.conversationId ?? "memory", status);
@@ -128,6 +130,19 @@ export async function appendMessageToZep(
     userId,
   }).filter((session) => context.role === "USER" || session.source === "conversation");
   for (const session of sessions) {
+    logMemoryDiagnostic({
+      context,
+      details: {
+        factPreview: message.content.slice(0, 160),
+        operation: "memory.write",
+        requestedProjectId: context.project?.id ?? null,
+        targetGroupId: session.id,
+        targetSource: session.source,
+      },
+      durationMs: Date.now() - startedAt,
+      operation: "memory.write",
+      status: "ok",
+    });
     await client.ensureSession({
       metadata: {
         conversationId: context.conversationId ?? null,
@@ -189,6 +204,25 @@ export async function getRelevantMemoryForTask(
   await client.ensureUser({ userId });
   const sessions = memorySessionIds({ project: context.project, userId })
     .filter((session) => session.source === "global" || session.source === "project");
+  const startedAt = Date.now();
+  logMemoryDiagnostic({
+    context,
+    details: {
+      goalPreview: context.goal.slice(0, 160),
+      operation: "memory.recall",
+      projectId: context.project?.id ?? null,
+      queryNamespaces: sessions.map((session) => ({
+        sessionId: session.id,
+        source: session.source,
+      })),
+      scope: effectiveMemoryScope(context.project),
+      zepGroupId: context.project?.id ? `project_${context.project.id}` : null,
+      zepUserId: `global_${sanitizeId(userId)}`,
+    },
+    durationMs: Date.now() - startedAt,
+    operation: "memory.recall",
+    status: "ok",
+  });
   const results: MemoryFact[] = [];
 
   for (const session of sessions) {
@@ -209,6 +243,31 @@ export async function getRelevantMemoryForTask(
   }
 
   return dedupeFacts(results).slice(0, 8);
+}
+
+function logMemoryDiagnostic({
+  context,
+  details,
+  durationMs,
+  operation,
+  status,
+}: {
+  context: Pick<MemoryMessageContext, "conversationId" | "project"> | Pick<MemoryRecallContext, "conversationId" | "project">;
+  details: Record<string, unknown>;
+  durationMs: number;
+  operation: string;
+  status: "error" | "offline" | "ok";
+}) {
+  void appendMemoryLog({
+    conversationId: context.conversationId ?? undefined,
+    details,
+    durationMs,
+    operation,
+    projectId: context.project?.id ?? undefined,
+    provider: "self-hosted",
+    scope: effectiveMemoryScope(context.project),
+    status,
+  }).catch(() => undefined);
 }
 
 export async function forgetMemoryForProject(

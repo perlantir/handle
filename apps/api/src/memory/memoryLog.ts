@@ -15,6 +15,7 @@ export interface MemoryLogEntry {
   projectId?: string;
   conversationId?: string;
   status: MemoryOperationStatus;
+  details?: Record<string, unknown>;
   errorType?: string;
   durationMs: number;
 }
