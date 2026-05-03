@@ -482,9 +482,13 @@ export async function forgetMemoryForProject(
   if (effectiveMemoryScope(context.project) === "NONE") return { deletedSessions: 0 };
 
   const userId = context.userId ?? memoryUserId();
-  const scope =
+  const requestedScope =
     context.scope ??
     (effectiveMemoryScope(context.project) === "GLOBAL_AND_PROJECT" ? "all" : "project");
+  const scope =
+    effectiveMemoryScope(context.project) === "GLOBAL_AND_PROJECT"
+      ? "all"
+      : requestedScope;
   const sessions = memorySessionIds({ project: context.project, userId }).filter(
     (session) =>
       (scope === "all" && (session.source === "global" || session.source === "project")) ||

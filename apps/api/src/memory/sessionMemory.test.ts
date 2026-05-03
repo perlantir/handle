@@ -354,6 +354,26 @@ describe("session memory", () => {
     });
   });
 
+  it("forgets all memory layers for global-and-project projects even when the agent asks for project scope", async () => {
+    const fakeClient = client();
+
+    await expect(
+      forgetMemoryForProject(
+        {
+          project: { id: "project-1", memoryScope: "GLOBAL_AND_PROJECT" },
+          scope: "project",
+        },
+        fakeClient as never,
+      ),
+    ).resolves.toEqual({ deletedSessions: 2 });
+    expect(fakeClient.deleteSessionMemory).toHaveBeenCalledWith({
+      sessionId: "global_handle-local-user",
+    });
+    expect(fakeClient.deleteSessionMemory).toHaveBeenCalledWith({
+      sessionId: "project_project-1",
+    });
+  });
+
   it("does not extract questions or ordinary imperatives as memory facts", async () => {
     const fakeClient = client();
 

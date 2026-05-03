@@ -199,7 +199,7 @@ async function run() {
       role: "USER",
     });
     await delay(500);
-    const result = await forgetMemoryForProject({ project });
+    const result = await forgetMemoryForProject({ project, scope: "project" });
     assert(result.deletedSessions >= 2, `Expected both layers deleted, got ${result.deletedSessions}`);
     const projectFacts = await factMessages(client, project);
     const globalFacts = await globalMessages(client);
