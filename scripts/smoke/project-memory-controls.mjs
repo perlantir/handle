@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
-import { createProjectsRouter } from "../../apps/api/src/routes/projects.ts";
-import { prisma } from "../../apps/api/src/lib/prisma.ts";
-import { appendMessageToZep } from "../../apps/api/src/memory/sessionMemory.ts";
+import { config } from "dotenv";
 
 const scenario = process.argv[2];
 if (!scenario) throw new Error("Usage: project-memory-controls.mjs <scenario>");
 const requireApi = createRequire(new URL("../../apps/api/package.json", import.meta.url));
 const express = requireApi("express");
 const request = requireApi("supertest");
+config({ path: new URL("../../.env", import.meta.url) });
+const { createProjectsRouter } = await import("../../apps/api/src/routes/projects.ts");
+const { prisma } = await import("../../apps/api/src/lib/prisma.ts");
+const { appendMessageToZep } = await import("../../apps/api/src/memory/sessionMemory.ts");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
