@@ -34,11 +34,20 @@ In scope:
 - Memory graph UI (Screen 06)
 - Memory inspector in Workspace right pane
 - Redaction layer before sending to Zep
+- Bi-temporal fact validity (`valid_at` / `invalid_at`) for current
+  versus historical facts
+- Semantic action-consequence log for real-world outcomes
 
 Out of scope:
 - Cross-user memory (single-user only)
 - Memory export/import (Phase 11 polish)
 - Memory budget management (don't optimize yet)
+- Procedural memory / task trajectory templates (Phase 6)
+- Failure memory / root cause traces from past failures (Phase 6)
+- Long-running task resumability (Phase 6)
+- Latency optimization; measure in Phase 5, optimize in Phase 6 only
+  if p95 memory latency exceeds 500ms
+- Sub-agent shared memory (no parallel agents yet)
 
 ==================================================
 ZEP SETUP
@@ -161,6 +170,63 @@ Memory reads:
 If the active self-hosted Zep build lacks group APIs, emulate project
 memory by namespacing project facts in the local adapter while keeping
 the public Handle contract unchanged.
+
+==================================================
+BI-TEMPORAL FACT VALIDITY
+==================================================
+
+Every fact written to memory carries validity timestamps:
+
+- `valid_at`: when the fact became true. Defaults to write time.
+- `invalid_at`: when the fact stopped being true. Set when a later
+  contradictory fact supersedes it.
+
+Zep stores these fields natively for graph facts. Handle wires them
+through every memory boundary:
+
+- `memory_save` accepts optional `valid_at`; if omitted, use now.
+- Automatic message memory writes include `valid_at`.
+- Contradicting facts should result in the older fact receiving
+  `invalid_at`. Zep should do this natively; Phase 5 verifies and, if
+  needed for the self-hosted adapter, mirrors it in Handle metadata.
+- `getRelevantMemoryForTask` formats validity timestamps in the
+  injected context.
+
+Memory context format:
+
+```text
+[stated, valid since 2026-03-15] User lives in Austin
+[stated, valid 2026-01-01 to 2026-03-15] User lived in Chicago
+[inferred, valid since 2026-04-22] User prefers concise responses
+```
+
+Agent system prompt addition:
+
+```text
+When a fact has both valid since and valid to dates, the user's current
+state is the one without valid to. Past facts (with valid to dates)
+provide history but do not reflect current reality. When the user asks
+something time-sensitive, prefer current facts. When asked about
+history, use past facts. Never confuse them.
+```
+
+Memory list view:
+
+- Show `valid_at` as a small label: `since Mar 15, 2026`.
+- If `invalid_at` is set, dim the row and label it `(historical)`.
+
+Memory detail panel:
+
+- Show a simple timeline of the fact's history when related facts or
+  superseded facts are available.
+
+Smoke:
+
+- `pnpm smoke:memory-bitemporal`
+- Submit `I live in Chicago`.
+- Submit `I moved to Austin`.
+- Verify Chicago has `invalid_at`, Austin has `valid_at`.
+- Ask `Where do I live?`, verify current answer is Austin.
 
 ==================================================
 GRACEFUL DEGRADATION
@@ -548,6 +614,89 @@ export interface MemoryRecallEvent {
 Workspace listens and updates the inspector.
 
 ==================================================
+SEMANTIC ACTION-CONSEQUENCE LOG
+==================================================
+
+Phase 4's `audit.log` records safety decisions. Phase 5 adds
+`~/Library/Logs/Handle/actions.log` for semantic outcomes that change
+the world or durable app state.
+
+`apps/api/src/lib/actionLog.ts`:
+
+```typescript
+interface ActionLogEntry {
+  timestamp: string;          // ISO 8601
+  taskId: string;
+  conversationId: string;
+  projectId: string;
+  outcomeType: ActionOutcomeType;
+  description: string;
+  target: string;
+  metadata: Record<string, unknown>;
+  reversible: boolean;
+  undoCommand?: string;
+}
+
+type ActionOutcomeType =
+  | 'file_created'
+  | 'file_modified'
+  | 'file_deleted'
+  | 'shell_command_executed'
+  | 'browser_navigated'
+  | 'memory_saved'
+  | 'memory_forgotten';
+```
+
+Write an action log entry after successful tool execution only. Failed
+tool calls do not write action outcomes.
+
+Examples:
+
+- `file_write` succeeds:
+  - `file_created` or `file_modified`
+  - `reversible: true` for files created in the workspace
+  - `undoCommand: rm <path>` only when safe
+- `shell_exec` succeeds:
+  - `shell_command_executed`
+  - `reversible: false`
+- `browser_navigate` succeeds:
+  - `browser_navigated`
+  - `reversible: false`
+- `memory_save` succeeds:
+  - `memory_saved`
+  - `reversible: true`
+  - `undoCommand: memory_forget <factId>`
+
+Add `/actions` page:
+
+- Tabs: All / By Project / By Conversation
+- Table: Timestamp | Outcome | Description | Target | Reversible |
+  Undo
+- Filter by outcome type
+- Filter by date range
+- Search by description/target
+
+Agent prompt addition:
+
+```text
+Recent actions you've taken in this conversation: [last 10 entries from
+action log]
+
+Past actions provide context for "what's the state of the world right
+now." If the user asks "what did you do" or "what files did you create",
+reference these.
+```
+
+Smoke:
+
+- `pnpm smoke:action-log`
+- Submit a task that writes a file.
+- Verify `actions.log` contains `file_created`.
+- Submit a task that runs a shell command.
+- Verify `actions.log` contains `shell_command_executed`.
+- Open `/actions`, verify both entries are shown.
+
+==================================================
 SETTINGS → MEMORY TAB
 ==================================================
 
@@ -623,6 +772,14 @@ TESTS
    - Zep offline does not fail agent runs
    - `memory_status` SSE emits offline/online changes
    - `memory.log` records failures without secrets
+11. Bi-temporal contradiction handling:
+   - Current facts have `valid_at` and no `invalid_at`
+   - Superseded facts have `invalid_at`
+   - Agent answers current-state questions from current facts
+12. Action log:
+   - Successful real-world outcomes append `actions.log`
+   - Failed tool calls do not append action outcomes
+   - Reversible workspace file creation exposes a safe undo
 
 ==================================================
 GATE CRITERIA
@@ -636,7 +793,9 @@ GATE CRITERIA
 5. Memory graph UI shows entities and relations
 6. memory_save / memory_search / memory_forget tools work
 7. Redaction prevents secrets from being stored
-8. SIGNOFF document
+8. Bi-temporal current/historical fact reasoning works
+9. Action log records outcomes and `/actions` displays them
+10. SIGNOFF document
 
 ==================================================
 MANUAL AUDIT
@@ -701,6 +860,24 @@ Section I: Per-message override
 4. Toggle memory on and submit another fact
 5. Verify the second fact is written
 
+Section J: Bi-temporal fact reasoning
+1. Submit: "I live in Chicago"
+2. Wait for completion
+3. Submit: "Actually, I moved to Austin last week"
+4. New conversation: submit "Where do I live?"
+5. Verify response says Austin as current state
+6. Open `/memory`, verify Chicago is historical and Austin is current
+7. Open detail panel, verify timeline shows the move
+
+Section K: Action-consequence log
+1. Submit: "Create a file called test.txt with 'hello' in it"
+2. Open `/actions`
+3. Verify `file_created` entry with workspace target and
+   `reversible=true`
+4. Click Undo
+5. Verify file is deleted
+6. Verify a new `file_deleted` action entry exists
+
 ==================================================
 IMPLEMENTATION ORDER
 ==================================================
@@ -713,10 +890,14 @@ IMPLEMENTATION ORDER
 6. Memory inspector in Workspace right pane
 7. Memory graph page (/memory)
 8. Settings → Memory tab
-9. Redaction additions
-10. Tests
-11. Manual audit harness
-12. SIGNOFF
+9. Per-message memory toggle
+10. Redaction additions
+11. Tests
+12. Manual audit harness
+13. Bi-temporal fact storage and reasoning
+14. Semantic action-consequence log
+15. Manual audit harness updates for bi-temporal/action log
+16. SIGNOFF
 
 ==================================================
 END OF PHASE 5 SPEC
