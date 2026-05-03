@@ -1,3 +1,4 @@
+import type { ApprovalPayload } from "@handle/shared";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const pngBase64 =
@@ -11,7 +12,15 @@ async function jsonRoute(route: Route, status: number, body: unknown) {
   });
 }
 
-function streamBody(taskId: string) {
+function streamBody(
+  taskId: string,
+  approvalRequest: ApprovalPayload = {
+    action: "browser_click",
+    reason: "Click appears to trigger destructive action: Delete Account",
+    target: "#delete",
+    type: "risky_browser_action",
+  },
+) {
   const screenshot = {
     byteCount: Buffer.from(pngBase64, "base64").byteLength,
     callId: "call-browser-1",
@@ -25,12 +34,7 @@ function streamBody(taskId: string) {
   };
   const approval = {
     approvalId: "approval-browser-1",
-    request: {
-      action: "browser_click",
-      reason: "Click appears to trigger destructive action: Delete Account",
-      target: "#delete",
-      type: "risky_browser_action",
-    },
+    request: approvalRequest,
     taskId,
     type: "approval_request",
   };
@@ -38,7 +42,11 @@ function streamBody(taskId: string) {
   return `data: ${JSON.stringify(screenshot)}\n\ndata: ${JSON.stringify(approval)}\n\n`;
 }
 
-async function mockWorkspaceApis(page: Page, taskId: string) {
+async function mockWorkspaceApis(
+  page: Page,
+  taskId: string,
+  approvalRequest?: Parameters<typeof streamBody>[1],
+) {
   const responses: unknown[] = [];
 
   await page.route("**/api/tasks/*", async (route) => {
@@ -65,7 +73,7 @@ async function mockWorkspaceApis(page: Page, taskId: string) {
 
   await page.route(`**/api/stream/${taskId}`, async (route) => {
     await route.fulfill({
-      body: streamBody(taskId),
+      body: streamBody(taskId, approvalRequest),
       headers: {
         "Cache-Control": "no-cache",
         "Content-Type": "text/event-stream",
@@ -110,5 +118,56 @@ test.describe("Workspace Browser Pane", () => {
     await expect
       .poll(() => responses)
       .toContainEqual({ approvalId: "approval-browser-1", decision: "denied" });
+  });
+
+  test("renders Phase 4 file delete approval copy", async ({ page }) => {
+    const taskId = "task-file-delete-ui";
+    const { responses } = await mockWorkspaceApis(page, taskId, {
+      path: "/tmp/handle-local-test/delete-me.txt",
+      reason: "Delete /tmp/handle-local-test/delete-me.txt?",
+      type: "file_delete",
+    });
+
+    await page.goto(`/tasks/${taskId}`);
+
+    await expect(
+      page.getByRole("heading", {
+        name: "Delete /tmp/handle-local-test/delete-me.txt?",
+      }),
+    ).toBeVisible();
+    await expect(page.getByText("Files · delete")).toBeVisible();
+
+    await page.getByRole("button", { name: "Approve" }).click();
+    await expect
+      .poll(() => responses)
+      .toContainEqual({ approvalId: "approval-browser-1", decision: "approved" });
+  });
+
+  test("requires explicit understanding before approving actual Chrome access", async ({ page }) => {
+    const taskId = "task-actual-chrome-ui";
+    const { responses } = await mockWorkspaceApis(page, taskId, {
+      reason:
+        "Connect to your actual Chrome? Agent will see your open tabs, logged-in sessions, saved passwords visible to extensions, and browsing history.",
+      type: "browser_use_actual_chrome",
+    });
+
+    await page.goto(`/tasks/${taskId}`);
+
+    await expect(page.getByRole("heading", { name: "Connect to your actual Chrome?" })).toBeVisible();
+    await expect(page.getByText("Agent will see: any tab you have open")).toBeVisible();
+    await expect(page.getByText("Agent will see: your logged-in sessions to all sites")).toBeVisible();
+    await expect(page.getByText("Agent will see: saved passwords visible to extensions")).toBeVisible();
+    await expect(page.getByText("Agent will see: browsing history")).toBeVisible();
+
+    const approve = page.getByRole("button", { name: "Approve" });
+    await expect(approve).toBeDisabled();
+
+    await page.getByRole("switch", { name: "I understand actual Chrome access risks" }).click();
+    await expect(approve).toBeEnabled();
+    await approve.click();
+
+    await expect
+      .poll(() => responses)
+      .toContainEqual({ approvalId: "approval-browser-1", decision: "approved" });
   });
 });

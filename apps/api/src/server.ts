@@ -13,7 +13,9 @@ import {
 } from "./lib/cors";
 import { getLogFilePath, logger } from "./lib/logger";
 import { approvalsRouter } from "./routes/approvals";
+import { agentRunsRouter } from "./routes/agentRuns";
 import { healthRouter } from "./routes/health";
+import { projectsRouter } from "./routes/projects";
 import { settingsRouter } from "./routes/settings";
 import { streamRouter } from "./routes/stream";
 import { tasksRouter } from "./routes/tasks";
@@ -46,7 +48,9 @@ export async function createServer() {
   } else {
     app.use("/api", clerkMiddleware(), requireClerkAuth);
   }
+  app.use("/api", agentRunsRouter);
   app.use("/api/approvals", approvalsRouter);
+  app.use("/api", projectsRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/tasks", tasksRouter);
   app.use("/api/tasks", streamRouter);

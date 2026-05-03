@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { ToolDefinition, ToolExecutionContext } from './toolRegistry';
 import { displayToolName } from './toolRegistry';
+import { isShellRateLimitError } from '../execution/localBackend';
 import { emitTaskEvent } from '../lib/eventBus';
 import { redactSecrets } from '../lib/redact';
 
@@ -50,17 +51,17 @@ function emitToolResult(context: ToolExecutionContext, callId: string, result: s
 export function createPhase1ToolDefinitions(): ToolDefinition[] {
   const shellExec: ToolDefinition = {
     name: 'shell_exec',
-    description: 'Execute a bash command in the E2B sandbox. Streams stdout/stderr in real time.',
+    description: 'Execute a bash command in the active execution backend. Streams stdout/stderr in real time.',
     inputSchema: shellExecInput,
     sideEffectClass: 'execute',
     requiresApproval: false,
-    backendSupport: { e2b: true, local: false },
+    backendSupport: { e2b: true, local: true },
     async implementation(input, context) {
       const parsed = shellExecInput.parse(input);
       const callId = emitToolCall(context, 'shell_exec', parsed);
 
       try {
-        const result = await context.sandbox.commands.run(parsed.command, {
+        const result = await context.backend.shellExec(parsed.command, {
           onStderr(data) {
             emitTaskEvent({
               type: 'tool_stream',
@@ -90,6 +91,16 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
         return output;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        if (isShellRateLimitError(err)) {
+          const output = JSON.stringify({
+            exitCode: 429,
+            stderr: redactSecrets(message),
+            stdout: '',
+          });
+          emitToolResult(context, callId, output, 429, message);
+          return output;
+        }
+
         emitToolResult(context, callId, '', undefined, message);
         throw err;
       }
@@ -98,11 +109,11 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
 
   const fileWrite: ToolDefinition = {
     name: 'file_write',
-    description: 'Write content to a file in the E2B sandbox.',
+    description: 'Write content to a file in the active execution backend.',
     inputSchema: fileWriteInput,
     sideEffectClass: 'write',
     requiresApproval: false,
-    backendSupport: { e2b: true, local: false },
+    backendSupport: { e2b: true, local: true },
     async implementation(input, context) {
       const parsed = fileWriteInput.parse(input);
       const callId = emitToolCall(context, 'file_write', {
@@ -111,7 +122,7 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
       });
 
       try {
-        await context.sandbox.files.write(parsed.path, parsed.content);
+        await context.backend.fileWrite(parsed.path, parsed.content);
         const result = `Wrote ${parsed.content.length} bytes to ${parsed.path}`;
         emitToolResult(context, callId, result);
         return result;
@@ -125,17 +136,17 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
 
   const fileRead: ToolDefinition = {
     name: 'file_read',
-    description: 'Read the contents of a file in the E2B sandbox.',
+    description: 'Read the contents of a file in the active execution backend.',
     inputSchema: fileReadInput,
     sideEffectClass: 'read',
     requiresApproval: false,
-    backendSupport: { e2b: true, local: false },
+    backendSupport: { e2b: true, local: true },
     async implementation(input, context) {
       const parsed = fileReadInput.parse(input);
       const callId = emitToolCall(context, 'file_read', parsed);
 
       try {
-        const content = await context.sandbox.files.read(parsed.path, { format: 'text' });
+        const content = await context.backend.fileRead(parsed.path);
         const redacted = redactSecrets(content);
         emitToolResult(context, callId, redacted);
         return redacted;
@@ -149,17 +160,17 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
 
   const fileList: ToolDefinition = {
     name: 'file_list',
-    description: 'List files and directories at a path in the E2B sandbox.',
+    description: 'List files and directories at a path in the active execution backend.',
     inputSchema: fileListInput,
     sideEffectClass: 'read',
     requiresApproval: false,
-    backendSupport: { e2b: true, local: false },
+    backendSupport: { e2b: true, local: true },
     async implementation(input, context) {
       const parsed = fileListInput.parse(input);
       const callId = emitToolCall(context, 'file_list', parsed);
 
       try {
-        const entries = await context.sandbox.files.list(parsed.path);
+        const entries = await context.backend.fileList(parsed.path);
         const result = redactSecrets(JSON.stringify(entries, null, 2));
         emitToolResult(context, callId, result);
         return result;

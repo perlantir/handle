@@ -1,8 +1,18 @@
-import type { ApprovalDecision, CreateTaskResponse, PendingApproval, TaskDetailResponse } from '@handle/shared';
+import type {
+  ApprovalDecision,
+  ChatMessage,
+  ConversationSummary,
+  CreateTaskResponse,
+  PendingApproval,
+  ProjectSummary,
+  SendConversationMessageResponse,
+  TaskDetailResponse,
+} from '@handle/shared';
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_HANDLE_API_BASE_URL ?? 'http://127.0.0.1:3001';
 
 interface CreateTaskInput {
+  backend?: 'e2b' | 'local';
   goal: string;
   token: string | null;
 }
@@ -12,6 +22,7 @@ interface AuthenticatedRequestInput {
 }
 
 interface RespondToApprovalInput extends AuthenticatedRequestInput {
+  alwaysApprove?: boolean;
   approvalId: string;
   decision: ApprovalDecision;
 }
@@ -19,6 +30,26 @@ interface RespondToApprovalInput extends AuthenticatedRequestInput {
 interface ApprovalResponse {
   approvalId: string;
   status: string;
+}
+
+interface ProjectInput {
+  browserMode?: ProjectSummary['browserMode'];
+  customScopePath?: string | null;
+  defaultBackend?: ProjectSummary['defaultBackend'];
+  defaultModel?: string | null;
+  defaultProvider?: string | null;
+  name?: string;
+  permissionMode?: ProjectSummary['permissionMode'];
+  workspaceScope?: ProjectSummary['workspaceScope'];
+}
+
+interface SendMessageInput {
+  backend?: 'e2b' | 'local';
+  content: string;
+  conversationId: string;
+  modelName?: string;
+  providerId?: string;
+  token: string | null;
 }
 
 async function parseApiError(response: Response, fallback: string) {
@@ -35,9 +66,13 @@ function authHeaders(token: string | null) {
   };
 }
 
-export async function createTask({ goal, token }: CreateTaskInput): Promise<CreateTaskResponse> {
+export async function createTask({
+  backend,
+  goal,
+  token,
+}: CreateTaskInput): Promise<CreateTaskResponse> {
   const response = await fetch(`${apiBaseUrl}/api/tasks`, {
-    body: JSON.stringify({ goal }),
+    body: JSON.stringify({ ...(backend ? { backend } : {}), goal }),
     headers: authHeaders(token),
     method: 'POST',
   });
@@ -63,6 +98,25 @@ export async function getTask(taskId: string, { token }: AuthenticatedRequestInp
   return response.json() as Promise<TaskDetailResponse>;
 }
 
+export async function cancelAgentRun(
+  agentRunId: string,
+  { token }: AuthenticatedRequestInput,
+): Promise<{ active: boolean; cancelled: boolean; status: string }> {
+  const response = await fetch(`${apiBaseUrl}/api/agent-runs/${agentRunId}/cancel`, {
+    body: JSON.stringify({ reason: 'Cancelled by user' }),
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to cancel run');
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<{ active: boolean; cancelled: boolean; status: string }>;
+}
+
+
 export async function listPendingApprovals({ token }: AuthenticatedRequestInput): Promise<PendingApproval[]> {
   const response = await fetch(`${apiBaseUrl}/api/approvals/pending`, {
     headers: authHeaders(token),
@@ -78,12 +132,13 @@ export async function listPendingApprovals({ token }: AuthenticatedRequestInput)
 }
 
 export async function respondToApproval({
+  alwaysApprove,
   approvalId,
   decision,
   token,
 }: RespondToApprovalInput): Promise<ApprovalResponse> {
   const response = await fetch(`${apiBaseUrl}/api/approvals/respond`, {
-    body: JSON.stringify({ approvalId, decision }),
+    body: JSON.stringify({ ...(alwaysApprove ? { alwaysApprove } : {}), approvalId, decision }),
     headers: authHeaders(token),
     method: 'POST',
   });
@@ -94,4 +149,212 @@ export async function respondToApproval({
   }
 
   return response.json() as Promise<ApprovalResponse>;
+}
+
+export async function pickProjectFolder({
+  token,
+}: AuthenticatedRequestInput): Promise<{ path: string }> {
+  const response = await fetch(`${apiBaseUrl}/api/projects/pick-folder`, {
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to choose folder');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { path?: string };
+  if (!body.path) throw new Error('Folder picker returned no path');
+  return { path: body.path };
+}
+
+export async function listProjects({
+  token,
+}: AuthenticatedRequestInput): Promise<ProjectSummary[]> {
+  const response = await fetch(`${apiBaseUrl}/api/projects`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load projects');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { projects?: ProjectSummary[] };
+  return body.projects ?? [];
+}
+
+export async function createProject({
+  input,
+  token,
+}: AuthenticatedRequestInput & { input: ProjectInput }): Promise<ProjectSummary> {
+  const response = await fetch(`${apiBaseUrl}/api/projects`, {
+    body: JSON.stringify(input),
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to create project');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { project?: ProjectSummary };
+  if (!body.project) throw new Error('Project create returned no project');
+  return body.project;
+}
+
+export async function updateProject({
+  input,
+  projectId,
+  token,
+}: AuthenticatedRequestInput & { input: ProjectInput; projectId: string }): Promise<ProjectSummary> {
+  const response = await fetch(`${apiBaseUrl}/api/projects/${projectId}`, {
+    body: JSON.stringify(input),
+    headers: authHeaders(token),
+    method: 'PUT',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to update project');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { project?: ProjectSummary };
+  if (!body.project) throw new Error('Project update returned no project');
+  return body.project;
+}
+
+export async function deleteProject({
+  projectId,
+  token,
+}: AuthenticatedRequestInput & { projectId: string }): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/projects/${projectId}`, {
+    headers: authHeaders(token),
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to delete project');
+    throw new Error(message);
+  }
+}
+
+export async function listConversations({
+  projectId,
+  token,
+}: AuthenticatedRequestInput & { projectId: string }): Promise<ConversationSummary[]> {
+  const response = await fetch(`${apiBaseUrl}/api/projects/${projectId}/conversations`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load conversations');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { conversations?: ConversationSummary[] };
+  return body.conversations ?? [];
+}
+
+export async function createConversation({
+  projectId,
+  title,
+  token,
+}: AuthenticatedRequestInput & { projectId: string; title?: string }): Promise<ConversationSummary> {
+  const response = await fetch(`${apiBaseUrl}/api/projects/${projectId}/conversations`, {
+    body: JSON.stringify({ ...(title ? { title } : {}) }),
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to create conversation');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { conversation?: ConversationSummary };
+  if (!body.conversation) throw new Error('Conversation create returned no conversation');
+  return body.conversation;
+}
+
+export async function updateConversation({
+  conversationId,
+  title,
+  token,
+}: AuthenticatedRequestInput & { conversationId: string; title: string }): Promise<ConversationSummary> {
+  const response = await fetch(`${apiBaseUrl}/api/conversations/${conversationId}`, {
+    body: JSON.stringify({ title }),
+    headers: authHeaders(token),
+    method: 'PUT',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to rename chat');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { conversation?: ConversationSummary };
+  if (!body.conversation) throw new Error('Conversation update returned no conversation');
+  return body.conversation;
+}
+
+export async function deleteConversation({
+  conversationId,
+  token,
+}: AuthenticatedRequestInput & { conversationId: string }): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/conversations/${conversationId}`, {
+    headers: authHeaders(token),
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to delete chat');
+    throw new Error(message);
+  }
+}
+
+export async function listMessages({
+  conversationId,
+  token,
+}: AuthenticatedRequestInput & { conversationId: string }): Promise<ChatMessage[]> {
+  const response = await fetch(`${apiBaseUrl}/api/conversations/${conversationId}/messages`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load messages');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { messages?: ChatMessage[] };
+  return body.messages ?? [];
+}
+
+export async function sendConversationMessage({
+  backend,
+  content,
+  conversationId,
+  modelName,
+  providerId,
+  token,
+}: SendMessageInput): Promise<SendConversationMessageResponse> {
+  const response = await fetch(`${apiBaseUrl}/api/conversations/${conversationId}/messages`, {
+    body: JSON.stringify({
+      ...(backend ? { backend } : {}),
+      content,
+      ...(modelName ? { modelName } : {}),
+      ...(providerId ? { providerId } : {}),
+    }),
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to send message');
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<SendConversationMessageResponse>;
 }

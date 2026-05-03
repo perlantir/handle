@@ -437,23 +437,42 @@ try {
   await page.goto(`${WEB_URL}/sign-in`);
   await page.getByText("Continue as smoke user").click();
   await page.waitForURL(`${WEB_URL}/`);
+  await page.getByRole("button", { name: "E2B" }).click();
+  const modelSelect = page.getByLabel("Model");
+  const modelOptions = await modelSelect.locator("option").evaluateAll((options) =>
+    options.map((option) => ({
+      label: option.textContent ?? "",
+      value: option.getAttribute("value") ?? "",
+    })),
+  );
+  const openAiOption = modelOptions.find((option) =>
+    option.value.startsWith("openai:"),
+  );
+  if (canonicalMode && openAiOption) {
+    await modelSelect.selectOption(openAiOption.value);
+  }
   await page
     .locator('textarea[name="goal"]')
     .fill(canonicalMode ? CANONICAL_GOAL : SMOKE_GOAL);
-  const taskResponsePromise = page.waitForResponse(
-    (response) =>
-      response.url() === `${API_URL}/api/tasks` &&
-      response.request().method() === "POST",
-  );
+  const taskResponsePromise = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.origin === API_URL &&
+      /^\/api\/conversations\/[^/]+\/messages$/.test(url.pathname) &&
+      response.request().method() === "POST"
+    );
+  });
   await page.locator('button[type="submit"]').click();
 
   const taskResponse = await taskResponsePromise;
   if (!taskResponse.ok()) {
-    throw new Error(`/api/tasks returned ${taskResponse.status()}`);
+    throw new Error(
+      `/api/conversations/:id/messages returned ${taskResponse.status()}`,
+    );
   }
 
-  const { taskId } = await taskResponse.json();
-  if (!taskId) throw new Error("Could not read task id from workspace URL");
+  const { agentRunId: taskId } = await taskResponse.json();
+  if (!taskId) throw new Error("Could not read agent run id from response");
 
   const taskEventsPromise = waitForTaskEvents(taskId);
   await page.waitForURL(`${WEB_URL}/tasks/${taskId}`);

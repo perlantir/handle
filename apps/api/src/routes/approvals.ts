@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { ApprovalPayload } from '@handle/shared';
+import { registerApprovalGrant } from '../approvals/approvalGrants';
 import { getAuthenticatedUserId } from '../auth/clerkMiddleware';
 import { resolveApprovalWaiter } from '../approvals/approvalWaiter';
 import { emitTaskEvent } from '../lib/eventBus';
@@ -9,6 +10,7 @@ import { prisma } from '../lib/prisma';
 
 const respondSchema = z.object({
   approvalId: z.string().min(1),
+  alwaysApprove: z.boolean().optional(),
   decision: z.enum(['approved', 'denied']),
 });
 
@@ -26,7 +28,12 @@ export interface ApprovalRouteStore {
     findMany(args: unknown): Promise<ApprovalRow[]>;
     update(args: unknown): Promise<{ id: string; status: string; taskId: string }>;
   };
-  task: {
+  agentRun?: {
+    findFirst(args: unknown): Promise<unknown | null>;
+    findMany(args: unknown): Promise<Array<{ id: string }>>;
+    update(args: unknown): Promise<unknown>;
+  };
+  task?: {
     findFirst(args: unknown): Promise<unknown | null>;
     findMany(args: unknown): Promise<Array<{ id: string }>>;
     update(args: unknown): Promise<unknown>;
@@ -48,6 +55,13 @@ function serializeApproval(row: ApprovalRow) {
   };
 }
 
+function projectIdFromRun(run: unknown) {
+  const candidate = run as { conversation?: { projectId?: unknown } } | null;
+  return typeof candidate?.conversation?.projectId === 'string'
+    ? candidate.conversation.projectId
+    : null;
+}
+
 export function createApprovalsRouter({ getUserId = getAuthenticatedUserId, store = prisma }: CreateApprovalsRouterOptions = {}) {
   const router = Router();
 
@@ -57,9 +71,12 @@ export function createApprovalsRouter({ getUserId = getAuthenticatedUserId, stor
       const userId = getUserId(req);
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-      const tasks = await store.task.findMany({
+      const runStore = store.agentRun ?? store.task;
+      if (!runStore) return res.json({ approvals: [] });
+
+      const tasks = await runStore.findMany({
         select: { id: true },
-        where: { userId },
+        where: store.agentRun ? {} : { userId },
       });
       const taskIds = tasks.map((task) => task.id);
 
@@ -93,8 +110,14 @@ export function createApprovalsRouter({ getUserId = getAuthenticatedUserId, stor
       });
       if (!approval) return res.status(404).json({ error: 'Approval not found' });
 
-      const task = await store.task.findFirst({
-        where: { id: approval.taskId, userId },
+      const runStore = store.agentRun ?? store.task;
+      if (!runStore) return res.status(404).json({ error: 'Approval not found' });
+
+      const task = await runStore.findFirst({
+        ...(store.agentRun
+          ? { include: { conversation: { select: { projectId: true } } } }
+          : {}),
+        where: store.agentRun ? { id: approval.taskId } : { id: approval.taskId, userId },
       });
       if (!task) return res.status(404).json({ error: 'Approval not found' });
 
@@ -106,10 +129,20 @@ export function createApprovalsRouter({ getUserId = getAuthenticatedUserId, stor
         data: { respondedAt: new Date(), status: parsed.data.decision },
         where: { id: approval.id },
       });
-      await store.task.update({
+      await runStore.update({
         data: { status: 'RUNNING' },
         where: { id: approval.taskId },
       });
+
+      if (parsed.data.decision === 'approved' && parsed.data.alwaysApprove) {
+        registerApprovalGrant(
+          {
+            projectId: store.agentRun ? projectIdFromRun(task) : null,
+            taskId: approval.taskId,
+          },
+          approval.payload as ApprovalPayload,
+        );
+      }
 
       resolveApprovalWaiter(approval.id, parsed.data.decision);
       emitTaskEvent({

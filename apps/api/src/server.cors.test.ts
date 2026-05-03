@@ -68,6 +68,8 @@ describe('API CORS configuration', () => {
 
     expectCorsHeaders(post);
     expect(post.body).toEqual({ taskId: 'task-cors-test' });
-    expect(runAgent).toHaveBeenCalledWith('task-cors-test', 'Verify CORS headers');
+    expect(runAgent).toHaveBeenCalledWith('task-cors-test', 'Verify CORS headers', {
+      backend: 'e2b',
+    });
   });
 });

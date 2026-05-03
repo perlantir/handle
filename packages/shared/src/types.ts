@@ -1,4 +1,10 @@
-export type TaskStatus = 'RUNNING' | 'WAITING' | 'STOPPED' | 'ERROR' | 'PAUSED';
+export type TaskStatus =
+  | 'RUNNING'
+  | 'WAITING'
+  | 'STOPPED'
+  | 'ERROR'
+  | 'PAUSED'
+  | 'CANCELLED';
 
 export type MessageRole = 'USER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL';
 
@@ -55,6 +61,12 @@ export interface AgentErrorEvent {
   taskId: string;
 }
 
+export interface AgentRunCancelledEvent {
+  type: 'agent_run_cancelled';
+  reason: string;
+  taskId: string;
+}
+
 export interface ApprovalRequestEvent {
   type: 'approval_request';
   approvalId: string;
@@ -96,6 +108,7 @@ export type SSEEvent =
   | StatusUpdateEvent
   | AssistantMessageEvent
   | AgentErrorEvent
+  | AgentRunCancelledEvent
   | ApprovalRequestEvent
   | BrowserScreenshotEvent
   | PlanUpdateEvent
@@ -105,6 +118,7 @@ export interface ApprovalPayload {
   type:
     | 'shell_exec'
     | 'file_write_outside_workspace'
+    | 'file_delete'
     | 'browser_use_actual_chrome'
     | 'risky_browser_action'
     | 'destructive_integration_action';
@@ -117,6 +131,12 @@ export interface ApprovalPayload {
 }
 
 export type ApprovalDecision = 'approved' | 'denied';
+
+export interface ApprovalResponseRequest {
+  approvalId: string;
+  alwaysApprove?: boolean;
+  decision: ApprovalDecision;
+}
 
 export type ApprovalStatus = ApprovalDecision | 'pending' | 'timeout';
 
@@ -143,10 +163,17 @@ export interface TaskMessage {
 }
 
 export interface TaskDetailResponse {
+  backend?: 'e2b' | 'local';
+  conversationId?: string;
   createdAt?: string;
   goal: string;
   id: string;
   messages: TaskMessage[];
+  conversationTitle?: string | null;
+  projectId?: string;
+  projectName?: string;
+  providerId?: string | null;
+  providerModel?: string | null;
   status: TaskStatus;
   updatedAt?: string;
 }
@@ -159,6 +186,75 @@ export interface CreateTaskRequest {
 
 export interface CreateTaskResponse {
   taskId: string;
+}
+
+export type WorkspaceScope = 'DEFAULT_WORKSPACE' | 'CUSTOM_FOLDER' | 'DESKTOP' | 'FULL_ACCESS';
+
+export type ProjectPermissionMode = 'FULL_ACCESS' | 'ASK' | 'PLAN';
+
+export type BackendType = 'E2B' | 'LOCAL';
+
+export type BrowserMode = 'SEPARATE_PROFILE' | 'ACTUAL_CHROME';
+
+export type AgentRunStatus =
+  | 'RUNNING'
+  | 'WAITING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  workspaceScope: WorkspaceScope;
+  customScopePath?: string | null;
+  permissionMode: ProjectPermissionMode;
+  defaultBackend: BackendType;
+  defaultProvider?: string | null;
+  defaultModel?: string | null;
+  browserMode: BrowserMode;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ConversationSummary {
+  id: string;
+  projectId: string;
+  title?: string | null;
+  latestAgentRunId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  role: 'USER' | 'ASSISTANT';
+  content: string;
+  agentRunId?: string | null;
+  providerId?: string | null;
+  modelName?: string | null;
+  createdAt?: string;
+}
+
+export interface AgentRunSummary {
+  id: string;
+  conversationId: string;
+  status: AgentRunStatus;
+  goal: string;
+  result?: string | null;
+  providerId?: string | null;
+  modelName?: string | null;
+  backend: BackendType;
+  startedAt?: string;
+  completedAt?: string | null;
+}
+
+export interface SendConversationMessageResponse {
+  agentRunId: string;
+  cancelledRunId?: string;
+  conversationId: string;
+  messageId: string;
 }
 
 export interface HealthResponse {

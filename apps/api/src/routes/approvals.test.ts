@@ -1,6 +1,7 @@
 import express from 'express';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { clearApprovalGrantsForTest, hasApprovalGrant } from '../approvals/approvalGrants';
 import { createApprovalsRouter, type ApprovalRouteStore } from './approvals';
 
 function createApp(store: ApprovalRouteStore) {
@@ -11,6 +12,10 @@ function createApp(store: ApprovalRouteStore) {
 }
 
 describe('approvals route', () => {
+  afterEach(() => {
+    clearApprovalGrantsForTest();
+  });
+
   it('lists pending and timed-out approvals for the current user tasks', async () => {
     const store: ApprovalRouteStore = {
       approvalRequest: {
@@ -96,5 +101,52 @@ describe('approvals route', () => {
       .expect(200);
 
     expect(response.body).toEqual({ approvalId: 'approval-test', status: 'approved' });
+  });
+
+  it('registers project-scoped always-approve grants for approved host actions', async () => {
+    const requestPayload = {
+      command: 'npm test',
+      reason: 'Run command: npm test?',
+      type: 'shell_exec',
+    } as const;
+    const store: ApprovalRouteStore = {
+      agentRun: {
+        async findFirst() {
+          return { conversation: { projectId: 'project-grant-test' }, id: 'run-test' };
+        },
+        async findMany() {
+          return [{ id: 'run-test' }];
+        },
+        async update() {
+          return {};
+        },
+      },
+      approvalRequest: {
+        async findFirst() {
+          return {
+            id: 'approval-grant',
+            payload: requestPayload,
+            status: 'pending',
+            taskId: 'run-test',
+            type: 'shell_exec',
+          };
+        },
+        async findMany() {
+          return [];
+        },
+        async update() {
+          return { id: 'approval-grant', status: 'approved', taskId: 'run-test' };
+        },
+      },
+    };
+
+    await request(createApp(store))
+      .post('/api/approvals/respond')
+      .send({ alwaysApprove: true, approvalId: 'approval-grant', decision: 'approved' })
+      .expect(200);
+
+    expect(
+      hasApprovalGrant({ projectId: 'project-grant-test', taskId: 'different-run' }, requestPayload),
+    ).toBe(true);
   });
 });

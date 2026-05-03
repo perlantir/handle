@@ -203,10 +203,10 @@ function latestToolCall(toolCalls: ToolCallState[], status?: ToolCallState['stat
 }
 
 export function LeftPane({ state, task }: LeftPaneProps) {
-  const [tab, setTab] = useState<LeftTab>('plan');
+  const [tab, setTab] = useState<LeftTab>('chat');
 
   return (
-    <aside className="flex min-h-0 flex-col border-r border-border-subtle">
+    <aside className="flex min-h-0 flex-1 flex-col border-r border-border-subtle">
       <div className="flex gap-1 px-5 py-[14px] pb-3">
         {tabLabels.map(([key, label]) => (
           <button

@@ -11,7 +11,10 @@ export interface ApprovalStore {
     create(args: unknown): Promise<{ id: string; status: string; taskId: string }>;
     updateMany(args: unknown): Promise<{ count: number }>;
   };
-  task: {
+  agentRun?: {
+    update(args: unknown): Promise<unknown>;
+  };
+  task?: {
     update(args: unknown): Promise<unknown>;
   };
 }
@@ -35,6 +38,22 @@ const approvalWaiters = new Map<
 >();
 
 async function updateTaskStatus(store: ApprovalStore, taskId: string, status: TaskStatus) {
+  const data =
+    store.agentRun && status === 'STOPPED'
+      ? { status: 'COMPLETED' }
+      : store.agentRun && status === 'ERROR'
+        ? { status: 'FAILED' }
+        : { status };
+
+  if (store.agentRun) {
+    await store.agentRun.update({
+      data,
+      where: { id: taskId },
+    });
+    return;
+  }
+
+  if (!store.task) return;
   await store.task.update({
     data: { status },
     where: { id: taskId },

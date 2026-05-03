@@ -31,6 +31,9 @@ import {
   type SettingsProvider,
   type SettingsProviderId,
 } from "@/lib/settingsProviders";
+import { BrowserSettings } from "./BrowserSettings";
+import { ExecutionSettings } from "./ExecutionSettings";
+import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 
 type OpenAIAuthChoice = "apiKey" | "both" | "chatgpt-oauth";
 
@@ -85,15 +88,24 @@ const providerMeta: Record<
   },
 };
 
-const settingsNav = [
-  "Providers",
-  "Profile",
-  "Approvals & trust",
-  "Memory",
-  "Privacy",
-  "Billing",
-  "Keyboard",
-  "Advanced",
+type SettingsSection = "Browser" | "Defaults" | "Execution" | "Providers";
+
+const settingsNav: Array<{
+  disabled?: boolean;
+  label: string;
+  section?: SettingsSection;
+}> = [
+  { label: "Providers", section: "Providers" },
+  { label: "Defaults", section: "Defaults" },
+  { label: "Execution", section: "Execution" },
+  { label: "Browser", section: "Browser" },
+  { disabled: true, label: "Profile" },
+  { disabled: true, label: "Approvals & trust" },
+  { disabled: true, label: "Memory" },
+  { disabled: true, label: "Privacy" },
+  { disabled: true, label: "Billing" },
+  { disabled: true, label: "Keyboard" },
+  { disabled: true, label: "Advanced" },
 ];
 
 interface ProviderDraft {
@@ -160,6 +172,8 @@ function sortProviders(providers: SettingsProvider[]) {
 }
 
 export function SettingsProvidersScreen() {
+  const [activeSection, setActiveSection] =
+    useState<SettingsSection>("Providers");
   const [drafts, setDrafts] = useState<
     Partial<Record<SettingsProviderId, ProviderDraft>>
   >({});
@@ -477,23 +491,27 @@ export function SettingsProvidersScreen() {
     <div className="grid h-full min-h-0 grid-cols-[220px_1fr] overflow-hidden">
       <aside className="border-r border-border-subtle px-4 py-6">
         <nav aria-label="Settings sections" className="flex flex-col gap-1">
-          {settingsNav.map((label) => {
-            const active = label === "Providers";
+          {settingsNav.map((item) => {
+            const active = item.section === activeSection;
 
             return (
               <button
-                key={label}
+                key={item.label}
                 aria-current={active ? "page" : undefined}
                 className={cn(
                   "mx-2 rounded-md px-4 py-2 text-left text-[12.5px] tracking-[-0.005em]",
                   active
                     ? "bg-[rgba(20,22,26,0.05)] font-medium text-text-primary"
                     : "font-normal text-text-secondary",
+                  item.disabled && "text-text-muted",
                 )}
-                disabled={!active}
+                disabled={item.disabled}
+                onClick={() => {
+                  if (item.section) setActiveSection(item.section);
+                }}
                 type="button"
               >
-                {label}
+                {item.label}
               </button>
             );
           })}
@@ -507,24 +525,28 @@ export function SettingsProvidersScreen() {
               Settings
             </h1>
             <div className="mt-5 text-[11px] font-medium uppercase tracking-[0.04em] text-text-muted">
-              Providers
+              {activeSection}
             </div>
           </header>
 
-          {loading ? (
+          {activeSection === "Execution" ? <ExecutionSettings /> : null}
+          {activeSection === "Browser" ? <BrowserSettings /> : null}
+          {activeSection === "Defaults" ? <ProjectDefaultsSettings /> : null}
+
+          {activeSection === "Providers" && loading ? (
             <div className="flex items-center gap-2 text-[12.5px] text-text-tertiary">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               Loading providers
             </div>
           ) : null}
 
-          {loadError ? (
+          {activeSection === "Providers" && loadError ? (
             <div className="rounded-lg border border-status-error/20 bg-status-error/5 px-3 py-2 text-[12.5px] text-status-error">
               {loadError}
             </div>
           ) : null}
 
-          {!loading && !loadError ? (
+          {activeSection === "Providers" && !loading && !loadError ? (
             <div className="flex flex-col gap-3">
               {providers.map((provider) => (
                 <ProviderSettingsCard

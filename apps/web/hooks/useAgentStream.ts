@@ -46,6 +46,14 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
   switch (event.type) {
     case 'approval_request':
       return { ...state, pendingApproval: { ...event.request, approvalId: event.approvalId } };
+    case 'agent_run_cancelled':
+      return {
+        ...state,
+        error: null,
+        pendingApproval: null,
+        status: 'CANCELLED',
+        thought: '',
+      };
     case 'browser_screenshot':
       return {
         ...state,
@@ -54,7 +62,7 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
     case 'error':
       return { ...state, error: event.message, status: 'ERROR' };
     case 'message':
-      return { ...state, finalMessage: event.content };
+      return { ...state, finalMessage: event.content, thought: '' };
     case 'plan_update':
       return { ...state, planSteps: event.steps };
     case 'provider_fallback':
@@ -64,6 +72,10 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
         ...state,
         pendingApproval: event.status === 'WAITING' ? state.pendingApproval : null,
         status: event.status,
+        thought:
+          event.status === 'STOPPED' || event.status === 'ERROR' || event.status === 'CANCELLED'
+            ? ''
+            : state.thought,
       };
     case 'thought':
       return { ...state, thought: state.thought + event.content };

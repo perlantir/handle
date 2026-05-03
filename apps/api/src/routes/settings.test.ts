@@ -12,7 +12,9 @@ import type {
 } from "../providers/types";
 import {
   createSettingsRouter,
+  type BrowserSettingsRow,
   type CreateSettingsRouterOptions,
+  type ExecutionSettingsRow,
   type KeychainLike,
   type ProviderConfigRow,
   type SettingsRouteStore,
@@ -57,6 +59,60 @@ function store(rows: ProviderConfigRow[]): SettingsRouteStore {
   };
 }
 
+function executionSettingsStore(
+  overrides: Partial<ExecutionSettingsRow> = {},
+): SettingsRouteStore {
+  let record: ExecutionSettingsRow = {
+    cleanupPolicy: "keep-all",
+    defaultBackend: "e2b",
+    id: "global",
+    updatedAt: new Date("2026-05-02T12:00:00.000Z"),
+    ...overrides,
+  };
+  const providerStore = store([row({ id: "openai" })]);
+
+  return {
+    ...providerStore,
+    executionSettings: {
+      findUnique: vi.fn(async () => record),
+      update: vi.fn(async (args: unknown) => {
+        const { data } = args as { data: Partial<ExecutionSettingsRow> };
+        record = { ...record, ...data };
+        return record;
+      }),
+      upsert: vi.fn(async (args: unknown) => {
+        const { create } = args as { create: ExecutionSettingsRow };
+        record = record ?? create;
+        return record;
+      }),
+    },
+  };
+}
+
+function browserSettingsStore(
+  overrides: Partial<BrowserSettingsRow> = {},
+): SettingsRouteStore {
+  let record: BrowserSettingsRow = {
+    id: "global",
+    mode: "separate-profile",
+    updatedAt: new Date("2026-05-02T12:00:00.000Z"),
+    ...overrides,
+  };
+  const providerStore = store([row({ id: "openai" })]);
+
+  return {
+    ...providerStore,
+    browserSettings: {
+      update: vi.fn(async (args: unknown) => {
+        const { data } = args as { data: Partial<BrowserSettingsRow> };
+        record = { ...record, ...data };
+        return record;
+      }),
+      upsert: vi.fn(async () => record),
+    },
+  };
+}
+
 function provider(
   config: ProviderConfig,
   model: BaseChatModel,
@@ -76,7 +132,10 @@ interface CreateAppOptions {
   createProvider?: (config: ProviderConfig) => ProviderInstance;
   getUserId?: () => string | null;
   keychain?: KeychainLike;
+  openPathInFinder?: CreateSettingsRouterOptions["openPathInFinder"];
+  resetBrowserProfile?: CreateSettingsRouterOptions["resetBrowserProfile"];
   store?: SettingsRouteStore;
+  testActualChromeConnection?: CreateSettingsRouterOptions["testActualChromeConnection"];
 }
 
 function createApp({
@@ -85,7 +144,10 @@ function createApp({
   createProvider,
   getUserId = () => "user-test",
   keychain,
+  openPathInFinder,
+  resetBrowserProfile,
   store: routeStore = store([row({ id: "openai" })]),
+  testActualChromeConnection,
 }: CreateAppOptions = {}) {
   const app = express();
   const routerOptions: CreateSettingsRouterOptions = {
@@ -96,6 +158,11 @@ function createApp({
   };
   if (createProvider) routerOptions.createProvider = createProvider;
   if (keychain) routerOptions.keychain = keychain;
+  if (openPathInFinder) routerOptions.openPathInFinder = openPathInFinder;
+  if (resetBrowserProfile) routerOptions.resetBrowserProfile = resetBrowserProfile;
+  if (testActualChromeConnection) {
+    routerOptions.testActualChromeConnection = testActualChromeConnection;
+  }
 
   app.use(express.json());
   app.use("/api/settings", createSettingsRouter(routerOptions));
@@ -118,6 +185,144 @@ const expectedKeyFormats: Record<ProviderId, string> = {
     "sk- or sk-proj- followed by 20+ letters, numbers, underscores, or dashes",
   openrouter: "sk-or- followed by 20+ letters, numbers, underscores, or dashes",
 };
+
+describe("settings execution route", () => {
+  it("returns the execution settings with the workspace base directory", async () => {
+    const routeStore = executionSettingsStore({
+      defaultBackend: "local",
+    });
+
+    const response = await request(createApp({ store: routeStore }))
+      .get("/api/settings/execution")
+      .expect(200);
+
+    expect(response.body.execution).toMatchObject({
+      cleanupPolicy: "keep-all",
+      defaultBackend: "local",
+      workspaceBaseDir: expect.stringContaining("Documents/Handle/workspaces"),
+    });
+    expect(routeStore.executionSettings?.upsert).toHaveBeenCalled();
+  });
+
+  it("updates the default execution backend", async () => {
+    const routeStore = executionSettingsStore();
+
+    const response = await request(createApp({ store: routeStore }))
+      .put("/api/settings/execution")
+      .send({ defaultBackend: "local" })
+      .expect(200);
+
+    expect(response.body.execution).toMatchObject({
+      cleanupPolicy: "keep-all",
+      defaultBackend: "local",
+    });
+    expect(routeStore.executionSettings?.update).toHaveBeenCalledWith({
+      data: { defaultBackend: "local" },
+      where: { id: "global" },
+    });
+  });
+
+  it("opens the workspace folder via injectable opener", async () => {
+    const openPathInFinder = vi.fn().mockResolvedValue(undefined);
+
+    const response = await request(
+      createApp({
+        openPathInFinder,
+        store: executionSettingsStore(),
+      }),
+    )
+      .post("/api/settings/execution/open-workspace")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      opened: true,
+      path: expect.stringContaining("Documents/Handle/workspaces"),
+    });
+    expect(openPathInFinder).toHaveBeenCalledWith(
+      expect.stringContaining("Documents/Handle/workspaces"),
+    );
+  });
+});
+
+describe("settings browser route", () => {
+  it("returns browser settings with profile and actual Chrome endpoint", async () => {
+    const routeStore = browserSettingsStore({ mode: "actual-chrome" });
+
+    const response = await request(createApp({ store: routeStore }))
+      .get("/api/settings/browser")
+      .expect(200);
+
+    expect(response.body.browser).toMatchObject({
+      actualChromeEndpoint: "http://127.0.0.1:9222",
+      mode: "actual-chrome",
+      profileDir: expect.stringContaining(".config/handle/chrome-profile"),
+    });
+    expect(routeStore.browserSettings?.upsert).toHaveBeenCalled();
+  });
+
+  it("updates browser mode", async () => {
+    const routeStore = browserSettingsStore();
+
+    const response = await request(createApp({ store: routeStore }))
+      .put("/api/settings/browser")
+      .send({ mode: "actual-chrome" })
+      .expect(200);
+
+    expect(response.body.browser).toMatchObject({
+      mode: "actual-chrome",
+    });
+    expect(routeStore.browserSettings?.update).toHaveBeenCalledWith({
+      data: { mode: "actual-chrome" },
+      where: { id: "global" },
+    });
+  });
+
+  it("resets the separate profile through an injectable resetter", async () => {
+    const resetBrowserProfile = vi.fn().mockResolvedValue(undefined);
+
+    const response = await request(
+      createApp({
+        resetBrowserProfile,
+        store: browserSettingsStore(),
+      }),
+    )
+      .post("/api/settings/browser/reset-profile")
+      .expect(200);
+
+    expect(response.body).toMatchObject({
+      profileDir: expect.stringContaining(".config/handle/chrome-profile"),
+      reset: true,
+    });
+    expect(resetBrowserProfile).toHaveBeenCalledWith(
+      expect.stringContaining(".config/handle/chrome-profile"),
+    );
+  });
+
+  it("tests actual Chrome connection through an injectable checker", async () => {
+    const testActualChromeConnection = vi.fn().mockResolvedValue({
+      connected: true,
+      detail: "Chrome/147",
+    });
+
+    const response = await request(
+      createApp({
+        store: browserSettingsStore(),
+        testActualChromeConnection,
+      }),
+    )
+      .post("/api/settings/browser/test-actual-chrome")
+      .expect(200);
+
+    expect(response.body).toEqual({
+      connected: true,
+      detail: "Chrome/147",
+      endpoint: "http://127.0.0.1:9222",
+    });
+    expect(testActualChromeConnection).toHaveBeenCalledWith(
+      "http://127.0.0.1:9222",
+    );
+  });
+});
 
 function mockKeychain(readBack = "unused-key") {
   return {

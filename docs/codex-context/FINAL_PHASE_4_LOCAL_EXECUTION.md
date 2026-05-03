@@ -279,6 +279,7 @@ const HIGH_RISK_COMMANDS = new Set([
 
 const FORBIDDEN_COMMANDS = new Set([
   'shutdown', 'reboot', 'halt', 'poweroff',
+  'doas', 'pkexec',
 ]);
 
 export type Decision = 'allow' | 'approve' | 'deny';
@@ -351,6 +352,34 @@ export class SafetyGovernor {
   }
 }
 ```
+
+==================================================
+WORKSPACE BOUNDARY FOR FILE DELETES
+==================================================
+
+Workspace deletes still require approval in Phase 4.
+
+Rationale: the workspace might contain user-generated artifacts.
+Phase 11 polish may relax this to allow within-workspace deletes
+after a configurable confirmation prompt.
+
+==================================================
+SHELL EXECUTION RATE LIMITING
+==================================================
+
+LocalBackend.shellExec must rate-limit the agent to 10 calls per
+second per task.
+
+Approval-required commands count against the rate limit at request
+time, not approval time. If the rate limit is hit, throw a clear
+error to the agent:
+
+```
+Shell execution rate limit exceeded; max 10 commands per second per task.
+```
+
+Rationale: agent runaway loops would otherwise thrash the user's
+filesystem in seconds.
 
 ==================================================
 LOCAL BROWSER SESSION
@@ -427,6 +456,34 @@ export async function createLocalBrowserSession(
     },
   };
 }
+```
+
+==================================================
+BROWSER ACTUAL-CHROME MODE: HEIGHTENED APPROVAL
+==================================================
+
+When the user enables actual-Chrome mode and the agent attempts to
+connect, the approval modal must list specifically what's at risk:
+
+- "Agent will see: any tab you have open"
+- "Agent will see: your logged-in sessions to all sites"
+- "Agent will see: saved passwords visible to extensions"
+- "Agent will see: browsing history"
+
+Default the modal to declined: button focus goes to "Deny", not
+"Approve".
+
+Require an explicit "I understand" checkbox before the "Approve"
+button is enabled.
+
+After approval expires via the 5 minute timeout, require fresh
+approval. Never carry actual-Chrome approval over to a later task or
+later connection attempt.
+
+Each approval is logged to audit.log with:
+
+```typescript
+action: 'browser_use_actual_chrome'
 ```
 
 ==================================================
@@ -521,21 +578,164 @@ Each type has its own modal copy:
   submit a form."
 
 ==================================================
+AUDIT LOG
+==================================================
+
+SafetyGovernor produces audit log entries at:
+
+```
+~/Library/Logs/Handle/audit.log
+```
+
+It writes an entry for every checked action, not just denials. The
+file is JSON Lines: one JSON object per line.
+
+```typescript
+interface AuditLogEntry {
+  timestamp: string;          // ISO 8601
+  taskId: string;
+  action: 'file_write' | 'file_delete' | 'shell_exec' | 'browser_use_actual_chrome';
+  target: string;             // path or command or URL
+  decision: 'allow' | 'approve' | 'deny';
+  approved?: boolean;          // present when decision was 'approve'
+  approvalDurationMs?: number; // time user took to decide
+  matchedPattern?: string;     // which regex/rule fired (for 'deny' or 'approve')
+  workspaceDir: string;        // for context
+}
+```
+
+Audit log is append-only. No audit log rotation in Phase 4; defer
+rotation to Phase 11 polish. Logs survive task completion. The user
+can review the log during a task:
+
+```bash
+tail -f ~/Library/Logs/Handle/audit.log
+```
+
+or after a task:
+
+```bash
+cat ~/Library/Logs/Handle/audit.log
+```
+
+==================================================
 TESTS
 ==================================================
+
+Required test coverage:
 
 1. ExecutionBackend interface implementations
 2. LocalBackend.fileWrite respects workspace boundary
 3. LocalBackend.shellExec calls SafetyGovernor
-4. SafetyGovernor.checkFileWrite returns correct decision for
-   various paths
-5. SafetyGovernor.checkShellExec returns correct decision for
-   various commands
-6. LocalBackend.fileDelete denies on / and ~
-7. LocalBrowserSession launches with separate profile
-8. LocalBrowserSession actual-chrome requires approval
-9. Backend toggle creates task with correct backend
-10. Workspace UI shows correct backend pill
+4. LocalBackend.fileRead and fileList preserve existing Phase 1
+   behavior
+5. LocalBackend.fileDelete requires approval inside workspace
+6. LocalBrowserSession launches with separate profile
+7. LocalBrowserSession actual-Chrome requires heightened approval
+8. Backend toggle creates task with correct backend
+9. Workspace UI shows correct backend pill
+10. Audit log entries are written for allow, approve, and deny
+    decisions
+
+SafetyGovernor must have at least 30 explicit unit tests covering the
+edge cases below.
+
+Forbidden pattern tests. Each must deny:
+
+1. `/System/Library/Foo`
+2. `/private/etc/passwd`
+3. `/usr/include/something`
+4. `/etc/hosts`
+5. `/var/log/system.log`
+6. `/Library/Preferences/com.apple.foo.plist`
+7. `/Applications/Calculator.app/Contents`
+8. `~/Library/Keychains/login.keychain`
+9. `~/.ssh/id_rsa`
+10. `~/.aws/credentials`
+11. `~/.config/anything-not-handle/foo.txt`
+
+Allow-list contrast:
+
+12. `/usr/local/foo` is allowed or approval-gated according to the
+    surrounding action, but must not match the forbidden `/usr`
+    pattern.
+
+Path traversal tests:
+
+13. `<workspace>/../../System/etc` resolves and denies
+14. `<workspace>/./../etc/hosts` resolves and denies
+15. A workspace symlink pointing to `/System` resolves and denies
+
+Quoting and case tests:
+
+16. `'/System/Library'` quoted in a command denies
+17. `/System/library` lowercased denies on default case-insensitive
+    macOS volumes
+18. `/System/Library/` trailing slash denies
+19. `/System/Library` no trailing slash denies
+
+Sudo and privilege escalation tests:
+
+20. `sudo` denies
+21. `sudo -i` denies
+22. `sudo -s` denies
+23. `sudo bash` denies
+24. `echo hi && sudo cat /etc/passwd` denies, caught by pipe/chain
+    checks
+25. `doas <anything>` denies
+26. `pkexec <anything>` denies
+27. `$SUDO foo` denies
+28. `${SUDO} foo` denies
+
+Other dangerous command patterns:
+
+29. `rm -rf /` denies
+30. `rm -rf /*` denies
+31. `rm -rf ~` denies
+32. `rm -rf ~/Documents` requires approval, not allow
+33. `mkfs.<anything>` denies
+34. `dd if=/dev/zero of=/dev/disk0` denies
+
+Add `doas` and `pkexec` to the FORBIDDEN_COMMANDS set.
+
+==================================================
+PATTERNS APPLIED FROM PHASE 3
+==================================================
+
+- Diagnostic logging from day 1 (Rule 31)
+- Action-specific diagnostic discipline (Rule 32), including local
+  browser session screenshots and actions
+- Approval gates with audit logs (Rule 33); Phase 4 SafetyGovernor is
+  the canonical implementation
+- Per-subsystem commits (Rule 11)
+- Rule 34: live smoke verified before human handoff
+- Smoke tests for the canonical local task: write hello world, run
+  Python, read output
+- Live integration smoke equivalent to Phase 3 Section E: mixed task
+  using the local backend that exercises file, shell, and browser tools
+  in one task
+
+==================================================
+SMOKE TESTS REQUIRED FOR PHASE 4
+==================================================
+
+Per Rule 34, Codex runs each smoke before handing off:
+
+- `pnpm smoke:local-backend-basic`: file write/read/list/delete inside
+  workspace, no approval needed except deletes as specified above
+- `pnpm smoke:local-backend-safety`: attempts known-dangerous actions
+  and asserts each is denied with the correct matched pattern
+- `pnpm smoke:local-backend-audit-log`: verifies audit.log entries
+  match the schema for various action types
+- `pnpm smoke:local-browser-separate-profile`: launches separate
+  Chrome profile, navigates, and screenshots
+- `pnpm smoke:local-browser-actual-chrome`: requires user to start
+  Chrome with debug port, includes setup check, requires approval
+- `pnpm smoke:local-rate-limit`: fires 50 shell_exec calls in 1 second
+  and asserts the rate limit kicks in at 10
+- `pnpm smoke:local-agent-integration`: mixed task: write file, list
+  workspace, run Python, read output. Real local backend, real agent.
+  Equivalent to Phase 3 Section E for local backend.
 
 ==================================================
 GATE CRITERIA

@@ -539,6 +539,45 @@ introduces new failure modes. Phase 2 surfaced this discipline through
 the KIMI, OAuth, and plan-generation debug cycles.
 
 ==================================================
+RULE 32: VISION-BASED AGENT TOOLS REQUIRE THEIR OWN DIAGNOSTIC DISCIPLINE
+==================================================
+
+When an agent's tool surface includes vision, screenshots, or
+coordinate-based actions, every action must log:
+- Input parameters
+- Byte counts of any media
+- Output classification, such as "click registered" or "no change
+  detected"
+- Timing
+
+This is in addition to Rule 31's diagnostic-first discipline. Vision
+actions fail in distinctive ways: models misjudge pixel locations,
+screenshots race with UI updates, and sandbox displays can fail or
+start in unexpected states. These need richer logs than text-only
+tools to debug.
+
+==================================================
+RULE 33: CAPABILITIES THAT ACT ON THE USER'S REAL MACHINE REQUIRE UNCONDITIONAL APPROVAL GATES AND AUDIT LOGS
+==================================================
+
+Any tool that affects the user's host filesystem, real network state,
+real browser sessions, or real installed applications must:
+- Be gated through a typed approval flow with the action and target in
+  the modal copy
+- Log the actual call in a persistent audit log at
+  ~/Library/Logs/Handle/audit.log, using JSON Lines format
+- Include timestamp, action, target, and decision in the audit entry
+- Default-deny when in doubt, following the allow -> approve -> deny
+  ladder with deny as the safe default
+- Have unit tests asserting deny fires for known-dangerous patterns
+
+This rule applies retroactively. Phase 4's SafetyGovernor is the
+canonical implementation. Future phases adding host-affecting
+capabilities, including Phase 6 integrations that change real OAuth
+state and Phase 9 schedules running unattended, extend the same
+pattern.
+
+==================================================
 RULE 34: CODEX RUNS LIVE SMOKE BEFORE HUMAN VERIFICATION
 ==================================================
 

@@ -153,7 +153,17 @@ async function mockSettingsProvidersApi(
   const requests: RecordedRequest[] = [];
   let oauthStatus = options.oauthStatus ?? disconnectedOAuthStatus();
 
-  await page.route("**/api/settings/providers**", async (route) => {
+  await page.route("**/api/projects**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/projects") {
+      await jsonRoute(route, 200, { projects: [] });
+      return;
+    }
+
+    await jsonRoute(route, 200, { conversations: [] });
+  });
+
+  await page.route("**/api/settings/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
@@ -161,6 +171,18 @@ async function mockSettingsProvidersApi(
     const body = await requestBody(route);
 
     requests.push({ body, method, path });
+
+    if (method === "GET" && path === "/api/settings/execution") {
+      await jsonRoute(route, 200, {
+        execution: {
+          cleanupPolicy: "keep-all",
+          defaultBackend: "e2b",
+          updatedAt: "2026-05-02T12:00:00.000Z",
+          workspaceBaseDir: "/Users/perlantir/Documents/Handle/workspaces",
+        },
+      });
+      return;
+    }
 
     if (method === "GET" && path === "/api/settings/providers") {
       await jsonRoute(route, 200, { providers });

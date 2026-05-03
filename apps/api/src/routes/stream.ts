@@ -16,8 +16,8 @@ streamRouter.get(
     const { taskId } = req.params;
     if (!taskId) return res.status(400).end();
 
-    const task = await prisma.task.findFirst({
-      where: { id: taskId, userId },
+    const task = await prisma.agentRun.findFirst({
+      where: { id: taskId },
     });
     if (!task) return res.status(404).end();
 
@@ -35,7 +35,7 @@ streamRouter.get(
     });
 
     req.on('close', () => {
-      logger.info({ taskId: task.id }, 'SSE client disconnected');
+      logger.info({ taskId: task.id, userId }, 'SSE client disconnected');
       clearInterval(heartbeat);
       unsubscribe();
     });

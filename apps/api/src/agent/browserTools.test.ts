@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import type { SSEEvent } from "@handle/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserSession } from "../execution/browserSession";
-import type { E2BSandboxLike } from "../execution/types";
+import type { E2BSandboxLike, ExecutionBackend } from "../execution/types";
 import { resetBrowserScreenshotThrottleForTest } from "../lib/browserScreenshotEvents";
 import { subscribeToTask } from "../lib/eventBus";
 import { createBrowserToolDefinitions } from "./browserTools";
@@ -51,9 +51,34 @@ function browserSession(overrides: Partial<BrowserSession> = {}): BrowserSession
   };
 }
 
+function backend(session: BrowserSession): ExecutionBackend {
+  return {
+    id: "e2b",
+    async browserSession() {
+      return session;
+    },
+    async fileDelete() {},
+    async fileList() {
+      return [];
+    },
+    async fileRead() {
+      return "";
+    },
+    async fileWrite() {},
+    getWorkspaceDir() {
+      return "/home/user";
+    },
+    async initialize() {},
+    async shellExec() {
+      return { exitCode: 0, stderr: "", stdout: "" };
+    },
+    async shutdown() {},
+  };
+}
+
 function context(session = browserSession()): ToolExecutionContext {
   return {
-    browserSession: session,
+    backend: backend(session),
     sandbox: sandbox(),
     taskId: "task-browser-tools",
   };
@@ -87,6 +112,7 @@ describe("browserTools", () => {
       "browser_wait_for_selector",
     ]);
     expect(definitions.every((definition) => definition.backendSupport.e2b)).toBe(true);
+    expect(definitions.every((definition) => definition.backendSupport.local)).toBe(true);
     expect(definitions.every((definition) => definition.requiresApproval === false)).toBe(true);
   });
 

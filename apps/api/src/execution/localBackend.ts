@@ -1,0 +1,404 @@
+import type { ApprovalPayload } from '@handle/shared';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { promises as defaultFs } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { awaitApproval, type ApprovalDecision } from '../approvals/approvalWaiter';
+import { hasApprovalGrant } from '../approvals/approvalGrants';
+import { logger } from '../lib/logger';
+import { redactSecrets } from '../lib/redact';
+import type { BrowserSession } from './browserSession';
+import { createLocalBrowserSession, type LocalBrowserMode } from './localBrowser';
+import {
+  SafetyGovernor,
+  type AuditLogAction,
+  type ProjectPermissionMode,
+  type SafetyCheckResult,
+  type SafetyDecision,
+  type WorkspaceScope,
+} from './safetyGovernor';
+import type {
+  ExecutionBackend,
+  ExecutionBrowserSessionOptions,
+  ExecutionCommandOptions,
+  ExecutionCommandResult,
+  ExecutionFileEntry,
+} from './types';
+
+interface LocalDirent {
+  isDirectory(): boolean;
+  name: string;
+}
+
+interface LocalStats {
+  size: number;
+}
+
+export interface LocalBackendFilesystem {
+  mkdir(path: string, options?: { recursive?: boolean }): Promise<unknown>;
+  readFile(path: string, encoding: 'utf8'): Promise<string>;
+  readdir(path: string, options: { withFileTypes: true }): Promise<LocalDirent[]>;
+  rm(path: string, options?: { force?: boolean; recursive?: boolean }): Promise<unknown>;
+  stat(path: string): Promise<LocalStats>;
+  writeFile(path: string, content: string, encoding: 'utf8'): Promise<unknown>;
+}
+
+export type LocalApprovalRequester = (
+  taskId: string,
+  request: ApprovalPayload,
+  options?: { timeoutMs?: number },
+) => Promise<ApprovalDecision>;
+
+export interface LocalBackendOptions {
+  approvalTimeoutMs?: number;
+  auditLogPath?: string;
+  browserMode?: LocalBrowserMode;
+  customScopePath?: string | null;
+  fileSystem?: LocalBackendFilesystem;
+  permissionMode?: ProjectPermissionMode | 'full-access' | 'ask' | 'plan' | null;
+  projectId?: string;
+  requestApproval?: LocalApprovalRequester;
+  safetyGovernor?: SafetyGovernor;
+  workspaceDir?: string;
+  workspaceScope?: WorkspaceScope | 'default-workspace' | 'custom-folder' | 'desktop' | 'full-access' | null;
+}
+
+const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
+const SHELL_RATE_LIMIT_PER_SECOND = 10;
+export const SHELL_RATE_LIMIT_MESSAGE = 'Shell execution rate limit exceeded; max 10 commands per second per task.';
+
+export class ShellRateLimitError extends Error {
+  readonly code = 'SHELL_RATE_LIMIT_EXCEEDED';
+
+  constructor() {
+    super(SHELL_RATE_LIMIT_MESSAGE);
+    this.name = 'ShellRateLimitError';
+  }
+}
+
+export function isShellRateLimitError(err: unknown): err is ShellRateLimitError {
+  if (err instanceof ShellRateLimitError) return true;
+  if (!(err instanceof Error)) return false;
+
+  const maybeCode = 'code' in err ? err.code : undefined;
+  return (
+    err.name === 'ShellRateLimitError' ||
+    maybeCode === 'SHELL_RATE_LIMIT_EXCEEDED' ||
+    err.message === SHELL_RATE_LIMIT_MESSAGE
+  );
+}
+
+function defaultWorkspaceDir(taskId: string) {
+  return join(homedir(), 'Documents', 'Handle', 'workspaces', taskId);
+}
+
+function approvalPayloadForAction(action: AuditLogAction, result: SafetyCheckResult): ApprovalPayload {
+  if (action === 'file_write') {
+    return {
+      path: result.resolvedTarget,
+      reason: `Write to ${result.resolvedTarget}? This is outside the task workspace.`,
+      type: 'file_write_outside_workspace',
+    };
+  }
+
+  if (action === 'file_delete') {
+    return {
+      path: result.resolvedTarget,
+      reason: `Delete ${result.resolvedTarget}?`,
+      type: 'file_delete',
+    };
+  }
+
+  throw new Error(`Unsupported file approval action: ${action}`);
+}
+
+export class LocalBackend implements ExecutionBackend {
+  readonly id = 'local' as const;
+  private readonly approvalTimeoutMs: number;
+  private readonly activeShellProcesses = new Set<ChildProcess>();
+  private browser: BrowserSession | null = null;
+  private readonly browserMode: LocalBrowserMode;
+  private readonly fs: LocalBackendFilesystem;
+  private readonly requestApproval: LocalApprovalRequester;
+  private readonly safetyGovernor: SafetyGovernor;
+  private readonly shellCallTimestamps: number[] = [];
+  private readonly projectId: string | null;
+  private readonly taskId: string;
+  private readonly workspaceDir: string;
+
+  constructor(taskId: string, options: LocalBackendOptions = {}) {
+    this.taskId = taskId;
+    this.workspaceDir = options.workspaceDir ?? defaultWorkspaceDir(taskId);
+    this.browserMode = options.browserMode ?? 'separate-profile';
+    this.fs = options.fileSystem ?? defaultFs;
+    this.projectId = options.projectId ?? null;
+    this.requestApproval = options.requestApproval ?? awaitApproval;
+    this.approvalTimeoutMs = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
+    this.safetyGovernor =
+      options.safetyGovernor ??
+      new SafetyGovernor({
+        ...(options.auditLogPath ? { auditLogPath: options.auditLogPath } : {}),
+        ...(options.customScopePath ? { customScopePath: options.customScopePath } : {}),
+        ...(options.projectId ? { projectId: options.projectId } : {}),
+        ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
+        taskId,
+        workspaceDir: this.workspaceDir,
+        ...(options.workspaceScope ? { workspaceScope: options.workspaceScope } : {}),
+      });
+  }
+
+  async initialize(_taskId = this.taskId) {
+    await this.fs.mkdir(this.workspaceDir, { recursive: true });
+  }
+
+  async shutdown(_taskId = this.taskId) {
+    for (const child of this.activeShellProcesses) {
+      if (!child.killed) child.kill('SIGTERM');
+    }
+    await this.browser?.destroy();
+    this.browser = null;
+    // Local workspaces persist for user inspection.
+  }
+
+  getWorkspaceDir() {
+    return this.workspaceDir;
+  }
+
+  async fileWrite(path: string, content: string) {
+    const result = await this.safetyGovernor.checkFileWrite(path);
+    const resolvedPath = await this.enforceFileDecision('file_write', result);
+
+    await this.fs.mkdir(dirname(resolvedPath), { recursive: true });
+    await this.fs.writeFile(resolvedPath, content, 'utf8');
+  }
+
+  async fileRead(path: string) {
+    const result = await this.safetyGovernor.checkFileRead(path);
+    if (result.decision !== 'allow') {
+      throw new Error(result.reason);
+    }
+
+    return this.fs.readFile(result.resolvedTarget, 'utf8');
+  }
+
+  async fileList(path: string): Promise<ExecutionFileEntry[]> {
+    const result = await this.safetyGovernor.checkFileList(path);
+    if (result.decision !== 'allow') {
+      throw new Error(result.reason);
+    }
+
+    const entries = await this.fs.readdir(result.resolvedTarget, { withFileTypes: true });
+    return Promise.all(
+      entries.map(async (entry) => {
+        const fullPath = join(result.resolvedTarget, entry.name);
+        const stat = await this.fs.stat(fullPath);
+        return {
+          isDir: entry.isDirectory(),
+          name: entry.name,
+          size: stat.size,
+        };
+      }),
+    );
+  }
+
+  async fileDelete(path: string) {
+    const result = await this.safetyGovernor.checkFileDelete(path);
+    const resolvedPath = await this.enforceFileDecision('file_delete', result);
+
+    await this.fs.rm(resolvedPath, { force: true, recursive: true });
+  }
+
+  async shellExec(command: string, opts: ExecutionCommandOptions): Promise<ExecutionCommandResult> {
+    await this.enforceShellRateLimit(command);
+
+    const result = this.safetyGovernor.checkShellExec(command);
+    await this.enforceShellDecision(result);
+
+    return new Promise<ExecutionCommandResult>((resolvePromise, reject) => {
+      const child = spawn('bash', ['-c', command], {
+        cwd: opts.cwd ?? this.workspaceDir,
+        env: { ...process.env, HANDLE_TASK_ID: this.taskId },
+      });
+      this.activeShellProcesses.add(child);
+      let stdout = '';
+      let stderr = '';
+      let timedOut = false;
+      let timeout: NodeJS.Timeout | null = null;
+
+      if (opts.timeoutMs) {
+        timeout = setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGKILL');
+        }, opts.timeoutMs);
+      }
+
+      child.stdout?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        stdout += text;
+        void opts.onStdout(text);
+      });
+
+      child.stderr?.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
+        stderr += text;
+        void opts.onStderr(text);
+      });
+
+      child.on('error', (err) => {
+        this.activeShellProcesses.delete(child);
+        if (timeout) clearTimeout(timeout);
+        reject(err);
+      });
+
+      child.on('exit', (code) => {
+        this.activeShellProcesses.delete(child);
+        if (timeout) clearTimeout(timeout);
+        resolvePromise({
+          exitCode: code ?? (timedOut ? 124 : 1),
+          stderr,
+          stdout,
+        });
+      });
+    });
+  }
+
+  async browserSession(options: ExecutionBrowserSessionOptions = {}): Promise<BrowserSession> {
+    if (!this.browser) {
+      this.browser = await createLocalBrowserSession({
+        ...(options.approval ? { approval: options.approval } : {}),
+        approvalTimeoutMs: this.approvalTimeoutMs,
+        mode: this.browserMode,
+        requestApproval: this.requestApproval,
+        safetyGovernor: this.safetyGovernor,
+        taskId: this.taskId,
+      });
+    }
+
+    return this.browser;
+  }
+
+  private async enforceFileDecision(action: 'file_write' | 'file_delete', result: SafetyCheckResult) {
+    if (result.decision === 'deny') {
+      await this.audit(action, result, 'deny');
+      throw new Error(result.reason);
+    }
+
+    if (result.decision === 'approve') {
+      const approvalRequest = approvalPayloadForAction(action, result);
+      if (hasApprovalGrant({ projectId: this.projectId, taskId: this.taskId }, approvalRequest)) {
+        await this.audit(action, result, 'approve', {
+          approvalDurationMs: 0,
+          approved: true,
+        });
+        return result.resolvedTarget;
+      }
+
+      const startedAt = Date.now();
+      const decision = await this.requestApproval(this.taskId, approvalRequest, {
+        timeoutMs: this.approvalTimeoutMs,
+      });
+      const approved = decision === 'approved';
+      await this.audit(action, result, 'approve', {
+        approvalDurationMs: Date.now() - startedAt,
+        approved,
+      });
+
+      if (!approved) {
+        throw new Error(decision === 'timeout' ? 'Approval timed out' : 'User denied approval');
+      }
+    } else {
+      await this.audit(action, result, 'allow');
+    }
+
+    return result.resolvedTarget;
+  }
+
+  private async enforceShellDecision(result: SafetyCheckResult) {
+    if (result.decision === 'deny') {
+      await this.audit('shell_exec', result, 'deny');
+      throw new Error(result.reason);
+    }
+
+    if (result.decision === 'approve') {
+      const approvalRequest: ApprovalPayload = {
+        command: result.resolvedTarget,
+        reason: `Run command: ${result.resolvedTarget}?`,
+        type: 'shell_exec',
+      };
+      if (hasApprovalGrant({ projectId: this.projectId, taskId: this.taskId }, approvalRequest)) {
+        await this.audit('shell_exec', result, 'approve', {
+          approvalDurationMs: 0,
+          approved: true,
+        });
+        return;
+      }
+
+      const startedAt = Date.now();
+      const decision = await this.requestApproval(
+        this.taskId,
+        approvalRequest,
+        { timeoutMs: this.approvalTimeoutMs },
+      );
+      const approved = decision === 'approved';
+      await this.audit('shell_exec', result, 'approve', {
+        approvalDurationMs: Date.now() - startedAt,
+        approved,
+      });
+
+      if (!approved) {
+        throw new Error(decision === 'timeout' ? 'Approval timed out' : 'User denied approval');
+      }
+      return;
+    }
+
+    await this.audit('shell_exec', result, 'allow');
+  }
+
+  private async enforceShellRateLimit(command: string) {
+    const now = Date.now();
+    while (this.shellCallTimestamps.length > 0 && now - this.shellCallTimestamps[0]! >= 1000) {
+      this.shellCallTimestamps.shift();
+    }
+
+    if (this.shellCallTimestamps.length >= SHELL_RATE_LIMIT_PER_SECOND) {
+      logger.warn(
+        {
+          command: redactSecrets(command),
+          projectId: this.projectId,
+          queueDepth: this.shellCallTimestamps.length,
+          taskId: this.taskId,
+          throwReason: SHELL_RATE_LIMIT_MESSAGE,
+          timestamp: new Date(now).toISOString(),
+        },
+        'Local shell execution rate limit hit',
+      );
+
+      await this.safetyGovernor.writeAuditEntry({
+        action: 'shell_exec',
+        decision: 'deny',
+        matchedPattern: 'rate_limit',
+        target: command,
+      });
+
+      throw new ShellRateLimitError();
+    }
+
+    this.shellCallTimestamps.push(now);
+  }
+
+  private async audit(
+    action: AuditLogAction,
+    result: SafetyCheckResult,
+    decision: SafetyDecision,
+    extra: { approvalDurationMs?: number; approved?: boolean } = {},
+  ) {
+    await this.safetyGovernor.writeAuditEntry({
+      action,
+      decision,
+      ...(extra.approved === undefined ? {} : { approved: extra.approved }),
+      ...(extra.approvalDurationMs === undefined ? {} : { approvalDurationMs: extra.approvalDurationMs }),
+      ...(result.matchedPattern ? { matchedPattern: result.matchedPattern } : {}),
+      target: result.resolvedTarget,
+    });
+  }
+}

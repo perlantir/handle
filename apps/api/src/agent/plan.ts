@@ -58,6 +58,7 @@ export interface EmitInitialPlanOptions {
     id: string;
     model: string;
   };
+  signal?: AbortSignal;
 }
 
 function truncateForLog(value: string, maxLength = 500) {
@@ -118,7 +119,9 @@ export async function emitInitialPlan(
       "Plan generation LangChain invoke started",
     );
 
-    const response = await llm.invoke(prompt.messages);
+    const response = await llm.invoke(prompt.messages, {
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
 
     logger.info(
       {

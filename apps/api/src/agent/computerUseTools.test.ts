@@ -3,8 +3,34 @@ import { describe, expect, it, vi } from "vitest";
 import { createComputerUseToolDefinitions } from "./computerUseTools";
 import type { ToolExecutionContext } from "./toolRegistry";
 
+function backend(): ToolExecutionContext["backend"] {
+  return {
+    id: "e2b",
+    async browserSession() {
+      throw new Error("browser not used in this test");
+    },
+    async fileDelete() {},
+    async fileList() {
+      return [];
+    },
+    async fileRead() {
+      return "";
+    },
+    async fileWrite() {},
+    getWorkspaceDir() {
+      return "/home/user";
+    },
+    async initialize() {},
+    async shellExec() {
+      return { exitCode: 0, stderr: "", stdout: "" };
+    },
+    async shutdown() {},
+  };
+}
+
 function desktopContext(): ToolExecutionContext {
   return {
+    backend: backend(),
     sandbox: {
       commands: {
         async run() {
@@ -67,6 +93,7 @@ describe("computerUseTools", () => {
       runComputerUse: vi.fn(),
     })[0]!;
     const context: ToolExecutionContext = {
+      backend: backend(),
       sandbox: {
         commands: {
           async run() {

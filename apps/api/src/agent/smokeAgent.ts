@@ -10,15 +10,24 @@ export function isSmokeAgentEnabled() {
   );
 }
 
-export async function runSmokeAgent(taskId: string, goal: string) {
+export async function runSmokeAgent(
+  taskId: string,
+  goal: string,
+  options: { signal?: AbortSignal } = {},
+) {
   emitTaskEvent({ type: "status_update", status: "RUNNING", taskId });
 
-  await prisma.task.update({
+  await prisma.agentRun.update({
     data: { sandboxId: "smoke-sandbox" },
     where: { id: taskId },
   });
 
-  await delay(5_000);
+  if (goal.includes("__HANDLE_SMOKE_HANG__")) {
+    await delay(60 * 60 * 1000, undefined, { signal: options.signal });
+    return;
+  }
+
+  await delay(5_000, undefined, { signal: options.signal });
   emitTaskEvent({
     type: "plan_update",
     steps: [
@@ -37,7 +46,7 @@ export async function runSmokeAgent(taskId: string, goal: string) {
     taskId,
   });
 
-  await delay(500);
+  await delay(500, undefined, { signal: options.signal });
   const callId = randomUUID();
   emitTaskEvent({
     type: "tool_call",
@@ -47,7 +56,7 @@ export async function runSmokeAgent(taskId: string, goal: string) {
     toolName: "file.write",
   });
 
-  await delay(150);
+  await delay(150, undefined, { signal: options.signal });
   emitTaskEvent({
     type: "tool_stream",
     callId,
@@ -56,7 +65,7 @@ export async function runSmokeAgent(taskId: string, goal: string) {
     taskId,
   });
 
-  await delay(150);
+  await delay(150, undefined, { signal: options.signal });
   emitTaskEvent({
     type: "tool_result",
     callId,
@@ -66,11 +75,22 @@ export async function runSmokeAgent(taskId: string, goal: string) {
 
   const finalMessage = "Smoke task completed and emitted a tool call.";
 
-  await prisma.message.create({
-    data: { content: finalMessage, role: "ASSISTANT", taskId },
+  const run = await prisma.agentRun.findUnique({
+    select: { conversationId: true },
+    where: { id: taskId },
   });
-  await prisma.task.update({
-    data: { status: "STOPPED" },
+  if (!run) throw new Error("Smoke agent run not found");
+
+  await prisma.message.create({
+    data: {
+      agentRunId: taskId,
+      content: finalMessage,
+      conversationId: run.conversationId,
+      role: "ASSISTANT",
+    },
+  });
+  await prisma.agentRun.update({
+    data: { completedAt: new Date(), result: finalMessage, status: "COMPLETED" },
     where: { id: taskId },
   });
 

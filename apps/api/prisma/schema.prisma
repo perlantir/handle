@@ -14,23 +14,23 @@ model User {
   email     String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  tasks     Task[]
 }
 
-model Task {
-  id               String     @id @default(cuid())
-  userId           String
-  status           TaskStatus @default(RUNNING)
-  goal             String
-  sandboxId        String?
-  backend          String     @default("e2b")
-  providerOverride String?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-  user             User       @relation(fields: [userId], references: [id])
-  messages         Message[]
+model Project {
+  id              String         @id @default(cuid())
+  name            String
+  workspaceScope  ScopeType      @default(DEFAULT_WORKSPACE)
+  customScopePath String?
+  permissionMode  String         @default("ASK")
+  defaultBackend  BackendType    @default(E2B)
+  defaultProvider String?
+  defaultModel    String?
+  browserMode     BrowserMode    @default(SEPARATE_PROFILE)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  conversations   Conversation[]
 
-  @@index([userId, createdAt])
+  @@index([createdAt])
 }
 
 model ProviderConfig {
@@ -50,6 +50,19 @@ model SafetySettings {
   updatedAt      DateTime @default(now()) @updatedAt
 }
 
+model ExecutionSettings {
+  id             String   @id @default("global")
+  defaultBackend String   @default("e2b")
+  cleanupPolicy  String   @default("keep-all")
+  updatedAt      DateTime @default(now()) @updatedAt
+}
+
+model BrowserSettings {
+  id        String   @id @default("global")
+  mode      String   @default("separate-profile")
+  updatedAt DateTime @default(now()) @updatedAt
+}
+
 enum TaskStatus {
   RUNNING
   WAITING
@@ -58,24 +71,88 @@ enum TaskStatus {
   PAUSED
 }
 
-model Message {
-  id         String   @id @default(cuid())
-  taskId     String
-  role       Role
-  content    String?
-  toolCalls  Json?
-  toolCallId String?
-  createdAt  DateTime @default(now())
-  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-
-  @@index([taskId, createdAt])
+enum ScopeType {
+  DEFAULT_WORKSPACE
+  CUSTOM_FOLDER
+  DESKTOP
+  FULL_ACCESS
 }
 
-enum Role {
+enum BackendType {
+  E2B
+  LOCAL
+}
+
+enum BrowserMode {
+  SEPARATE_PROFILE
+  ACTUAL_CHROME
+}
+
+model Conversation {
+  id        String     @id @default(cuid())
+  projectId String
+  title     String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  messages  Message[]
+  agentRuns AgentRun[]
+
+  @@index([projectId, updatedAt])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           MessageRole
+  content        String
+  agentRunId     String?
+  providerId     String?
+  modelName      String?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agentRun       AgentRun?    @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@index([agentRunId])
+}
+
+enum MessageRole {
   USER
   ASSISTANT
   SYSTEM
   TOOL
+}
+
+model AgentRun {
+  id             String         @id @default(cuid())
+  conversationId String
+  status         AgentRunStatus @default(RUNNING)
+  goal           String
+  result         String?
+  toolCalls      Json           @default("[]")
+  costUsd        Decimal?       @db.Decimal(10, 4)
+  backend        BackendType    @default(E2B)
+  providerId     String?
+  modelName      String?
+  sandboxId      String?
+  startedAt      DateTime       @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  conversation   Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  messages       Message[]
+
+  @@index([conversationId, startedAt])
+  @@index([status])
+}
+
+enum AgentRunStatus {
+  RUNNING
+  WAITING
+  COMPLETED
+  FAILED
+  CANCELLED
 }
 
 model ApprovalRequest {
