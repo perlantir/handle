@@ -190,6 +190,9 @@ const PHASE_3_BROWSER_AND_COMPUTER_USE_PROMPT = `
 - browser_scroll: Scroll the current page.
 - browser_wait_for_selector: Wait for a selector to appear.
 - computer_use: Ask Anthropic computer-use to inspect/control the visible desktop.
+- memory_save: Save a durable preference, project fact, decision, or idea.
+- memory_search: Search remembered facts relevant to the current task.
+- memory_forget: Forget memory after explicit user approval.
 </available_phase_3_tools>
 
 Phase 3 prompt version: ${SYSTEM_PROMPT_VERSION}

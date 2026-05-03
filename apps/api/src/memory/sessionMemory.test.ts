@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   appendMessageToZep,
+  forgetMemoryForProject,
   formatMemoryContext,
   getRelevantMemoryForTask,
   isMemoryEnabled,
@@ -21,6 +22,7 @@ function client(overrides: Record<string, unknown> = {}) {
       ok: true,
       value: [{ content: "Favorite color is teal", score: 0.2 }],
     }),
+    deleteSessionMemory: vi.fn().mockResolvedValue({ ok: true }),
     ...overrides,
   };
 }
@@ -121,5 +123,19 @@ describe("session memory", () => {
         fakeClient as never,
       ),
     ).resolves.toEqual([]);
+  });
+
+  it("forgets project memory by deleting the project namespace", async () => {
+    const fakeClient = client();
+
+    await expect(
+      forgetMemoryForProject(
+        { project: { id: "project-1", memoryScope: "GLOBAL_AND_PROJECT" } },
+        fakeClient as never,
+      ),
+    ).resolves.toEqual({ deletedSessions: 1 });
+    expect(fakeClient.deleteSessionMemory).toHaveBeenCalledWith({
+      sessionId: "project_project-1",
+    });
   });
 });

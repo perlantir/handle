@@ -16,6 +16,7 @@ import {
 } from "./toolRegistry";
 import { createBrowserToolDefinitions } from "./browserTools";
 import { createComputerUseToolDefinitions } from "./computerUseTools";
+import { createMemoryToolDefinitions } from "./memoryTools";
 import { createPhase1ToolDefinitions } from "./tools";
 import {
   buildHandleSystemPrompt,
@@ -92,6 +93,7 @@ export async function createHandleAgent(
   const tools = createLangChainTools(
     [
       ...createPhase1ToolDefinitions(),
+      ...createMemoryToolDefinitions(),
       ...createBrowserToolDefinitions(),
       ...createComputerUseToolDefinitions(),
     ],

@@ -22,6 +22,7 @@ const scopeLabels = {
   destructive_integration_action: ["Integration", "write"],
   file_delete: ["Files", "delete"],
   file_write_outside_workspace: ["Files", "write"],
+  memory_forget: ["Memory", "delete"],
   risky_browser_action: ["Browser", "approve"],
   shell_exec: ["Shell", "execute"],
 } satisfies Record<PendingApproval["request"]["type"], [string, string]>;
@@ -36,6 +37,8 @@ function approvalTitle(approval: PendingApproval) {
       return `Delete ${request.path ?? "selected path"}?`;
     case "file_write_outside_workspace":
       return `Write to ${request.path ?? "selected path"}? This is outside the task workspace.`;
+    case "memory_forget":
+      return "Forget memory?";
     case "risky_browser_action":
       return "Approve action?";
     case "shell_exec":

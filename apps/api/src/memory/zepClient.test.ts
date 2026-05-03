@@ -97,6 +97,9 @@ describe("HandleZepClient", () => {
           },
         ]);
       }
+      if (target.endsWith("/api/v1/sessions/session-1/memory") && init?.method === "DELETE") {
+        return new Response("OK");
+      }
       return new Response("unexpected", { status: 500 });
     });
     const client = new HandleZepClient({ baseUrl: "http://zep.test" }, fetchImpl as typeof fetch);
@@ -126,5 +129,8 @@ describe("HandleZepClient", () => {
         score: 0.25,
       },
     ]);
+    await expect(
+      client.deleteSessionMemory({ sessionId: "session-1" }),
+    ).resolves.toMatchObject({ ok: true });
   });
 });

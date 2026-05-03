@@ -173,6 +173,33 @@ export async function getRelevantMemoryForTask(
   return dedupeFacts(results).slice(0, 8);
 }
 
+export async function forgetMemoryForProject(
+  context: {
+    project?: MemoryProjectContext | null | undefined;
+    scope?: "all" | "global" | "project";
+    userId?: string | null | undefined;
+  },
+  client: HandleZepClient = getZepClient(),
+) {
+  if (!context.project) return { deletedSessions: 0 };
+  if (effectiveMemoryScope(context.project) === "NONE") return { deletedSessions: 0 };
+
+  const userId = context.userId ?? memoryUserId();
+  const scope = context.scope ?? "project";
+  const sessions = memorySessionIds({ project: context.project, userId }).filter(
+    (session) =>
+      (scope === "all" && (session.source === "global" || session.source === "project")) ||
+      session.source === scope,
+  );
+
+  let deletedSessions = 0;
+  for (const session of sessions) {
+    const result = await client.deleteSessionMemory({ sessionId: session.id });
+    if (result.ok) deletedSessions += 1;
+  }
+  return { deletedSessions };
+}
+
 export function formatMemoryContext(facts: MemoryFact[]) {
   if (facts.length === 0) return "";
   return [

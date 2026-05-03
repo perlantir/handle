@@ -228,6 +228,21 @@ export class HandleZepClient {
     });
   }
 
+  async deleteSessionMemory(input: {
+    sessionId: string;
+  }): Promise<ZepOperationResult> {
+    return this.safeOperation("delete_session_memory", async () => {
+      const response = await this.request(
+        `/api/v1/sessions/${encodeURIComponent(input.sessionId)}/memory`,
+        { method: "DELETE" },
+      );
+      if (response.ok) return response.text();
+      const body = await response.text();
+      if (response.status === 404) return "OK";
+      throw new Error(`Zep memory delete failed: HTTP ${response.status} ${body.slice(0, 240)}`);
+    });
+  }
+
   private async safeOperation<T>(
     operation: string,
     fn: () => Promise<T>,

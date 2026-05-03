@@ -131,6 +131,7 @@ export interface ApprovalPayload {
     | 'file_delete'
     | 'browser_use_actual_chrome'
     | 'risky_browser_action'
+    | 'memory_forget'
     | 'destructive_integration_action';
   command?: string;
   path?: string;

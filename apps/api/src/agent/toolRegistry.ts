@@ -3,6 +3,7 @@ import type { SideEffectClass } from '@handle/shared';
 import type { z } from 'zod';
 import type { BrowserSession } from '../execution/browserSession';
 import type { E2BSandboxLike, ExecutionBackend } from '../execution/types';
+import type { MemoryProjectContext } from '../memory/sessionMemory';
 
 export type ApprovalRequirement = boolean | ((input: unknown, context: ToolExecutionContext) => boolean | Promise<boolean>);
 
@@ -10,7 +11,9 @@ export interface ToolExecutionContext {
   taskId: string;
   backend: ExecutionBackend;
   browserSession?: BrowserSession;
+  conversationId?: string;
   memoryContext?: string;
+  memoryProject?: MemoryProjectContext | null;
   sandbox: E2BSandboxLike;
   trustedDomains?: string[];
 }

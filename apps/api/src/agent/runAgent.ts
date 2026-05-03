@@ -708,9 +708,14 @@ export function createAgentRunner({
         return;
       }
 
+      const memoryProject = normalizeMemoryProjectContext(project);
       const agentContext = {
         backend,
+        ...(memoryProject && runContext.conversationId
+          ? { conversationId: runContext.conversationId }
+          : {}),
         ...(memoryContext ? { memoryContext } : {}),
+        ...(memoryProject ? { memoryProject } : {}),
         taskId,
         sandbox,
         trustedDomains,
