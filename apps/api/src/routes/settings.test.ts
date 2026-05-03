@@ -542,6 +542,44 @@ describe("settings providers route", () => {
     expect(JSON.stringify(response.body)).not.toContain("test-key-not-real");
   });
 
+  it("exposes keyed providers as enabled after a fresh settings reset", async () => {
+    const routeStore = store([
+      row({ enabled: false, id: "openai", primaryModel: "gpt-5.2" }),
+      row({
+        enabled: false,
+        fallbackOrder: 2,
+        id: "anthropic",
+        primaryModel: "claude-opus-4-7",
+      }),
+    ]);
+    const keychain = {
+      deleteCredential: vi.fn(),
+      getCredential: vi.fn(async (account: string) => {
+        if (account === "anthropic:apiKey") return "test-key-not-real";
+        throw new Error("not found");
+      }),
+      setCredential: vi.fn(),
+    };
+
+    const response = await request(createApp({ keychain, store: routeStore }))
+      .get("/api/settings/providers")
+      .expect(200);
+
+    expect(response.body.providers).toEqual([
+      expect.objectContaining({
+        enabled: false,
+        hasApiKey: false,
+        id: "openai",
+      }),
+      expect.objectContaining({
+        enabled: true,
+        hasApiKey: true,
+        id: "anthropic",
+      }),
+    ]);
+    expect(routeStore.providerConfig.update).not.toHaveBeenCalled();
+  });
+
   it("updates local provider settings", async () => {
     const routeStore = store([row({ id: "local" })]);
 

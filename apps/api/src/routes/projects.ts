@@ -9,8 +9,13 @@ import { cancelAgentRunById } from "../agent/cancelAgentRun";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
 import { runAgent as defaultRunAgent } from "../agent/runAgent";
 import { asyncHandler } from "../lib/http";
+import { getCredential as defaultGetCredential } from "../lib/keychain";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
+import {
+  keyedProvidersForFreshInstall,
+  type ProviderKeychainLike,
+} from "../providers/providerCredentials";
 import { isProviderId, type ProviderId } from "../providers/types";
 
 const projectSchema = z.object({
@@ -92,6 +97,7 @@ export interface ProjectRouteStore {
 
 interface CreateProjectsRouterOptions {
   getUserId?: typeof getAuthenticatedUserId;
+  keychain?: ProviderKeychainLike;
   runAgent?: (
     agentRunId: string,
     goal: string,
@@ -183,7 +189,10 @@ async function ensureDefaultProject(store: ProjectRouteStore) {
   });
 }
 
-async function projectDefaultsFromSettings(store: ProjectRouteStore) {
+async function projectDefaultsFromSettings(
+  store: ProjectRouteStore,
+  keychain: ProviderKeychainLike,
+) {
   const data: Partial<z.infer<typeof projectSchema>> = {};
   const memorySettings = await store.memorySettings
     ?.findUnique({ where: { id: "global" } })
@@ -200,10 +209,16 @@ async function projectDefaultsFromSettings(store: ProjectRouteStore) {
   const providers = await store.providerConfig
     ?.findMany({
       orderBy: { fallbackOrder: "asc" },
-      where: { enabled: true },
     })
     .catch(() => []);
-  const provider = providers?.find((row) => row.enabled && isProviderId(row.id));
+  const freshInstallEnabledProviderIds = providers
+    ? await keyedProvidersForFreshInstall(providers, keychain)
+    : new Set<string>();
+  const provider = providers?.find(
+    (row) =>
+      (row.enabled || freshInstallEnabledProviderIds.has(row.id)) &&
+      isProviderId(row.id),
+  );
   if (provider && isProviderId(provider.id)) {
     data.defaultProvider = provider.id;
     data.defaultModel = provider.modelName ?? provider.primaryModel;
@@ -214,6 +229,7 @@ async function projectDefaultsFromSettings(store: ProjectRouteStore) {
 
 export function createProjectsRouter({
   getUserId = getAuthenticatedUserId,
+  keychain = { getCredential: defaultGetCredential },
   runAgent = defaultRunAgent,
   store = prisma,
 }: CreateProjectsRouterOptions = {}) {
@@ -295,7 +311,7 @@ export function createProjectsRouter({
           .json({ error: "Invalid request", details: parsed.error.flatten() });
       }
 
-      const defaults = await projectDefaultsFromSettings(store);
+      const defaults = await projectDefaultsFromSettings(store, keychain);
       const normalized = await projectInputFromRequest({
         ...defaults,
         ...parsed.data,

@@ -28,6 +28,11 @@ import {
   chatGptOAuthProxyManager,
   type ChatGptOAuthProxyManager,
 } from "../providers/openaiChatgptProxy";
+import {
+  accountForProvider,
+  hasProviderApiKey,
+  keyedProvidersForFreshInstall,
+} from "../providers/providerCredentials";
 import { createProviderInstance } from "../providers/registry";
 import {
   isProviderId,
@@ -221,10 +226,6 @@ const DESCRIPTIONS: Record<ProviderId, string> = {
   openai: "OpenAI",
   openrouter: "OpenRouter (100+ models from many providers)",
 };
-
-function accountForProvider(id: ProviderId) {
-  return `${id}:apiKey`;
-}
 
 function parseProviderId(value: string | undefined) {
   return value && isProviderId(value) ? value : null;
@@ -473,17 +474,6 @@ async function memoryStatusForSettings(row: MemorySettingsRow, keychain: Keychai
     hasCloudApiKey: apiKey.length > 0,
     status: await client.checkConnection(),
   };
-}
-
-async function hasProviderApiKey(
-  providerId: ProviderId,
-  keychain: KeychainLike,
-) {
-  const value = await keychain
-    .getCredential(accountForProvider(providerId))
-    .catch(() => "");
-
-  return value.length > 0;
 }
 
 function contentToString(value: unknown): string {
@@ -816,10 +806,17 @@ export function createSettingsRouter({
       const rows = await store.providerConfig.findMany({
         orderBy: { fallbackOrder: "asc" },
       });
+      const freshInstallEnabledProviderIds = await keyedProvidersForFreshInstall(
+        rows,
+        keychain,
+      );
 
       const providers = await Promise.all(
         rows.map(async (row) => {
-          const provider = serializeProvider(row);
+          const effectiveRow = freshInstallEnabledProviderIds.has(row.id)
+            ? { ...row, enabled: true }
+            : row;
+          const provider = serializeProvider(effectiveRow);
           if (!provider) return null;
 
           return {

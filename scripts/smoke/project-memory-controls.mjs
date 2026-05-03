@@ -16,13 +16,14 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function app() {
+function app(options = {}) {
   const server = express();
   server.use(express.json());
   server.use(
     "/api",
     createProjectsRouter({
       getUserId: () => "smoke-project-memory-controls",
+      ...options,
       store: prisma,
       runAgent: async () => undefined,
     }),
@@ -34,6 +35,7 @@ async function run() {
   const suffix = Date.now();
 
   if (scenario === "new-project-inherits-providers") {
+    const providerSnapshot = await prisma.providerConfig.findMany();
     await prisma.memorySettings.upsert({
       create: {
         defaultScopeForNewProjects: "PROJECT_ONLY",
@@ -43,30 +45,47 @@ async function run() {
       update: { defaultScopeForNewProjects: "PROJECT_ONLY" },
       where: { id: "global" },
     });
-    await prisma.providerConfig.upsert({
-      create: {
-        enabled: true,
-        fallbackOrder: 1,
-        id: "anthropic",
-        primaryModel: "claude-opus-4-7",
-      },
-      update: {
-        enabled: true,
-        fallbackOrder: 1,
-        modelName: null,
-        primaryModel: "claude-opus-4-7",
-      },
-      where: { id: "anthropic" },
-    });
+    await prisma.providerConfig.updateMany({ data: { enabled: false } });
 
-    const response = await request(app())
-      .post("/api/projects")
-      .send({ name: `Provider inherit ${suffix}` })
-      .expect(201);
-    const project = response.body.project;
-    assert(project.memoryScope === "PROJECT_ONLY", `Expected PROJECT_ONLY, got ${project.memoryScope}`);
-    assert(project.defaultProvider, "Expected project to inherit a default provider");
-    assert(project.defaultModel, "Expected project to inherit a default model");
+    try {
+      const response = await request(
+        app({
+          keychain: {
+            getCredential: async (account) => {
+              if (account === "anthropic:apiKey") return "test-key-not-real";
+              throw new Error("not found");
+            },
+          },
+        }),
+      )
+        .post("/api/projects")
+        .send({ name: `Provider inherit ${suffix}` })
+        .expect(201);
+      const project = response.body.project;
+      assert(
+        project.memoryScope === "PROJECT_ONLY",
+        `Expected PROJECT_ONLY, got ${project.memoryScope}`,
+      );
+      assert(
+        project.defaultProvider === "anthropic",
+        `Expected anthropic, got ${project.defaultProvider}`,
+      );
+      assert(project.defaultModel, "Expected project to inherit a default model");
+    } finally {
+      for (const provider of providerSnapshot) {
+        await prisma.providerConfig.update({
+          data: {
+            authMode: provider.authMode,
+            baseURL: provider.baseURL,
+            enabled: provider.enabled,
+            fallbackOrder: provider.fallbackOrder,
+            modelName: provider.modelName,
+            primaryModel: provider.primaryModel,
+          },
+          where: { id: provider.id },
+        });
+      }
+    }
     return;
   }
 
