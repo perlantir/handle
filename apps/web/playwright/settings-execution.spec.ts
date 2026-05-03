@@ -112,7 +112,17 @@ async function openSettingsSection(page: Page, section: string) {
     name: new RegExp(`^${section}$`),
   });
   await expect(navButton).toBeVisible();
-  await navButton.click();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await navButton.click();
+    try {
+      await expect(navButton).toHaveAttribute("aria-current", "page", {
+        timeout: 2_000,
+      });
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+    }
+  }
   await expect(navButton).toHaveAttribute("aria-current", "page");
 }
 

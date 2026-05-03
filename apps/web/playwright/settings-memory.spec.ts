@@ -134,12 +134,31 @@ async function openSettings(page: Page) {
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 }
 
+async function openSettingsSection(page: Page, section: string) {
+  const navButton = page.getByRole("button", {
+    name: new RegExp(`^${section}$`),
+  });
+  await expect(navButton).toBeVisible();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await navButton.click();
+    try {
+      await expect(navButton).toHaveAttribute("aria-current", "page", {
+        timeout: 2_000,
+      });
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+    }
+  }
+  await expect(navButton).toHaveAttribute("aria-current", "page");
+}
+
 test.describe("Settings Memory", () => {
   test("renders, saves, manages Zep, and resets memory", async ({ page }) => {
     const { requests } = await mockSettingsApi(page);
     await openSettings(page);
 
-    await page.getByRole("button", { name: "Memory" }).click();
+    await openSettingsSection(page, "Memory");
 
     await expect(page.getByText("Memory provider")).toBeVisible();
     await expect(page.getByRole("radio", { name: /Self-hosted/ })).toBeChecked();
