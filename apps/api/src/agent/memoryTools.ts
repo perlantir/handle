@@ -100,6 +100,7 @@ export function createMemoryToolDefinitions(): ToolDefinition[] {
         await appendMessageToZep({
           content: parsed.fact,
           conversationId: context.conversationId,
+          extractionMode: "explicit_fact",
           project: context.memoryProject,
           role: "USER",
           ...(parsed.valid_at ? { validAt: parsed.valid_at } : {}),

@@ -72,6 +72,7 @@ describe("memory tools", () => {
     expect(appendMessageToZep).toHaveBeenCalledWith(
       expect.objectContaining({
         content: "Favorite color is teal",
+        extractionMode: "explicit_fact",
         project: { id: "project-test", memoryScope: "GLOBAL_AND_PROJECT" },
       }),
     );
