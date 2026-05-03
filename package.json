@@ -13,6 +13,9 @@
     "format": "prettier --check .",
     "format:write": "prettier --write .",
     "lint": "turbo lint",
+    "memory:up": "mkdir -p ${DOCKER_CONFIG:-/tmp/handle-docker-config}/cli-plugins && ln -sf $HOME/.docker/cli-plugins/docker-compose ${DOCKER_CONFIG:-/tmp/handle-docker-config}/cli-plugins/docker-compose && DOCKER_CONFIG=${DOCKER_CONFIG:-/tmp/handle-docker-config} docker compose -f docker-compose.zep.yaml up -d",
+    "memory:down": "mkdir -p ${DOCKER_CONFIG:-/tmp/handle-docker-config}/cli-plugins && ln -sf $HOME/.docker/cli-plugins/docker-compose ${DOCKER_CONFIG:-/tmp/handle-docker-config}/cli-plugins/docker-compose && DOCKER_CONFIG=${DOCKER_CONFIG:-/tmp/handle-docker-config} docker compose -f docker-compose.zep.yaml down",
+    "memory:logs": "mkdir -p ${DOCKER_CONFIG:-/tmp/handle-docker-config}/cli-plugins && ln -sf $HOME/.docker/cli-plugins/docker-compose ${DOCKER_CONFIG:-/tmp/handle-docker-config}/cli-plugins/docker-compose && DOCKER_CONFIG=${DOCKER_CONFIG:-/tmp/handle-docker-config} docker compose -f docker-compose.zep.yaml logs -f zep zep-graphiti",
     "smoke:e2e-canonical": "node scripts/smoke/e2e-task.mjs --canonical",
     "smoke:e2e-providers": "node scripts/smoke/e2e-providers.mjs",
     "smoke:e2e-task": "node scripts/smoke/e2e-task.mjs",
@@ -53,6 +56,7 @@
     "smoke:workspace-ui-regression": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-ui-regression.spec.ts",
     "smoke:trivial-question-no-tools": "node scripts/smoke/trivial-question-no-tools.mjs",
     "smoke:web-signin": "node scripts/smoke/web-signin.mjs",
+    "smoke:zep-self-hosted-up": "node scripts/smoke/zep-self-hosted-up.mjs",
     "test": "pnpm -r --if-present test",
     "typecheck": "turbo typecheck"
   },

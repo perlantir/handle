@@ -70,6 +70,41 @@ pnpm --filter @handle/web dev
 
 Open `http://127.0.0.1:3000`. This is the canonical local web URL; do not use `http://localhost:3000`.
 
+## Memory Layer
+
+Phase 5 uses Zep for memory. Handle defaults to a local self-hosted Zep
+stack on the user's Mac, with Zep Cloud available as an alternate.
+
+Start local memory:
+
+```bash
+pnpm memory:up
+```
+
+Stop local memory:
+
+```bash
+pnpm memory:down
+```
+
+Follow logs:
+
+```bash
+pnpm memory:logs
+```
+
+The local API listens on `http://127.0.0.1:8000` and persists data in
+Docker volumes. The stack is based on Zep's last public self-hostable
+images (`ghcr.io/getzep/zep:0.27.2`, Postgres/pgvector, and the Zep NLP
+server). Current Zep docs emphasize Zep Cloud and mark Community
+Edition as legacy/deprecated, so this path is intentionally isolated in
+`docker-compose.zep.yaml`.
+
+The memory scripts default `DOCKER_CONFIG` to
+`/tmp/handle-docker-config` so public image pulls do not depend on, read
+from, or mutate the user's Docker Desktop credential store. Set
+`DOCKER_CONFIG` explicitly if you need a different Docker configuration.
+
 ## Checks
 
 ```bash
@@ -78,6 +113,7 @@ pnpm test
 pnpm smoke:web-signin
 pnpm smoke:e2e-task
 pnpm smoke:e2e-canonical
+pnpm smoke:zep-self-hosted-up
 pnpm build
 ```
 
