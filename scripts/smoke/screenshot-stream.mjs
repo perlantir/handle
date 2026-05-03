@@ -3,6 +3,7 @@ import { config as loadDotenv } from "dotenv";
 import {
   createBrowserDesktopSandbox,
 } from "../../apps/api/src/execution/browserSession.ts";
+import { E2BBackend } from "../../apps/api/src/execution/e2bBackend.ts";
 import { createBrowserToolDefinitions } from "../../apps/api/src/agent/browserTools.ts";
 import { subscribeToTask } from "../../apps/api/src/lib/eventBus.ts";
 import { resetBrowserScreenshotThrottleForTest } from "../../apps/api/src/lib/browserScreenshotEvents.ts";
@@ -37,6 +38,7 @@ const events = [];
 const unsubscribe = subscribeToTask(taskId, (event) => events.push(event));
 let sandbox;
 let context;
+let backend;
 
 try {
   console.log("[screenshot-stream] creating E2B Desktop sandbox");
@@ -46,7 +48,8 @@ try {
   });
   console.log(`[screenshot-stream] sandbox created: ${sandbox.sandboxId ?? "unknown"}`);
 
-  context = { sandbox, taskId };
+  backend = new E2BBackend({ installCommonPackages: false, sandbox });
+  context = { backend, sandbox, taskId };
   console.log("[screenshot-stream] navigating to https://news.ycombinator.com");
   await tool("browser_navigate").implementation({ url: "https://news.ycombinator.com" }, context);
 
@@ -72,8 +75,7 @@ try {
   resetBrowserScreenshotThrottleForTest(taskId);
 
   if (sandbox) {
-    await context?.browserSession?.destroy?.();
-    console.log("[screenshot-stream] killing sandbox");
-    await sandbox.kill();
+    console.log("[screenshot-stream] shutting down backend");
+    await backend?.shutdown?.(taskId);
   }
 }
