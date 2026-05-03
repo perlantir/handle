@@ -110,4 +110,19 @@ describe("memory tools", () => {
     );
     expect(result).toContain("Forgot memory namespace");
   });
+
+  it("returns a clear disabled message when memory context is unavailable", async () => {
+    const save = createMemoryToolDefinitions().find((tool) => tool.name === "memory_save");
+    if (!save) throw new Error("memory_save missing");
+
+    const disabledContext = {
+      ...context(),
+      memoryProject: null,
+    };
+
+    await expect(
+      save.implementation({ fact: "Favorite color is teal" }, disabledContext),
+    ).resolves.toBe("Memory is disabled for this project or message.");
+    expect(appendMessageToZep).not.toHaveBeenCalled();
+  });
 });

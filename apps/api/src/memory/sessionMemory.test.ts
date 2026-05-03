@@ -90,6 +90,47 @@ describe("session memory", () => {
     );
   });
 
+  it("redacts secrets before writing memory messages", async () => {
+    const fakeClient = client();
+
+    await appendMessageToZep(
+      {
+        content: `My key is sk-${"s".repeat(30)} and card is 4111 1111 1111 1111`,
+        conversationId: "conversation-redact",
+        project: { id: "project-1", memoryScope: "PROJECT_ONLY" },
+        role: "USER",
+      },
+      fakeClient as never,
+    );
+
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          expect.objectContaining({
+            content: "My key is [REDACTED] and card is [REDACTED]",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("skips client calls when memory is disabled for a message", async () => {
+    const fakeClient = client();
+
+    await expect(
+      appendMessageToZep(
+        {
+          content: "Do not save this",
+          memoryEnabled: false,
+          project: { id: "project-1", memoryScope: "GLOBAL_AND_PROJECT" },
+          role: "USER",
+        },
+        fakeClient as never,
+      ),
+    ).resolves.toEqual({ ok: true, skipped: true });
+    expect(fakeClient.checkConnection).not.toHaveBeenCalled();
+  });
+
   it("recalls and formats relevant memory", async () => {
     const fakeClient = client();
 
