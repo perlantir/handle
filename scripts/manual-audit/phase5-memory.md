@@ -116,7 +116,7 @@ Verify:
 
 Verify:
 
-- [ ] List view table shows Fact, Source, Type, Confidence, and Actions.
+- [ ] List view table shows Fact, Source, Validity, Confidence, and Actions.
 - [ ] Search narrows results.
 - [ ] Detail panel updates when a fact is selected.
 - [ ] Delete asks for confirmation and removes the namespace.
@@ -135,7 +135,43 @@ Verify:
 - [ ] Stable `teal` fact is recalled.
 - [ ] Composer toggle returns to the project default after sending.
 
-## Section J: Prior Phase Regression
+## Section J: Bi-Temporal Fact Reasoning
+
+1. Submit: `I live in Chicago.`
+2. Wait for completion.
+3. Submit: `Actually, I moved to Austin last week.`
+4. Open a new conversation.
+5. Submit: `Where do I live?`
+6. Open `/memory`, search for `Chicago`, and click the Chicago fact.
+7. Search for `Austin`, and click the Austin fact.
+
+Verify:
+
+- [ ] Agent response says Austin is current.
+- [ ] Agent does not treat Chicago as the current city.
+- [ ] Chicago fact is dimmed or labeled historical.
+- [ ] Austin fact is current and has a valid-since label.
+- [ ] Detail panel timeline shows when the move became valid and when Chicago became historical.
+
+## Section K: Action-Consequence Log
+
+1. Submit: `Create a file called test.txt with 'hello' in it.`
+2. Open `/actions`.
+3. Find the action for the created file.
+4. Click Undo on the reversible `file_created` entry.
+5. Verify the file no longer exists in the workspace.
+6. Refresh `/actions`.
+
+Verify:
+
+- [ ] `/actions` shows an entry with `outcomeType=file_created`.
+- [ ] Target is the workspace path for `test.txt`.
+- [ ] Reversible is `Yes`.
+- [ ] Undo deletes the file.
+- [ ] `/actions` shows a later `file_deleted` entry for the undo.
+- [ ] `~/Library/Logs/Handle/actions.log` contains both JSON Lines entries.
+
+## Section L: Prior Phase Regression
 
 Run the existing regression smokes:
 
