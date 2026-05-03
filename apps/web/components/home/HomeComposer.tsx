@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Brain, ChevronDown, ShieldAlert } from "lucide-react";
 import type { ProjectSummary } from "@handle/shared";
@@ -43,6 +43,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
   const [selectedModelKey, setSelectedModelKey] = useState("");
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const memoryTouchedRef = useRef(false);
 
   const activeProject =
     projects.find((project) => project.id === searchParams.get("projectId")) ??
@@ -69,10 +70,6 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
       setBackend(settings.defaultBackend);
       setProjects(loadedProjects);
       setProviders(loadedProviders);
-      const firstEnabled = loadedProviders.find((provider) => provider.enabled);
-      if (firstEnabled) {
-        setSelectedModelKey(`${firstEnabled.id}:${firstEnabled.primaryModel}`);
-      }
     }
 
     loadComposerContext()
@@ -92,8 +89,22 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
 
   useEffect(() => {
     setCustomScopePath(activeProject?.customScopePath ?? "");
+    memoryTouchedRef.current = false;
     setMemoryEnabled(defaultMemoryEnabled(activeProject));
   }, [activeProject?.customScopePath, activeProject?.id, activeProject?.memoryScope]);
+
+  useEffect(() => {
+    const enabled = providers.filter((provider) => provider.enabled);
+    const projectProvider =
+      enabled.find((provider) => provider.id === activeProject?.defaultProvider) ??
+      enabled[0] ??
+      null;
+    if (!projectProvider) {
+      setSelectedModelKey("");
+      return;
+    }
+    setSelectedModelKey(`${projectProvider.id}:${activeProject?.defaultModel ?? projectProvider.primaryModel}`);
+  }, [activeProject?.defaultModel, activeProject?.defaultProvider, activeProject?.id, providers]);
 
   function updateProjectState(project: ProjectSummary) {
     setProjects((current) =>
@@ -166,6 +177,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
           : {}),
         token,
       });
+      memoryTouchedRef.current = false;
       setMemoryEnabled(defaultMemoryEnabled(activeProject));
       router.push(`/tasks/${agentRunId}`);
     } catch (err) {
@@ -313,7 +325,10 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
               : "border-border-subtle bg-bg-surface text-text-tertiary",
           )}
           disabled={submitting}
-          onClick={() => setMemoryEnabled((current) => !current)}
+          onClick={() => {
+            memoryTouchedRef.current = true;
+            setMemoryEnabled((current) => !current);
+          }}
           title={memoryEnabled ? "Save & recall memory for this message" : "Memory disabled for this message"}
           type="button"
         >

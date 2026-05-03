@@ -58,16 +58,18 @@ export function BottomComposer({
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [providers, setProviders] = useState<SettingsProvider[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState('');
+  const memoryTouchedRef = useRef(false);
   const pendingProjectPatchRef = useRef<Promise<ProjectSummary | null> | null>(null);
 
   useEffect(() => {
     if (!task?.projectId) {
       setBackend(task?.backend ?? 'e2b');
     }
+    memoryTouchedRef.current = false;
     setSelectedModelKey(
       task?.providerId && task.providerModel ? `${task.providerId}:${task.providerModel}` : '',
     );
-  }, [task?.backend, task?.providerId, task?.providerModel]);
+  }, [task?.backend, task?.projectId, task?.providerId, task?.providerModel]);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,7 +82,9 @@ export function BottomComposer({
       if (cancelled) return;
       const activeProject = projects.find((item) => item.id === task?.projectId) ?? null;
       setProject(activeProject);
-      setMemoryEnabled(defaultMemoryEnabled(activeProject));
+      if (!memoryTouchedRef.current) {
+        setMemoryEnabled(defaultMemoryEnabled(activeProject));
+      }
       setCustomScopePath(activeProject?.customScopePath ?? '');
       if (activeProject?.defaultBackend) {
         setBackend(activeProject.defaultBackend === 'LOCAL' ? 'local' : 'e2b');
@@ -166,6 +170,7 @@ export function BottomComposer({
         token,
       });
       setValue('');
+      memoryTouchedRef.current = false;
       setMemoryEnabled(defaultMemoryEnabled(project));
       router.push(`/tasks/${agentRunId}`);
     } catch (err) {
@@ -292,7 +297,10 @@ export function BottomComposer({
               : "border-border-subtle bg-bg-canvas text-text-tertiary",
           )}
           disabled={submitting}
-          onClick={() => setMemoryEnabled((current) => !current)}
+          onClick={() => {
+            memoryTouchedRef.current = true;
+            setMemoryEnabled((current) => !current);
+          }}
           title={memoryEnabled ? 'Save & recall memory for this message' : 'Memory disabled for this message'}
           type="button"
         >
