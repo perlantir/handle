@@ -11,7 +11,7 @@ const {
 } = await import("../../apps/api/src/memory/trajectoryMemory.ts");
 const {
   findSimilarSuccessfulTrajectories,
-  formatProceduralMemoryContext,
+  listProcedureTemplates,
   synthesizeTrajectoryTemplates,
 } = await import("../../apps/api/src/memory/proceduralMemory.ts");
 
@@ -19,7 +19,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-async function seedTrajectory({ goal, projectId }) {
+async function seedSuccessfulPythonTask({ goal, projectId }) {
   const conversation = await prisma.conversation.create({
     data: { projectId, title: goal.slice(0, 80) },
   });
@@ -30,9 +30,9 @@ async function seedTrajectory({ goal, projectId }) {
   await recordTrajectoryStep({
     agentRunId: run.id,
     step: {
-      durationMs: 10,
+      durationMs: 20,
       status: "success",
-      subgoal: "Created script.py with helper function",
+      subgoal: "Created a Python script file",
       toolInput: { path: "script.py" },
       toolName: "file_write",
       toolOutput: "ok",
@@ -41,9 +41,9 @@ async function seedTrajectory({ goal, projectId }) {
   await recordTrajectoryStep({
     agentRunId: run.id,
     step: {
-      durationMs: 12,
+      durationMs: 25,
       status: "success",
-      subgoal: "Ran script with python3",
+      subgoal: "Ran the Python script",
       toolInput: { command: "python3 script.py" },
       toolName: "shell_exec",
       toolOutput: "ok",
@@ -55,32 +55,40 @@ async function seedTrajectory({ goal, projectId }) {
 
 const suffix = Date.now();
 const project = await prisma.project.create({
-  data: { id: `procedural-project-${suffix}`, name: `Procedural Smoke ${suffix}` },
+  data: {
+    id: `procedural-template-project-${suffix}`,
+    name: `Procedural Template Smoke ${suffix}`,
+  },
 });
 
-console.log("[procedural-memory] seeding successful trajectories");
-await seedTrajectory({
-  goal: "Write a Python script that prints fibonacci numbers",
-  projectId: project.id,
-});
-await seedTrajectory({
-  goal: "Write a Python script that calculates factorials",
-  projectId: project.id,
-});
-
-const matches = await findSimilarSuccessfulTrajectories({
-  goal: "Write a Python script that prints prime numbers",
-  projectId: project.id,
-});
-assert(matches.length >= 2, `Expected at least 2 matches, got ${matches.length}`);
-const promptContext = formatProceduralMemoryContext(matches);
-assert(promptContext.includes("<procedural_memory>"), "Procedural memory prompt block missing");
-assert(promptContext.includes("fibonacci") || promptContext.includes("factorials"), "Prior task not referenced");
+console.log("[procedural-template-extraction] seeding similar successful trajectories");
+for (const value of ["hello", "world", "phase5"]) {
+  await seedSuccessfulPythonTask({
+    goal: `Write a Python script that prints '${value}' and run it`,
+    projectId: project.id,
+  });
+}
 
 const synthesis = await synthesizeTrajectoryTemplates({ projectId: project.id });
 assert(
   synthesis.created + synthesis.updated >= 1,
-  `Expected at least one synthesized template create/update, got ${JSON.stringify(synthesis)}`,
+  `Expected template create/update, got ${JSON.stringify(synthesis)}`,
+);
+assert(synthesis.threshold <= 3, `Expected practical threshold <= 3, got ${synthesis.threshold}`);
+
+const templates = await listProcedureTemplates();
+const template = templates.find(
+  (item) => item.name.includes("write python script") && item.usageCount >= 3,
+);
+assert(
+  template,
+  `No extracted write-python-script template found: ${JSON.stringify(templates.slice(0, 5))}`,
 );
 
-console.log("[procedural-memory] PASS");
+const matches = await findSimilarSuccessfulTrajectories({
+  goal: "Write a Python script that prints 'final' and run it",
+  projectId: project.id,
+});
+assert(matches.length >= 3, `Expected 3 procedural recall matches, got ${matches.length}`);
+
+console.log("[procedural-template-extraction] PASS");

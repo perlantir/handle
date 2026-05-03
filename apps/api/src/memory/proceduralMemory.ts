@@ -1,5 +1,7 @@
 import { prisma } from "../lib/prisma";
+import { logger } from "../lib/logger";
 import { redactSecrets } from "../lib/redact";
+import { appendMemoryLog } from "./memoryLog";
 import {
   goalEmbedding,
   normalizeSteps,
@@ -45,6 +47,11 @@ interface RawTrajectory {
   outcomeReason?: string | null;
   steps?: unknown;
 }
+
+const PROCEDURAL_TEMPLATE_MIN_TRAJECTORIES = Math.max(
+  2,
+  Number.parseInt(process.env.HANDLE_PROCEDURAL_TEMPLATE_MIN_TRAJECTORIES ?? "2", 10) || 2,
+);
 
 export async function findSimilarSuccessfulTrajectories({
   goal,
@@ -175,7 +182,12 @@ export async function synthesizeTrajectoryTemplates({
   store?: TrajectoryStore;
 } = {}) {
   if (!store.agentRunTrajectory?.findMany || !store.trajectoryTemplate?.create) {
-    return { created: 0 };
+    await logSynthesisDecision({
+      decision: "unsupported_store",
+      projectId: projectId ?? null,
+      threshold: PROCEDURAL_TEMPLATE_MIN_TRAJECTORIES,
+    });
+    return { created: 0, skipped: 0, threshold: PROCEDURAL_TEMPLATE_MIN_TRAJECTORIES, updated: 0 };
   }
   const trajectories = await store.agentRunTrajectory.findMany({
     orderBy: { createdAt: "desc" },
@@ -189,33 +201,87 @@ export async function synthesizeTrajectoryTemplates({
   const groups = new Map<string, RawTrajectory[]>();
   for (const trajectory of trajectories) {
     const key = templateKey(trajectory.goal ?? "");
-    if (!key) continue;
+    if (!key) {
+      await logSynthesisDecision({
+        decision: "skipped_no_key",
+        projectId: projectId ?? null,
+        threshold: PROCEDURAL_TEMPLATE_MIN_TRAJECTORIES,
+      });
+      continue;
+    }
     const current = groups.get(key) ?? [];
     current.push(trajectory);
     groups.set(key, current);
   }
 
   let created = 0;
+  let skipped = 0;
+  let updated = 0;
   for (const [key, rows] of groups) {
-    if (rows.length < 2) continue;
+    if (rows.length < PROCEDURAL_TEMPLATE_MIN_TRAJECTORIES) {
+      skipped += 1;
+      await logSynthesisDecision({
+        candidateCount: rows.length,
+        decision: "below_threshold",
+        key,
+        projectId: projectId ?? null,
+        threshold: PROCEDURAL_TEMPLATE_MIN_TRAJECTORIES,
+      });
+      continue;
+    }
     const exemplar = rows[0];
     const pattern = rows
       .flatMap((row) => normalizeSteps(row.steps).slice(0, 5))
       .map((step) => ({ subgoal: step.subgoal, toolName: step.toolName }));
-    await store.trajectoryTemplate.create({
-      data: {
-        createdFromIds: rows.map((row) => String(row.agentRunId ?? "")).filter(Boolean),
-        goalEmbedding: goalEmbedding(key),
-        name: `Procedure: ${key}`,
-        pattern,
-        successRate: 1,
-        usageCount: rows.length,
-      },
-    });
-    if (exemplar) created += 1;
+    const data = {
+      createdFromIds: rows.map((row) => String(row.agentRunId ?? "")).filter(Boolean),
+      goalEmbedding: goalEmbedding(key),
+      name: `Procedure: ${key}`,
+      pattern,
+      successRate: 1,
+      usageCount: rows.length,
+    };
+    const existing = await findExistingTemplateByName(store, data.name);
+    if (existing?.id && store.trajectoryTemplate.update) {
+      await store.trajectoryTemplate.update({
+        data,
+        where: { id: existing.id },
+      });
+      updated += 1;
+      await logSynthesisDecision({
+        candidateCount: rows.length,
+        decision: "updated",
+        key,
+        projectId: projectId ?? null,
+        templateId: existing.id,
+        threshold: PROCEDURAL_TEMPLATE_MIN_TRAJECTORIES,
+      });
+    } else {
+      await store.trajectoryTemplate.create({ data });
+      if (exemplar) created += 1;
+      await logSynthesisDecision({
+        candidateCount: rows.length,
+        decision: "created",
+        key,
+        projectId: projectId ?? null,
+        threshold: PROCEDURAL_TEMPLATE_MIN_TRAJECTORIES,
+      });
+    }
   }
 
-  return { created };
+  logger.info(
+    {
+      created,
+      groupCount: groups.size,
+      projectId: projectId ?? null,
+      skipped,
+      threshold: PROCEDURAL_TEMPLATE_MIN_TRAJECTORIES,
+      updated,
+    },
+    "Procedural template synthesis completed",
+  );
+
+  return { created, skipped, threshold: PROCEDURAL_TEMPLATE_MIN_TRAJECTORIES, updated };
 }
 
 export async function listProcedureTemplates({
@@ -301,4 +367,54 @@ function indent(value: string, spaces: number) {
 function templateKey(goal: string) {
   const all = [...tokens(goal)].filter((token) => !["that", "with", "from"].includes(token));
   return all.slice(0, 3).join(" ");
+}
+
+async function findExistingTemplateByName(store: TrajectoryStore, name: string) {
+  if (!store.trajectoryTemplate?.findMany) return null;
+  try {
+    const rows = (await store.trajectoryTemplate.findMany({
+      take: 1,
+      where: { name },
+    })) as Array<{ id?: string }>;
+    return rows[0]?.id ? { id: String(rows[0].id) } : null;
+  } catch (err) {
+    logger.warn({ err, name }, "Failed to look up existing trajectory template");
+    return null;
+  }
+}
+
+async function logSynthesisDecision({
+  candidateCount,
+  decision,
+  key,
+  projectId,
+  templateId,
+  threshold,
+}: {
+  candidateCount?: number;
+  decision: string;
+  key?: string;
+  projectId?: string | null;
+  templateId?: string;
+  threshold: number;
+}) {
+  await appendMemoryLog({
+    details: {
+      ...(candidateCount === undefined ? {} : { candidateCount }),
+      decision,
+      ...(key ? { key } : {}),
+      ...(templateId ? { templateId } : {}),
+      threshold,
+    },
+    durationMs: 0,
+    operation: "procedural.synthesis",
+    provider: "self-hosted",
+    ...(projectId ? { projectId } : {}),
+    status: "ok",
+  }).catch((err) => {
+    logger.warn(
+      { decision, err, projectId: projectId ?? null },
+      "Failed to write procedural synthesis log",
+    );
+  });
 }

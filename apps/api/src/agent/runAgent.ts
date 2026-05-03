@@ -21,6 +21,7 @@ import {
   findSimilarSuccessfulTrajectories,
   formatFailureMemoryContext,
   formatProceduralMemoryContext,
+  synthesizeTrajectoryTemplates,
 } from "../memory/proceduralMemory";
 import { ensureSharedMemoryNamespace, type SharedMemoryStore } from "../memory/sharedMemory";
 import {
@@ -835,6 +836,11 @@ export function createAgentRunner({
           outcome: "SUCCEEDED",
           store,
         });
+        await synthesizeProceduralTemplatesForRun({
+          projectId: project?.id ?? null,
+          store,
+          taskId,
+        });
         emitEvent({
           type: "message",
           role: "assistant",
@@ -919,6 +925,13 @@ export function createAgentRunner({
         ...(finalResult.reason ? { outcomeReason: finalResult.reason } : {}),
         store,
       });
+      if (finalStatus === "STOPPED") {
+        await synthesizeProceduralTemplatesForRun({
+          projectId: project?.id ?? null,
+          store,
+          taskId,
+        });
+      }
 
       emitEvent({
         type: "message",
@@ -1027,3 +1040,20 @@ export function createAgentRunner({
 }
 
 export const runAgent = createAgentRunner();
+
+async function synthesizeProceduralTemplatesForRun({
+  projectId,
+  store,
+  taskId,
+}: {
+  projectId?: string | null;
+  store: TrajectoryStore;
+  taskId: string;
+}) {
+  await synthesizeTrajectoryTemplates({ projectId: projectId ?? null, store }).catch((err) => {
+    logger.warn(
+      { err, projectId: projectId ?? null, taskId },
+      "Procedural template synthesis failed after successful run",
+    );
+  });
+}
