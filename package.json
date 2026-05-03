@@ -43,6 +43,7 @@
     "smoke:memory-inspector-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-browser-pane.spec.ts --grep \"renders screenshot history\"",
     "smoke:memory-page-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/memory-page.spec.ts",
     "smoke:memory-recall": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-recall.mjs",
+    "smoke:memory-redaction": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-redaction.mjs",
     "smoke:memory-tools": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-tools.mjs",
     "smoke:mid-conversation-backend-switch": "node scripts/smoke/mid-conversation-backend-switch.mjs",
     "smoke:project-creation-rename": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/project-creation-rename.mjs",
