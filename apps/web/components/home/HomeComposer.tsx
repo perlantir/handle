@@ -95,10 +95,18 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
       previousProjectIdRef.current = projectId;
     }
     setCustomScopePath(activeProject?.customScopePath ?? "");
+    if (activeProject?.defaultBackend) {
+      setBackend(activeProject.defaultBackend === "LOCAL" ? "local" : "e2b");
+    }
     if (!memoryTouchedRef.current) {
       setMemoryEnabled(defaultMemoryEnabled(activeProject));
     }
-  }, [activeProject?.customScopePath, activeProject?.id, activeProject?.memoryScope]);
+  }, [
+    activeProject?.customScopePath,
+    activeProject?.defaultBackend,
+    activeProject?.id,
+    activeProject?.memoryScope,
+  ]);
 
   useEffect(() => {
     const enabled = providers.filter((provider) => provider.enabled);

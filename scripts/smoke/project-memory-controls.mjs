@@ -112,6 +112,40 @@ async function run() {
     return;
   }
 
+  if (scenario === "project-backend-persists") {
+    const response = await request(app())
+      .post("/api/projects")
+      .send({
+        defaultBackend: "LOCAL",
+        name: `Backend Persist ${suffix}`,
+        workspaceScope: "DEFAULT_WORKSPACE",
+      })
+      .expect(201);
+    const project = response.body.project;
+    assert(project.defaultBackend === "LOCAL", `Create returned ${project.defaultBackend}`);
+    const persisted = await prisma.project.findUnique({ where: { id: project.id } });
+    assert(persisted?.defaultBackend === "LOCAL", `DB persisted ${persisted?.defaultBackend}`);
+    return;
+  }
+
+  if (scenario === "project-backend-edit-persists") {
+    const project = await prisma.project.create({
+      data: {
+        defaultBackend: "LOCAL",
+        id: `project-backend-edit-${suffix}`,
+        name: `Backend Edit ${suffix}`,
+      },
+    });
+    const response = await request(app())
+      .put(`/api/projects/${project.id}`)
+      .send({ defaultBackend: "E2B", name: project.name })
+      .expect(200);
+    assert(response.body.project.defaultBackend === "E2B", `Edit returned ${response.body.project.defaultBackend}`);
+    const persisted = await prisma.project.findUnique({ where: { id: project.id } });
+    assert(persisted?.defaultBackend === "E2B", `DB persisted ${persisted?.defaultBackend}`);
+    return;
+  }
+
   if (scenario === "memory-toggle-off-respected") {
     let zepCalls = 0;
     const fakeClient = {

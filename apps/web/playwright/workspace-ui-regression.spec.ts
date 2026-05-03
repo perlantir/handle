@@ -174,6 +174,71 @@ async function mockHomeProjectControls(page: Page) {
   return { requests };
 }
 
+async function mockHomeProjectBackend(page: Page) {
+  const requests: Array<{ body: unknown; method: string; path: string }> = [];
+  let project = {
+    browserMode: "SEPARATE_PROFILE",
+    customScopePath: null as string | null,
+    defaultBackend: "LOCAL",
+    defaultModel: "claude-opus-4-7",
+    defaultProvider: "anthropic",
+    id: "project-local",
+    memoryScope: "PROJECT_ONLY",
+    name: "Local Project",
+    permissionMode: "ASK",
+    workspaceScope: "DEFAULT_WORKSPACE",
+  };
+
+  await page.route("**/api/settings/execution", async (route) => {
+    await jsonRoute(route, 200, {
+      execution: {
+        cleanupPolicy: "keep-all",
+        defaultBackend: "e2b",
+        updatedAt: "2026-05-02T00:00:00.000Z",
+        workspaceBaseDir: "/Users/perlantir/Documents/Handle/workspaces",
+      },
+    });
+  });
+  await page.route("**/api/settings/providers", async (route) => {
+    await jsonRoute(route, 200, {
+      providers: [
+        {
+          authMode: "apiKey",
+          baseURL: null,
+          description: "Anthropic",
+          enabled: true,
+          fallbackOrder: 1,
+          hasApiKey: true,
+          id: "anthropic",
+          modelName: null,
+          primaryModel: "claude-opus-4-7",
+          updatedAt: "2026-05-02T00:00:00.000Z",
+        },
+      ],
+    });
+  });
+  await page.route("**/api/projects**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    const body = request.postData() ? JSON.parse(request.postData() ?? "{}") : null;
+    requests.push({ body, method, path });
+
+    if (method === "GET" && path === "/api/projects") {
+      await jsonRoute(route, 200, { projects: [project] });
+      return;
+    }
+    if (method === "PUT" && path === "/api/projects/project-local") {
+      project = { ...project, ...(body as Partial<typeof project>) };
+      await jsonRoute(route, 200, { project });
+      return;
+    }
+    await jsonRoute(route, 200, { conversations: [] });
+  });
+
+  return { requests };
+}
+
 async function mockSidebarManagement(page: Page) {
   const requests: Array<{ body: unknown; method: string; path: string }> = [];
   let projects = [
@@ -459,6 +524,25 @@ test.describe("Workspace UI regressions", () => {
 });
 
 test.describe("Project control regressions", () => {
+  test("uses the project backend default over the global execution default", async ({ page }) => {
+    const { requests } = await mockHomeProjectBackend(page);
+
+    await page.goto("/?projectId=project-local");
+
+    const backendGroup = page.getByRole("group", { name: "Task backend" });
+    await expect(backendGroup.getByRole("button", { name: "Local" })).toHaveClass(/bg-bg-inverse/);
+    await expect(backendGroup.getByRole("button", { name: "E2B" })).not.toHaveClass(/bg-bg-inverse/);
+
+    await backendGroup.getByRole("button", { name: "E2B" }).click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({
+        body: { defaultBackend: "E2B" },
+        method: "PUT",
+        path: "/api/projects/project-local",
+      });
+  });
+
   test("uses folder picker flow and saves permission level separately", async ({ page }) => {
     const { requests } = await mockHomeProjectControls(page);
 
