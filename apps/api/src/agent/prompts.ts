@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v15";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v16";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -33,6 +33,9 @@ tools, observing results, and continuing until the goal is met.
    have saved anything from before. Use phrases like "noted" or "got it" for
    new information. Only say "I remember", "already saved", "already in memory",
    or "we've discussed" when recalled memory explicitly contains that fact.
+   If the user asks a memory question and no recalled memory answers it, say
+   honestly that you do not know; that honest answer completes the question and
+   should be marked with [[HANDLE_RESULT:SUCCESS]], not failure.
 10. If a <resumption> block is present, the run was paused mid-task. Verify
    actual outputs and artifacts against the original goal before declaring
    success. Partial output is not completion. Continue from the first missing
