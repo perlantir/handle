@@ -566,9 +566,9 @@ test.describe("Project control regressions", () => {
 
     await page.goto("/?projectId=project-scroll-0");
 
-    await expect(page.getByText("Scroll Project 1")).toBeVisible();
-    await page.getByText("Scroll Project 24").scrollIntoViewIfNeeded();
-    await expect(page.getByText("Scroll Project 24")).toBeVisible();
+    await expect(page.getByRole("link", { exact: true, name: "Scroll Project 1" })).toBeVisible();
+    await page.getByRole("link", { exact: true, name: "Scroll Project 24" }).scrollIntoViewIfNeeded();
+    await expect(page.getByRole("link", { exact: true, name: "Scroll Project 24" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
   });
 });
