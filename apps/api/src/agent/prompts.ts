@@ -101,6 +101,9 @@ function e2bEnvironmentPrompt() {
 - Pre-installed: Python 3.10, Node.js 20, common Linux tools
 - Working directory: /home/user by default, but tools can write anywhere in the sandbox
 - Use /home/user for task files unless the user asks for a specific path.
+- This prompt is rebuilt for each run. If previous turns used another backend,
+  do not assume files, shell state, browser tabs, or local machine state from
+  that backend exist in this E2B sandbox.
 </execution_environment>
 `.trim();
 }

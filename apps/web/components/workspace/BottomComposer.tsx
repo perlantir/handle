@@ -2,7 +2,7 @@
 
 import { ArrowUp, Mic, Paperclip, Sparkles, Square } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ProjectSummary, TaskDetailResponse } from '@handle/shared';
 import { listProjects, pickProjectFolder, sendConversationMessage, updateProject } from '@/lib/api';
 import { useHandleAuth } from '@/lib/handleAuth';
@@ -43,9 +43,12 @@ export function BottomComposer({
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [providers, setProviders] = useState<SettingsProvider[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState('');
+  const pendingProjectPatchRef = useRef<Promise<ProjectSummary | null> | null>(null);
 
   useEffect(() => {
-    setBackend(task?.backend ?? 'e2b');
+    if (!task?.projectId) {
+      setBackend(task?.backend ?? 'e2b');
+    }
     setSelectedModelKey(
       task?.providerId && task.providerModel ? `${task.providerId}:${task.providerModel}` : '',
     );
@@ -63,6 +66,11 @@ export function BottomComposer({
       const activeProject = projects.find((item) => item.id === task?.projectId) ?? null;
       setProject(activeProject);
       setCustomScopePath(activeProject?.customScopePath ?? '');
+      if (activeProject?.defaultBackend) {
+        setBackend(activeProject.defaultBackend === 'LOCAL' ? 'local' : 'e2b');
+      } else {
+        setBackend(task?.backend ?? 'e2b');
+      }
       setProviders(loadedProviders);
       if (!selectedModelKey) {
         const current =
@@ -83,10 +91,20 @@ export function BottomComposer({
 
   async function saveProjectPatch(input: Parameters<typeof updateProject>[0]['input']) {
     if (!project) return null;
-    const token = await getToken();
-    const updated = await updateProject({ input, projectId: project.id, token });
-    setProject(updated);
-    return updated;
+    const promise = (async () => {
+      const token = await getToken();
+      const updated = await updateProject({ input, projectId: project.id, token });
+      setProject(updated);
+      return updated;
+    })();
+    pendingProjectPatchRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      if (pendingProjectPatchRef.current === promise) {
+        pendingProjectPatchRef.current = null;
+      }
+    }
   }
 
   async function chooseSpecificFolder() {
@@ -96,16 +114,12 @@ export function BottomComposer({
     try {
       const token = await getToken();
       const { path } = await pickProjectFolder({ token });
-      const updated = await updateProject({
-        input: {
-          customScopePath: path,
-          workspaceScope: 'CUSTOM_FOLDER',
-        },
-        projectId: project.id,
-        token,
+      const updated = await saveProjectPatch({
+        customScopePath: path,
+        workspaceScope: 'CUSTOM_FOLDER',
       });
       setProject(updated);
-      setCustomScopePath(updated.customScopePath ?? path);
+      setCustomScopePath(updated?.customScopePath ?? path);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not choose folder');
     } finally {
@@ -121,6 +135,9 @@ export function BottomComposer({
     setSubmitting(true);
     setError(null);
     try {
+      if (pendingProjectPatchRef.current) {
+        await pendingProjectPatchRef.current;
+      }
       const token = await getToken();
       const [providerId, ...modelParts] = selectedModelKey.split(':');
       const modelName = modelParts.join(':');

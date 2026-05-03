@@ -443,7 +443,16 @@ export function createProjectsRouter({
         cancelledRunId = activeRun.id;
       }
 
-      const project = (conversation as { project?: { defaultBackend?: string } }).project;
+      const project = (conversation as {
+        project?: {
+          defaultBackend?: string;
+          defaultModel?: string | null;
+          defaultProvider?: string | null;
+          id?: string;
+          permissionMode?: string | null;
+          workspaceScope?: string | null;
+        };
+      }).project;
       const backend = apiBackendToDb(parsed.data.backend) ?? project?.defaultBackend ?? "E2B";
       const run = await store.agentRun.create({
         data: {
@@ -462,6 +471,20 @@ export function createProjectsRouter({
       if (parsed.data.providerId) {
         runOptions.providerOverride = parsed.data.providerId;
       }
+      logger.info(
+        {
+          backend,
+          conversationId: req.params.conversationId,
+          modelName: parsed.data.modelName ?? project?.defaultModel ?? null,
+          permissionMode: project?.permissionMode ?? null,
+          projectDefaultBackend: project?.defaultBackend ?? null,
+          projectId: project?.id ?? null,
+          providerId: parsed.data.providerId ?? project?.defaultProvider ?? null,
+          runId: run.id,
+          workspaceScope: project?.workspaceScope ?? null,
+        },
+        "Conversation message starting agent run with selected runtime context",
+      );
       runAgent(run.id, parsed.data.content, runOptions).catch((err) => {
         logger.error({ conversationId: req.params.conversationId, err, runId: run.id }, "runAgent unhandled rejection");
       });

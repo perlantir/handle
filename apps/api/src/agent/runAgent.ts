@@ -465,6 +465,7 @@ export function createAgentRunner({
       const selectedBackend =
         options.backend ??
         normalizeBackend(runContext.backend ?? project?.defaultBackend);
+      const localWorkspaceDir = localWorkspaceDirForProject(project, taskId);
 
       await providerRegistry.initialize();
       const modelOverride = runContext.modelName ?? project?.defaultModel ?? undefined;
@@ -478,6 +479,21 @@ export function createAgentRunner({
       logger.info(
         { providerId: provider.id, model: provider.config.primaryModel },
         "Using provider for task",
+      );
+      logger.info(
+        {
+          backend: selectedBackend,
+          conversationId: runContext.conversationId,
+          modelName: modelOverride ?? provider.config.primaryModel,
+          permissionMode: project?.permissionMode ?? null,
+          projectDefaultBackend: project?.defaultBackend ?? null,
+          projectId: project?.id ?? null,
+          providerId: taskOverride ?? provider.id,
+          taskId,
+          workspaceDir: selectedBackend === "local" ? localWorkspaceDir : "/home/user",
+          workspaceScope: project?.workspaceScope ?? null,
+        },
+        "Agent run runtime context selected",
       );
       await updateRun(store, taskId, {
         backend: selectedBackend,
@@ -554,7 +570,7 @@ export function createAgentRunner({
         }
         if (project?.id) {
           localBackendOptions.projectId = project.id;
-          localBackendOptions.workspaceDir = localWorkspaceDirForProject(project, taskId);
+          localBackendOptions.workspaceDir = localWorkspaceDir;
         }
         if (project?.permissionMode) {
           localBackendOptions.permissionMode =
