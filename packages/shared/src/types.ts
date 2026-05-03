@@ -206,6 +206,8 @@ export type BackendType = 'E2B' | 'LOCAL';
 
 export type BrowserMode = 'SEPARATE_PROFILE' | 'ACTUAL_CHROME';
 
+export type MemoryScope = 'GLOBAL_AND_PROJECT' | 'PROJECT_ONLY' | 'NONE';
+
 export type AgentRunStatus =
   | 'RUNNING'
   | 'WAITING'
@@ -219,6 +221,7 @@ export interface ProjectSummary {
   workspaceScope: WorkspaceScope;
   customScopePath?: string | null;
   permissionMode: ProjectPermissionMode;
+  memoryScope: MemoryScope;
   defaultBackend: BackendType;
   defaultProvider?: string | null;
   defaultModel?: string | null;
@@ -241,6 +244,7 @@ export interface ChatMessage {
   conversationId: string;
   role: 'USER' | 'ASSISTANT';
   content: string;
+  memoryEnabled?: boolean | null;
   agentRunId?: string | null;
   providerId?: string | null;
   modelName?: string | null;
