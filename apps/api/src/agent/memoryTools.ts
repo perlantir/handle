@@ -6,6 +6,7 @@ import { redactSecrets } from "../lib/redact";
 import { appendActionLog } from "../lib/actionLog";
 import {
   appendMessageToZep,
+  effectiveMemoryScope,
   forgetMemoryForProject,
   getRelevantMemoryForTask,
 } from "../memory/sessionMemory";
@@ -30,7 +31,9 @@ const forgetInput = z.object({
   query: z.string().min(1).describe("The memory to forget."),
   scope: z
     .enum(["project", "global", "all"])
-    .describe("Which memory namespace to delete. Use project unless the user explicitly asks for global or all memory."),
+    .describe(
+      "Which memory namespace to delete. In GLOBAL_AND_PROJECT projects, Handle expands any value to both project and global namespaces so the fact is fully forgotten.",
+    ),
 });
 
 function emitMemoryToolCall(
@@ -68,6 +71,10 @@ function memoryDisabledMessage() {
   return "Memory is disabled for this project or message.";
 }
 
+function secretMemoryBlockedMessage() {
+  return "Secret-shaped content was blocked. Handle did not keep that value in memory. Put secrets in a password manager instead.";
+}
+
 function actionContext(context: ToolExecutionContext) {
   return {
     conversationId: context.conversationId ?? context.taskId,
@@ -97,7 +104,7 @@ export function createMemoryToolDefinitions(): ToolDefinition[] {
           return message;
         }
 
-        await appendMessageToZep({
+        const writeResult = await appendMessageToZep({
           content: parsed.fact,
           conversationId: context.conversationId,
           extractionMode: "explicit_fact",
@@ -105,6 +112,19 @@ export function createMemoryToolDefinitions(): ToolDefinition[] {
           role: "USER",
           ...(parsed.valid_at ? { validAt: parsed.valid_at } : {}),
         });
+        if (
+          writeResult.skippedReason === "redaction_triggered" ||
+          writeResult.skippedReason === "redaction_marker_present"
+        ) {
+          const result = secretMemoryBlockedMessage();
+          emitMemoryToolResult(context, callId, result);
+          return result;
+        }
+        if (!writeResult.ok) {
+          const result = "Memory is currently offline; I could not save that fact.";
+          emitMemoryToolResult(context, callId, result, result);
+          return result;
+        }
         const result = "Saved memory.";
         emitMemoryToolResult(context, callId, result);
         await appendActionLog({
@@ -175,7 +195,11 @@ export function createMemoryToolDefinitions(): ToolDefinition[] {
 
         const decision = await awaitApproval(context.taskId, {
           action: "forget",
-          reason: `Forget memory matching "${redactSecrets(parsed.query)}" in ${parsed.scope} scope`,
+          reason: `Forget memory matching "${redactSecrets(parsed.query)}" in ${
+            effectiveMemoryScope(context.memoryProject) === "GLOBAL_AND_PROJECT"
+              ? "global and project"
+              : parsed.scope
+          } scope`,
           target: parsed.query,
           type: "memory_forget",
         });

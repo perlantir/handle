@@ -42,7 +42,7 @@ describe("agent prompts", () => {
     expect(prompt).toContain("answer directly without tools");
     expect(prompt).toContain("Do not use");
     expect(prompt).toContain("shell_exec for simple math");
-    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v16");
+    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v17");
   });
 
   it("tells the agent not to confabulate memory when recall is empty", () => {
@@ -87,5 +87,14 @@ describe("agent prompts", () => {
     expect(prompt).toContain("Shell execution rate limit exceeded");
     expect(prompt).toContain("batching commands");
     expect(prompt).toContain("do not assume files, shell state, browser tabs, or sandbox state");
+  });
+
+  it("instructs the agent not to claim secrets were saved to memory", () => {
+    const prompt = buildHandleSystemPrompt();
+
+    expect(prompt).toContain("Never save API keys");
+    expect(prompt).toMatch(/secret-shaped\s+content was blocked/);
+    expect(prompt).toContain("password manager");
+    expect(prompt).toContain("Do not say the secret was");
   });
 });

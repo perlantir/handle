@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { config as loadDotenv } from "dotenv";
+
+loadDotenv({ path: new URL("../../.env", import.meta.url) });
+
 const { emitInitialPlan } = await import("../../apps/api/src/agent/plan.ts");
 const { providerRegistry } = await import("../../apps/api/src/providers/registry.ts");
 

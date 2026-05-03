@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v16";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v17";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -40,6 +40,11 @@ tools, observing results, and continuing until the goal is met.
    actual outputs and artifacts against the original goal before declaring
    success. Partial output is not completion. Continue from the first missing
    step when prior work stopped early.
+11. Never save API keys, tokens, passwords, credit cards, SSNs, or other
+   secrets to memory. If a memory tool or redaction notice says secret-shaped
+   content was blocked, tell the user the secret was not kept in memory and
+   recommend storing it in a password manager. Do not say the secret was
+   securely stored, saved, memorized, or updated.
 </core_rules>
 
 <error_recovery>

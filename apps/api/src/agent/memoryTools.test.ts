@@ -7,6 +7,7 @@ vi.mock("../approvals/approvalWaiter", () => ({
 
 vi.mock("../memory/sessionMemory", () => ({
   appendMessageToZep: vi.fn().mockResolvedValue({ ok: true }),
+  effectiveMemoryScope: vi.fn((project) => project?.memoryScope ?? "GLOBAL_AND_PROJECT"),
   forgetMemoryForProject: vi.fn().mockResolvedValue({ deletedSessions: 1 }),
   getRelevantMemoryForTask: vi.fn().mockResolvedValue([
     { content: "Favorite color is teal", source: "project" },
@@ -76,6 +77,40 @@ describe("memory tools", () => {
         project: { id: "project-test", memoryScope: "GLOBAL_AND_PROJECT" },
       }),
     );
+  });
+
+  it("does not report success when redaction blocks a memory save", async () => {
+    vi.mocked(appendMessageToZep).mockResolvedValueOnce({
+      factsWritten: 0,
+      ok: true,
+      skipped: false,
+      skippedReason: "redaction_marker_present",
+    });
+    const save = createMemoryToolDefinitions().find((tool) => tool.name === "memory_save");
+    if (!save) throw new Error("memory_save missing");
+
+    const result = await save.implementation(
+      { fact: "User's API key is [REDACTED]." },
+      context(),
+    );
+
+    expect(result).toContain("Secret-shaped content was blocked");
+    expect(result).toContain("did not keep");
+    expect(result).not.toContain("Saved memory");
+  });
+
+  it("reports memory offline instead of saved when the write layer fails", async () => {
+    vi.mocked(appendMessageToZep).mockResolvedValueOnce({
+      ok: false,
+      skipped: true,
+      skippedReason: "memory_offline",
+    });
+    const save = createMemoryToolDefinitions().find((tool) => tool.name === "memory_save");
+    if (!save) throw new Error("memory_save missing");
+
+    await expect(
+      save.implementation({ fact: "Favorite color is teal" }, context()),
+    ).resolves.toBe("Memory is currently offline; I could not save that fact.");
   });
 
   it("searches memory through the recall layer", async () => {
