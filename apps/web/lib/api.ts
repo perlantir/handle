@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   ConversationSummary,
   CreateTaskResponse,
+  MemoryFactSummary,
   PendingApproval,
   ProjectSummary,
   SendConversationMessageResponse,
@@ -64,6 +65,54 @@ function authHeaders(token: string | null) {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
   };
+}
+
+export async function listMemoryFacts({
+  projectId,
+  scope = 'all',
+  token,
+}: AuthenticatedRequestInput & {
+  projectId?: string;
+  scope?: 'all' | 'global' | 'project';
+}): Promise<{ facts: MemoryFactSummary[]; status: { provider?: string; status: 'online' | 'offline'; detail?: string } }> {
+  const params = new URLSearchParams({ scope });
+  if (projectId) params.set('projectId', projectId);
+  const response = await fetch(`${apiBaseUrl}/api/memory/facts?${params.toString()}`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load memory');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as {
+    facts?: MemoryFactSummary[];
+    status?: { provider?: string; status?: 'online' | 'offline'; detail?: string };
+  };
+  return {
+    facts: body.facts ?? [],
+    status: {
+      status: body.status?.status ?? 'offline',
+      ...(body.status?.provider ? { provider: body.status.provider } : {}),
+      ...(body.status?.detail ? { detail: body.status.detail } : {}),
+    },
+  };
+}
+
+export async function deleteMemorySession({
+  sessionId,
+  token,
+}: AuthenticatedRequestInput & { sessionId: string }): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/memory/facts/${encodeURIComponent(sessionId)}`, {
+    headers: authHeaders(token),
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to delete memory');
+    throw new Error(message);
+  }
 }
 
 export async function createTask({

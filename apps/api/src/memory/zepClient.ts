@@ -37,6 +37,12 @@ export interface ZepMemorySearchResult {
   score?: number;
 }
 
+export interface ZepSessionSummary {
+  metadata?: Record<string, unknown>;
+  sessionId: string;
+  userId?: string | null;
+}
+
 export interface MemoryStatusSnapshot {
   provider: MemoryProvider;
   status: MemoryConnectionStatus;
@@ -243,6 +249,44 @@ export class HandleZepClient {
     });
   }
 
+  async listSessions(): Promise<ZepOperationResult<ZepSessionSummary[]>> {
+    return this.safeOperation("list_sessions", async () => {
+      const response = await this.request("/api/v1/sessions", { method: "GET" });
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Zep session list failed: HTTP ${response.status} ${body.slice(0, 240)}`);
+      }
+      const raw = (await response.json().catch(() => [])) as unknown;
+      const sessions = Array.isArray(raw)
+        ? raw
+        : typeof raw === "object" && raw && "sessions" in raw && Array.isArray((raw as { sessions: unknown }).sessions)
+          ? (raw as { sessions: unknown[] }).sessions
+          : [];
+      return sessions.flatMap((item) => normalizeSession(item));
+    });
+  }
+
+  async getSessionMemory(input: {
+    sessionId: string;
+  }): Promise<ZepOperationResult<ZepMemoryMessage[]>> {
+    return this.safeOperation("get_session_memory", async () => {
+      const response = await this.request(
+        `/api/v1/sessions/${encodeURIComponent(input.sessionId)}/memory`,
+        { method: "GET" },
+      );
+      if (!response.ok) {
+        const body = await response.text();
+        if (response.status === 404) return [];
+        throw new Error(`Zep memory read failed: HTTP ${response.status} ${body.slice(0, 240)}`);
+      }
+      const raw = (await response.json().catch(() => ({}))) as unknown;
+      if (!raw || typeof raw !== "object" || !("messages" in raw)) return [];
+      const messages = (raw as { messages: unknown }).messages;
+      if (!Array.isArray(messages)) return [];
+      return messages.flatMap((item) => normalizeMemoryMessage(item));
+    });
+  }
+
   private async safeOperation<T>(
     operation: string,
     fn: () => Promise<T>,
@@ -357,4 +401,43 @@ function normalizeSearchResult(item: unknown): ZepMemorySearchResult[] {
     result.score = record.dist;
   }
   return [result];
+}
+
+function normalizeSession(item: unknown): ZepSessionSummary[] {
+  if (!item || typeof item !== "object") return [];
+  const record = item as {
+    metadata?: unknown;
+    session_id?: unknown;
+    user_id?: unknown;
+  };
+  if (typeof record.session_id !== "string") return [];
+  const session: ZepSessionSummary = { sessionId: record.session_id };
+  if (record.metadata && typeof record.metadata === "object") {
+    session.metadata = record.metadata as Record<string, unknown>;
+  }
+  if (typeof record.user_id === "string" || record.user_id === null) {
+    session.userId = record.user_id;
+  }
+  return [session];
+}
+
+function normalizeMemoryMessage(item: unknown): ZepMemoryMessage[] {
+  if (!item || typeof item !== "object") return [];
+  const record = item as {
+    content?: unknown;
+    metadata?: unknown;
+    role?: unknown;
+  };
+  if (typeof record.content !== "string") return [];
+  const message: ZepMemoryMessage = {
+    content: record.content,
+    role:
+      record.role === "assistant" || record.role === "system" || record.role === "user"
+        ? record.role
+        : "user",
+  };
+  if (record.metadata && typeof record.metadata === "object") {
+    message.metadata = record.metadata as Record<string, unknown>;
+  }
+  return [message];
 }

@@ -120,6 +120,17 @@ export interface MemoryRecallEvent {
   timestamp: string;
 }
 
+export interface MemoryFactSummary {
+  id: string;
+  confidence: number;
+  content: string;
+  lastUpdated: string;
+  source: 'global' | 'project';
+  sourceLabel: string;
+  sessionId: string;
+  type: string;
+}
+
 export type SSEEvent =
   | ThoughtEvent
   | ToolCallEvent
