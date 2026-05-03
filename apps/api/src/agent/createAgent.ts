@@ -52,6 +52,10 @@ interface CreatePhase1AgentOptions {
   llm?: CreateToolCallingAgentParams["llm"];
 }
 
+function escapePromptTemplateLiterals(text: string) {
+  return text.replaceAll("{", "{{").replaceAll("}", "}}");
+}
+
 export async function createPhase1Agent(
   context: ToolExecutionContext,
   options: CreatePhase1AgentOptions = {},
@@ -64,7 +68,7 @@ export async function createPhase1Agent(
     workspaceDir: context.backend.getWorkspaceDir(),
   });
   const prompt = ChatPromptTemplate.fromMessages([
-    ["system", systemPrompt],
+    ["system", escapePromptTemplateLiterals(systemPrompt)],
     new MessagesPlaceholder("chat_history"),
     ["human", "{input}"],
     new MessagesPlaceholder("agent_scratchpad"),
@@ -108,7 +112,7 @@ export async function createHandleAgent(
     workspaceDir: context.backend.getWorkspaceDir(),
   });
   const prompt = ChatPromptTemplate.fromMessages([
-    ["system", systemPrompt],
+    ["system", escapePromptTemplateLiterals(systemPrompt)],
     new MessagesPlaceholder("chat_history"),
     ["human", "{input}"],
     new MessagesPlaceholder("agent_scratchpad"),
