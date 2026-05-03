@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { cancelAgentRunById } from "../agent/cancelAgentRun";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
 import { runAgent as defaultRunAgent } from "../agent/runAgent";
 import { asyncHandler } from "../lib/http";
@@ -45,7 +46,8 @@ const execFile = promisify(execFileCallback);
 export interface ProjectRouteStore {
   agentRun: {
     create(args: unknown): Promise<{ id: string }>;
-    findFirst(args: unknown): Promise<unknown | null>;
+    findFirst(args: unknown): Promise<{ id: string; status?: string } | null>;
+    update(args: unknown): Promise<unknown>;
   };
   conversation: {
     create(args: unknown): Promise<{ id: string }>;
@@ -418,6 +420,29 @@ export function createProjectsRouter({
         },
       });
 
+      const activeRun = await store.agentRun.findFirst({
+        orderBy: { startedAt: "desc" },
+        select: { id: true, status: true },
+        where: {
+          conversationId: req.params.conversationId,
+          status: { in: ["RUNNING", "WAITING"] },
+        },
+      });
+      let cancelledRunId: string | undefined;
+      if (
+        activeRun &&
+        typeof activeRun === "object" &&
+        "id" in activeRun &&
+        typeof activeRun.id === "string"
+      ) {
+        await cancelAgentRunById({
+          reason: "Interrupted by a follow-up message",
+          runId: activeRun.id,
+          store,
+        });
+        cancelledRunId = activeRun.id;
+      }
+
       const project = (conversation as { project?: { defaultBackend?: string } }).project;
       const backend = apiBackendToDb(parsed.data.backend) ?? project?.defaultBackend ?? "E2B";
       const run = await store.agentRun.create({
@@ -443,6 +468,7 @@ export function createProjectsRouter({
 
       return res.json({
         agentRunId: run.id,
+        ...(cancelledRunId ? { cancelledRunId } : {}),
         conversationId: req.params.conversationId,
         messageId: message.id,
       });

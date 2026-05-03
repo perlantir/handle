@@ -8,6 +8,7 @@ function createStore(): ProjectRouteStore {
     agentRun: {
       create: vi.fn().mockResolvedValue({ id: "run-test" }),
       findFirst: vi.fn().mockResolvedValue({ id: "run-test" }),
+      update: vi.fn().mockResolvedValue({ id: "run-test" }),
     },
     conversation: {
       create: vi.fn().mockResolvedValue({ id: "conversation-test" }),
@@ -127,6 +128,7 @@ describe("projects routes", () => {
 
   it("creates a conversation message, agent run, and starts the agent", async () => {
     const store = createStore();
+    vi.mocked(store.agentRun.findFirst).mockResolvedValueOnce(null);
     const runAgent = vi.fn().mockResolvedValue(undefined);
     const { app } = createApp(store, runAgent);
 
@@ -164,6 +166,33 @@ describe("projects routes", () => {
     expect(runAgent).toHaveBeenCalledWith("run-test", "Continue the work", {
       backend: "local",
       providerOverride: "anthropic",
+    });
+  });
+
+  it("cancels an active run before starting an interrupting follow-up", async () => {
+    const store = createStore();
+    vi.mocked(store.agentRun.findFirst).mockResolvedValueOnce({
+      id: "run-active",
+      status: "RUNNING",
+    });
+    const runAgent = vi.fn().mockResolvedValue(undefined);
+    const { app } = createApp(store, runAgent);
+
+    const response = await request(app)
+      .post("/api/conversations/conversation-test/messages")
+      .send({ content: "Actually do this instead" })
+      .expect(200);
+
+    expect(response.body.cancelledRunId).toBe("run-active");
+    expect(store.agentRun.update).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        result: "Interrupted by a follow-up message",
+        status: "CANCELLED",
+      }),
+      where: { id: "run-active" },
+    });
+    expect(runAgent).toHaveBeenCalledWith("run-test", "Actually do this instead", {
+      backend: "local",
     });
   });
 
