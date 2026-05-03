@@ -333,15 +333,18 @@ function logMemoryDiagnostic({
   operation: string;
   status: "error" | "offline" | "ok";
 }) {
-  void appendMemoryLog({
-    conversationId: context.conversationId ?? undefined,
+  const entry = {
     details,
     durationMs,
     operation,
-    projectId: context.project?.id ?? undefined,
-    provider: "self-hosted",
+    provider: "self-hosted" as const,
     scope: effectiveMemoryScope(context.project),
     status,
+    ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+    ...(context.project?.id ? { projectId: context.project.id } : {}),
+  };
+  void appendMemoryLog({
+    ...entry,
   }).catch(() => undefined);
 }
 
