@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ShieldAlert } from "lucide-react";
+import { Brain, ChevronDown, ShieldAlert } from "lucide-react";
 import type { ProjectSummary } from "@handle/shared";
 import { Composer } from "@/components/design-system";
 import { useHandleAuth } from "@/lib/handleAuth";
@@ -25,6 +25,10 @@ interface HomeComposerProps {
   onValueChange: (value: string) => void;
 }
 
+function defaultMemoryEnabled(project: ProjectSummary | null) {
+  return project?.memoryScope !== "NONE";
+}
+
 export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
   const { getToken } = useHandleAuth();
   const router = useRouter();
@@ -37,6 +41,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
   const [customScopePath, setCustomScopePath] = useState("");
   const [pickingFolder, setPickingFolder] = useState(false);
   const [selectedModelKey, setSelectedModelKey] = useState("");
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   const activeProject =
@@ -87,7 +92,8 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
 
   useEffect(() => {
     setCustomScopePath(activeProject?.customScopePath ?? "");
-  }, [activeProject?.customScopePath, activeProject?.id]);
+    setMemoryEnabled(defaultMemoryEnabled(activeProject));
+  }, [activeProject?.customScopePath, activeProject?.id, activeProject?.memoryScope]);
 
   function updateProjectState(project: ProjectSummary) {
     setProjects((current) =>
@@ -151,6 +157,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
         backend,
         content: goal,
         conversationId: conversation.id,
+        memoryEnabled,
         ...(selectedProvider
           ? {
               modelName: selectedProvider.primaryModel,
@@ -159,6 +166,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
           : {}),
         token,
       });
+      setMemoryEnabled(defaultMemoryEnabled(activeProject));
       router.push(`/tasks/${agentRunId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start task");
@@ -295,7 +303,23 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
           </button>
         </div>
       )}
-      <div className="mt-2 flex justify-end">
+      <div className="mt-2 flex flex-wrap justify-end gap-2">
+        <button
+          aria-label={memoryEnabled ? "Memory enabled for this message" : "Memory disabled for this message"}
+          className={cn(
+            "inline-flex h-8 items-center gap-1.5 rounded-pill border px-3 text-[11.5px] font-medium outline-none transition-colors duration-fast",
+            memoryEnabled
+              ? "border-accent/30 bg-accent/5 text-text-primary"
+              : "border-border-subtle bg-bg-surface text-text-tertiary",
+          )}
+          disabled={submitting}
+          onClick={() => setMemoryEnabled((current) => !current)}
+          title={memoryEnabled ? "Save & recall memory for this message" : "Memory disabled for this message"}
+          type="button"
+        >
+          <Brain className="h-3.5 w-3.5" />
+          Memory {memoryEnabled ? "on" : "off"}
+        </button>
         <label className="inline-flex items-center gap-2 rounded-pill border border-border-subtle bg-bg-surface px-3 py-1.5 text-[11.5px] text-text-secondary">
           <span>Model</span>
           <select

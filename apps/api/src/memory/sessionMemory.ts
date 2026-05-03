@@ -55,6 +55,7 @@ export function isMemoryEnabled({
   memoryEnabled?: boolean | null | undefined;
   project?: MemoryProjectContext | null | undefined;
 }) {
+  if (memoryEnabled === true) return true;
   if (memoryEnabled === false) return false;
   return effectiveMemoryScope(project) !== "NONE";
 }

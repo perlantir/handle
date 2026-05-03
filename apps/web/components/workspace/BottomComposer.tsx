@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUp, Mic, Paperclip, Sparkles, Square } from 'lucide-react';
+import { ArrowUp, Brain, Mic, Paperclip, Sparkles, Square } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { ProjectSummary, TaskDetailResponse } from '@handle/shared';
@@ -19,6 +19,10 @@ function IconButton({ children, label }: { children: React.ReactNode; label: str
       {children}
     </button>
   );
+}
+
+function defaultMemoryEnabled(project: ProjectSummary | null) {
+  return project?.memoryScope !== 'NONE';
 }
 
 export function BottomComposer({
@@ -41,6 +45,7 @@ export function BottomComposer({
   const [error, setError] = useState<string | null>(null);
   const [pickingFolder, setPickingFolder] = useState(false);
   const [project, setProject] = useState<ProjectSummary | null>(null);
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [providers, setProviders] = useState<SettingsProvider[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState('');
   const pendingProjectPatchRef = useRef<Promise<ProjectSummary | null> | null>(null);
@@ -65,6 +70,7 @@ export function BottomComposer({
       if (cancelled) return;
       const activeProject = projects.find((item) => item.id === task?.projectId) ?? null;
       setProject(activeProject);
+      setMemoryEnabled(defaultMemoryEnabled(activeProject));
       setCustomScopePath(activeProject?.customScopePath ?? '');
       if (activeProject?.defaultBackend) {
         setBackend(activeProject.defaultBackend === 'LOCAL' ? 'local' : 'e2b');
@@ -146,9 +152,11 @@ export function BottomComposer({
         conversationId: task.conversationId,
         ...(backend ? { backend } : {}),
         ...(providerId && modelName ? { providerId, modelName } : {}),
+        memoryEnabled,
         token,
       });
       setValue('');
+      setMemoryEnabled(defaultMemoryEnabled(project));
       router.push(`/tasks/${agentRunId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send follow-up');
@@ -265,6 +273,22 @@ export function BottomComposer({
             </button>
           </>
         )}
+        <button
+          aria-label={memoryEnabled ? 'Memory enabled for this message' : 'Memory disabled for this message'}
+          className={cn(
+            "inline-flex h-8 items-center gap-1.5 rounded-pill border px-3 text-[11.5px] font-medium outline-none transition-colors duration-fast",
+            memoryEnabled
+              ? "border-accent/30 bg-accent/5 text-text-primary"
+              : "border-border-subtle bg-bg-canvas text-text-tertiary",
+          )}
+          disabled={submitting}
+          onClick={() => setMemoryEnabled((current) => !current)}
+          title={memoryEnabled ? 'Save & recall memory for this message' : 'Memory disabled for this message'}
+          type="button"
+        >
+          <Brain className="h-3.5 w-3.5" />
+          Memory {memoryEnabled ? 'on' : 'off'}
+        </button>
       </div>
       <form
         className="flex items-center gap-2.5 rounded-[14px] border border-border-subtle bg-bg-canvas py-1 pl-4 pr-1.5"

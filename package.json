@@ -27,6 +27,7 @@
     "smoke:conversation-multi-turn": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/conversation-multi-turn.mjs",
     "smoke:conversation-history-persistence": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/conversation-history-persistence.mjs",
     "smoke:computer-use-agent": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/computer-use-agent.mjs",
+    "smoke:composer-memory-toggle-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-backend-pill.spec.ts --grep \"composer sends backend override\"",
     "smoke:desktop-sandbox": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/desktop-sandbox.mjs",
     "smoke:computer-use-task": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/computer-use-task.mjs",
     "smoke:local-backend-basic": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/local-backend-basic.mjs",

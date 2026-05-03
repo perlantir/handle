@@ -49,6 +49,7 @@ interface SendMessageInput {
   backend?: 'e2b' | 'local';
   content: string;
   conversationId: string;
+  memoryEnabled?: boolean;
   modelName?: string;
   providerId?: string;
   token: string | null;
@@ -386,6 +387,7 @@ export async function sendConversationMessage({
   backend,
   content,
   conversationId,
+  memoryEnabled,
   modelName,
   providerId,
   token,
@@ -394,6 +396,7 @@ export async function sendConversationMessage({
     body: JSON.stringify({
       ...(backend ? { backend } : {}),
       content,
+      ...(memoryEnabled === undefined ? {} : { memoryEnabled }),
       ...(modelName ? { modelName } : {}),
       ...(providerId ? { providerId } : {}),
     }),

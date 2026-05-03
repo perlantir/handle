@@ -56,6 +56,12 @@ describe("session memory", () => {
     expect(isMemoryEnabled({ project: { memoryScope: "NONE" } })).toBe(false);
     expect(
       isMemoryEnabled({
+        memoryEnabled: true,
+        project: { memoryScope: "NONE" },
+      }),
+    ).toBe(true);
+    expect(
+      isMemoryEnabled({
         memoryEnabled: false,
         project: { memoryScope: "GLOBAL_AND_PROJECT" },
       }),
