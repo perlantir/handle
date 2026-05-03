@@ -56,6 +56,7 @@
     "smoke:workspace-ui-regression": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-ui-regression.spec.ts",
     "smoke:trivial-question-no-tools": "node scripts/smoke/trivial-question-no-tools.mjs",
     "smoke:web-signin": "node scripts/smoke/web-signin.mjs",
+    "smoke:zep-client-connect": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/zep-client-connect.mjs",
     "smoke:zep-self-hosted-up": "node scripts/smoke/zep-self-hosted-up.mjs",
     "test": "pnpm -r --if-present test",
     "typecheck": "turbo typecheck"

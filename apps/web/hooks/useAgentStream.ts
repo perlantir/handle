@@ -63,6 +63,8 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
       return { ...state, error: event.message, status: 'ERROR' };
     case 'message':
       return { ...state, finalMessage: event.content, thought: '' };
+    case 'memory_status':
+      return state;
     case 'plan_update':
       return { ...state, planSteps: event.steps };
     case 'provider_fallback':

@@ -100,6 +100,15 @@ export interface BrowserScreenshotEvent {
   source: 'browser_tools' | 'computer_use';
 }
 
+export interface MemoryStatusEvent {
+  type: 'memory_status';
+  taskId: string;
+  status: 'online' | 'offline';
+  provider: 'self-hosted' | 'cloud';
+  detail?: string;
+  timestamp: string;
+}
+
 export type SSEEvent =
   | ThoughtEvent
   | ToolCallEvent
@@ -111,6 +120,7 @@ export type SSEEvent =
   | AgentRunCancelledEvent
   | ApprovalRequestEvent
   | BrowserScreenshotEvent
+  | MemoryStatusEvent
   | PlanUpdateEvent
   | ProviderFallbackEvent;
 
