@@ -17,6 +17,7 @@ import {
 import { createBrowserToolDefinitions } from "./browserTools";
 import { createComputerUseToolDefinitions } from "./computerUseTools";
 import { createMemoryToolDefinitions } from "./memoryTools";
+import { createSharedMemoryToolDefinitions } from "./sharedMemoryTools";
 import { createPhase1ToolDefinitions } from "./tools";
 import {
   buildHandleSystemPrompt,
@@ -94,6 +95,7 @@ export async function createHandleAgent(
     [
       ...createPhase1ToolDefinitions(),
       ...createMemoryToolDefinitions(),
+      ...createSharedMemoryToolDefinitions(),
       ...createBrowserToolDefinitions(),
       ...createComputerUseToolDefinitions(),
     ],

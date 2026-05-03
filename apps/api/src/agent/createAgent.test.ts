@@ -193,6 +193,8 @@ describe("createHandleAgent", () => {
       "memory_save",
       "memory_search",
       "memory_forget",
+      "shared_memory_read",
+      "shared_memory_write",
       "browser_navigate",
       "browser_click",
       "browser_type",

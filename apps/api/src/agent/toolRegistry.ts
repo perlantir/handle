@@ -18,6 +18,7 @@ export interface ToolExecutionContext {
   projectId?: string;
   recordTrajectoryStep?: (step: TrajectoryStepRecord) => Promise<void>;
   sandbox: E2BSandboxLike;
+  sharedMemoryNamespaceId?: string;
   trustedDomains?: string[];
 }
 

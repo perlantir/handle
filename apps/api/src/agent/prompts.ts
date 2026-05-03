@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v13";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v14";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -196,6 +196,7 @@ const PHASE_3_BROWSER_AND_COMPUTER_USE_PROMPT = `
 - memory_save: Save a durable preference, project fact, decision, or idea.
 - memory_search: Search remembered facts relevant to the current task.
 - memory_forget: Forget memory after explicit user approval.
+- shared_memory_read/shared_memory_write: Phase 5 primitives for future sub-agent coordination. Use only when coordinating state inside this run.
 </available_phase_3_tools>
 
 Phase 3 prompt version: ${SYSTEM_PROMPT_VERSION}

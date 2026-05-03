@@ -22,6 +22,7 @@ import {
   formatFailureMemoryContext,
   formatProceduralMemoryContext,
 } from "../memory/proceduralMemory";
+import { ensureSharedMemoryNamespace, type SharedMemoryStore } from "../memory/sharedMemory";
 import {
   completeTrajectory,
   failureReasonFromError,
@@ -110,6 +111,7 @@ interface TaskStore {
     findFirst?(args: unknown): Promise<unknown | null>;
   };
   agentRunTrajectory?: TrajectoryStore["agentRunTrajectory"];
+  sharedMemoryNamespace?: SharedMemoryStore["sharedMemoryNamespace"];
   message: {
     create(args: unknown): Promise<unknown>;
   };
@@ -184,6 +186,7 @@ interface RunAgentDependencies {
       memoryContext?: string;
       recordTrajectoryStep?: (step: TrajectoryStepRecord) => Promise<void>;
       sandbox: E2BSandboxLike;
+      sharedMemoryNamespaceId?: string;
       taskId: string;
       trustedDomains?: string[];
     },
@@ -573,6 +576,13 @@ export function createAgentRunner({
         providerId: provider.id,
       });
       await initializeTrajectory({ agentRunId: taskId, goal, store });
+      const sharedMemoryNamespaceId = await ensureSharedMemoryNamespace({
+        parentRunId: taskId,
+        store,
+      }).catch((err) => {
+        logger.warn({ err, taskId }, "Failed to initialize shared memory namespace");
+        return null;
+      });
       runControl.throwIfCancelled();
 
       try {
@@ -838,6 +848,7 @@ export function createAgentRunner({
             });
           }
         },
+        ...(sharedMemoryNamespaceId ? { sharedMemoryNamespaceId } : {}),
         taskId,
         sandbox,
         trustedDomains,

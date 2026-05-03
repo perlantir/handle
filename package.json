@@ -65,6 +65,7 @@
     "smoke:settings-execution-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/settings-execution.spec.ts",
     "smoke:settings-memory-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/settings-memory.spec.ts",
     "smoke:settings-providers-ui": "playwright test --config apps/web/playwright.config.ts --workers=1",
+    "smoke:shared-memory-primitive": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/shared-memory-primitive.mjs",
     "smoke:workspace-backend-pill": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-backend-pill.spec.ts",
     "smoke:workspace-ui-regression": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-ui-regression.spec.ts",
     "smoke:trajectory-recording": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/trajectory-recording.mjs",
