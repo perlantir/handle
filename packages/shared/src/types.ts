@@ -109,6 +109,17 @@ export interface MemoryStatusEvent {
   timestamp: string;
 }
 
+export interface MemoryRecallEvent {
+  type: 'memory_recall';
+  taskId: string;
+  facts: Array<{
+    content: string;
+    source: 'global' | 'project';
+    score?: number;
+  }>;
+  timestamp: string;
+}
+
 export type SSEEvent =
   | ThoughtEvent
   | ToolCallEvent
@@ -120,6 +131,7 @@ export type SSEEvent =
   | AgentRunCancelledEvent
   | ApprovalRequestEvent
   | BrowserScreenshotEvent
+  | MemoryRecallEvent
   | MemoryStatusEvent
   | PlanUpdateEvent
   | ProviderFallbackEvent;

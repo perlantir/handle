@@ -670,6 +670,18 @@ export function createAgentRunner({
           },
           "Memory recall completed for agent run",
         );
+        if (recalledMemory.length > 0) {
+          emitEvent({
+            facts: recalledMemory.map((fact) => ({
+              content: fact.content,
+              source: fact.source,
+              ...(typeof fact.score === "number" ? { score: fact.score } : {}),
+            })),
+            taskId,
+            timestamp: new Date().toISOString(),
+            type: "memory_recall",
+          });
+        }
       } catch (err) {
         logger.warn({ err, taskId }, "Memory recall failed; continuing without memory");
       }

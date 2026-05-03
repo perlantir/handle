@@ -1,6 +1,6 @@
 'use client';
 
-import { FileText, Globe, Shield } from 'lucide-react';
+import { Brain, FileText, Globe, Shield } from 'lucide-react';
 import type { PendingApproval } from '@handle/shared';
 import type { AgentStreamState, ToolCallState } from '@/hooks/useAgentStream';
 import { InspectorBlock, PillButton } from '@/components/design-system';
@@ -106,6 +106,27 @@ function SourceRow({ domain, sub }: { domain: string; sub: string }) {
   );
 }
 
+function MemoryRow({
+  fact,
+}: {
+  fact: AgentStreamState['memoryFacts'][number];
+}) {
+  return (
+    <div className="flex items-start gap-2.5 py-1">
+      <div className="mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] border border-border-subtle bg-bg-canvas text-text-tertiary">
+        <Brain className="h-[11px] w-[11px]" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="break-words text-[12px] leading-[17px] text-text-primary">{fact.content}</div>
+        <div className="mt-px text-[10.5px] text-text-tertiary">
+          {fact.source}
+          {typeof fact.score === 'number' ? ` · ${fact.score.toFixed(2)}` : ''}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RightInspector({ approvals, onReviewApproval, state }: RightInspectorProps) {
   const latestTool = latestToolCall(state.toolCalls);
   const fileTools = state.toolCalls.filter((toolCall) => toolCall.toolName.startsWith('file.'));
@@ -132,7 +153,16 @@ export function RightInspector({ approvals, onReviewApproval, state }: RightInsp
           ))}
         </InspectorBlock>
 
-        <InspectorBlock title="Memory used" />
+        <InspectorBlock
+          {...(state.memoryFacts.length > 0 ? { badge: String(state.memoryFacts.length) } : {})}
+          title="Memory used"
+        >
+          {state.memoryFacts.length === 0 ? (
+            <div className="text-[12px] leading-[18px] text-text-muted">No memory recalled for this run.</div>
+          ) : (
+            state.memoryFacts.map((fact) => <MemoryRow fact={fact} key={`${fact.source}:${fact.content}`} />)
+          )}
+        </InspectorBlock>
 
         <InspectorBlock title="Files touched">
           {fileTools.map((toolCall) => (
