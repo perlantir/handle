@@ -9,6 +9,8 @@ import { ApprovalPill, StatusDot } from '@/components/design-system';
 interface StatusBarHeaderProps {
   cancelling?: boolean;
   onCancel?: () => void;
+  onPause?: () => void;
+  pausing?: boolean;
   state: AgentStreamState;
   task: TaskDetailResponse | null;
 }
@@ -37,6 +39,7 @@ function statusSubtitle(state: AgentStreamState) {
 
   if (state.error) return state.error;
   if (state.status === 'CANCELLED') return 'Cancelled';
+  if (state.status === 'PAUSED') return 'Paused';
   if (state.status === 'WAITING') return state.pendingApproval?.reason ?? 'Waiting for approval';
   if (state.status === 'STOPPED') return 'Complete';
   if (latestTool) return `${runningTool ? 'Running' : 'Last ran'} ${latestTool.toolName}`;
@@ -78,7 +81,7 @@ function modelValue(task: TaskDetailResponse | null) {
   return task?.providerModel ? `${provider} · ${task.providerModel}` : provider;
 }
 
-export function StatusBarHeader({ cancelling = false, onCancel, state, task }: StatusBarHeaderProps) {
+export function StatusBarHeader({ cancelling = false, onCancel, onPause, pausing = false, state, task }: StatusBarHeaderProps) {
   const status = state.status === 'IDLE' && task ? task.status : state.status;
   const hasPendingApproval = state.status === 'WAITING' || Boolean(state.pendingApproval);
   const backend = task?.backend ?? 'e2b';
@@ -88,7 +91,7 @@ export function StatusBarHeader({ cancelling = false, onCancel, state, task }: S
     <header className="mt-8 flex h-14 shrink-0 items-center gap-[14px] border-b border-border-subtle px-8 pr-6">
       <StatusDot
         status={dotStatus(status)}
-        pulsing={status !== 'STOPPED' && status !== 'ERROR' && status !== 'CANCELLED'}
+        pulsing={status !== 'STOPPED' && status !== 'ERROR' && status !== 'CANCELLED' && status !== 'PAUSED'}
         size="lg"
       />
       <div className="flex min-w-0 flex-col gap-px">
@@ -123,13 +126,17 @@ export function StatusBarHeader({ cancelling = false, onCancel, state, task }: S
 
       {hasPendingApproval && <ApprovalPill label="1 pending" />}
 
-      <button
-        aria-label="Pause task"
-        className="flex h-8 w-8 items-center justify-center rounded-pill border border-border-subtle bg-bg-surface text-text-secondary transition-colors duration-fast hover:bg-bg-subtle"
-        type="button"
-      >
-        <Pause className="h-[13px] w-[13px]" />
-      </button>
+      {isActive ? (
+        <button
+          aria-label="Pause task"
+          className="flex h-8 w-8 items-center justify-center rounded-pill border border-border-subtle bg-bg-surface text-text-secondary transition-colors duration-fast hover:bg-bg-subtle disabled:opacity-60"
+          disabled={pausing}
+          onClick={onPause}
+          type="button"
+        >
+          <Pause className="h-[13px] w-[13px]" />
+        </button>
+      ) : null}
       {isActive ? (
         <button
           aria-label="Stop task"

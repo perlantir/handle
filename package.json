@@ -53,6 +53,7 @@
     "smoke:project-creation-rename": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/project-creation-rename.mjs",
     "smoke:procedural-memory": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/procedural-memory.mjs",
     "smoke:projects-crud": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/projects-crud.mjs",
+    "smoke:resumability": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/resumability.mjs",
     "smoke:screenshot-stream": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/screenshot-stream.mjs",
     "smoke:scope-custom-folder": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/scope-custom-folder.mjs",
     "smoke:scope-default-workspace": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/scope-default-workspace.mjs",

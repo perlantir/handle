@@ -282,6 +282,7 @@ export type MemoryScope = 'GLOBAL_AND_PROJECT' | 'PROJECT_ONLY' | 'NONE';
 export type AgentRunStatus =
   | 'RUNNING'
   | 'WAITING'
+  | 'PAUSED'
   | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED';

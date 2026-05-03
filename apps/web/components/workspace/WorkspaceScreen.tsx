@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { PendingApproval, TaskDetailResponse } from "@handle/shared";
 import { useAgentStream } from "@/hooks/useAgentStream";
 import { useHandleAuth } from "@/lib/handleAuth";
-import { cancelAgentRun, getTask, listPendingApprovals } from "@/lib/api";
+import { cancelAgentRun, getTask, listPendingApprovals, pauseAgentRun, resumeAgentRun } from "@/lib/api";
 import { ApprovalModal } from "./ApprovalModal";
 import { BottomComposer } from "./BottomComposer";
 import { CenterPane } from "./CenterPane";
@@ -37,6 +37,8 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
   );
   const [chatWidth, setChatWidth] = useState(64);
   const [cancellingRun, setCancellingRun] = useState(false);
+  const [pausingRun, setPausingRun] = useState(false);
+  const [resumingRun, setResumingRun] = useState(false);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("handle.workspace.chatWidth");
@@ -106,6 +108,7 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
 
   const effectiveStatus = state.status === "IDLE" && task ? task.status : state.status;
   const isRunActive = effectiveStatus === "RUNNING" || effectiveStatus === "WAITING";
+  const isRunPaused = effectiveStatus === "PAUSED";
 
   async function handleCancelRun() {
     if (!taskId || cancellingRun) return;
@@ -118,11 +121,35 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
     }
   }
 
+  async function handlePauseRun() {
+    if (!taskId || pausingRun) return;
+    setPausingRun(true);
+    try {
+      const token = await getToken();
+      await pauseAgentRun(taskId, { token });
+    } finally {
+      setPausingRun(false);
+    }
+  }
+
+  async function handleResumeRun() {
+    if (!taskId || resumingRun) return;
+    setResumingRun(true);
+    try {
+      const token = await getToken();
+      await resumeAgentRun(taskId, { token });
+    } finally {
+      setResumingRun(false);
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <StatusBarHeader
         cancelling={cancellingRun}
         onCancel={handleCancelRun}
+        onPause={handlePauseRun}
+        pausing={pausingRun}
         state={state}
         task={task}
       />
@@ -135,7 +162,12 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
           <BottomComposer
             cancelling={cancellingRun}
             isRunActive={isRunActive}
+            isRunPaused={isRunPaused}
             onCancelRun={handleCancelRun}
+            onPauseRun={handlePauseRun}
+            onResumeRun={handleResumeRun}
+            pausing={pausingRun}
+            resuming={resumingRun}
             task={task}
           />
         </div>

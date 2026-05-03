@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUp, Brain, Mic, Paperclip, Sparkles, Square } from 'lucide-react';
+import { ArrowUp, Brain, Mic, Paperclip, Pause, Play, Sparkles, Square } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { ProjectSummary, TaskDetailResponse } from '@handle/shared';
@@ -28,12 +28,22 @@ function defaultMemoryEnabled(project: ProjectSummary | null) {
 export function BottomComposer({
   cancelling = false,
   isRunActive = false,
+  isRunPaused = false,
   onCancelRun,
+  onPauseRun,
+  onResumeRun,
+  pausing = false,
+  resuming = false,
   task,
 }: {
   cancelling?: boolean;
   isRunActive?: boolean;
+  isRunPaused?: boolean;
   onCancelRun?: () => void;
+  onPauseRun?: () => void;
+  onResumeRun?: () => void;
+  pausing?: boolean;
+  resuming?: boolean;
   task: TaskDetailResponse | null;
 }) {
   const router = useRouter();
@@ -310,6 +320,30 @@ export function BottomComposer({
         <IconButton label="Voice input">
           <Mic className="h-[13px] w-[13px]" />
         </IconButton>
+        {isRunActive ? (
+          <button
+            aria-label="Pause active run"
+            className="flex h-[34px] items-center gap-1.5 rounded-pill border border-border-subtle bg-bg-surface px-3 text-[11.5px] font-medium text-text-secondary transition-colors duration-fast hover:bg-bg-subtle disabled:opacity-60"
+            disabled={pausing}
+            onClick={onPauseRun}
+            type="button"
+          >
+            <Pause className="h-[13px] w-[13px]" />
+            Pause
+          </button>
+        ) : null}
+        {isRunPaused ? (
+          <button
+            aria-label="Resume paused run"
+            className="flex h-[34px] items-center gap-1.5 rounded-pill border border-accent/30 bg-accent/5 px-3 text-[11.5px] font-medium text-text-primary transition-colors duration-fast hover:bg-accent/10 disabled:opacity-60"
+            disabled={resuming}
+            onClick={onResumeRun}
+            type="button"
+          >
+            <Play className="h-[13px] w-[13px]" />
+            Resume
+          </button>
+        ) : null}
         {isRunActive ? (
           <button
             aria-label="Stop active run"

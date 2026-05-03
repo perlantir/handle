@@ -256,6 +256,42 @@ export async function cancelAgentRun(
   return response.json() as Promise<{ active: boolean; cancelled: boolean; status: string }>;
 }
 
+export async function pauseAgentRun(
+  agentRunId: string,
+  { token }: AuthenticatedRequestInput,
+): Promise<{ active: boolean; paused: boolean; status: string }> {
+  const response = await fetch(`${apiBaseUrl}/api/agent-runs/${agentRunId}/pause`, {
+    body: JSON.stringify({ reason: 'Paused by user' }),
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to pause run');
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<{ active: boolean; paused: boolean; status: string }>;
+}
+
+export async function resumeAgentRun(
+  agentRunId: string,
+  { token }: AuthenticatedRequestInput,
+): Promise<{ resumed: boolean; status: string }> {
+  const response = await fetch(`${apiBaseUrl}/api/agent-runs/${agentRunId}/resume`, {
+    body: JSON.stringify({}),
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to resume run');
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<{ resumed: boolean; status: string }>;
+}
+
 
 export async function listPendingApprovals({ token }: AuthenticatedRequestInput): Promise<PendingApproval[]> {
   const response = await fetch(`${apiBaseUrl}/api/approvals/pending`, {

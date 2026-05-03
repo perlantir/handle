@@ -41,10 +41,13 @@ import { createHandleAgent } from "./createAgent";
 import { createComputerUseToolDefinitions } from "./computerUseTools";
 import { parseAgentFinalResult } from "./finalResult";
 import { emitInitialPlan } from "./plan";
+import { createAgentRunCheckpoint, latestCheckpointContext } from "./runCheckpoint";
 import {
   beginAgentRun,
   cancelReason,
+  isAgentRunPausedSignal,
   isAgentRunCancelledError,
+  pauseReason,
 } from "./runControl";
 import { isSmokeAgentEnabled, runSmokeAgent } from "./smokeAgent";
 
@@ -102,11 +105,16 @@ interface AgentLike {
 }
 
 interface TaskStore {
+  agentRunCheckpoint?: {
+    create?(args: unknown): Promise<unknown>;
+    findFirst?(args: unknown): Promise<unknown | null>;
+  };
   agentRunTrajectory?: TrajectoryStore["agentRunTrajectory"];
   message: {
     create(args: unknown): Promise<unknown>;
   };
   agentRun?: {
+    findFirst?(args: unknown): Promise<unknown | null>;
     findUnique(args: unknown): Promise<AgentRunContext | null>;
     update(args: unknown): Promise<unknown>;
   };
@@ -226,10 +234,11 @@ function backendToDb(value: "e2b" | "local") {
 }
 
 function runStatusToDb(
-  status: "RUNNING" | "WAITING" | "STOPPED" | "ERROR" | "CANCELLED",
+  status: "RUNNING" | "WAITING" | "STOPPED" | "ERROR" | "PAUSED" | "CANCELLED",
 ) {
   if (status === "STOPPED") return "COMPLETED";
   if (status === "ERROR") return "FAILED";
+  if (status === "PAUSED") return "PAUSED";
   if (status === "CANCELLED") return "CANCELLED";
   return status;
 }
@@ -275,6 +284,7 @@ async function updateRun(store: TaskStore, taskId: string, data: Record<string, 
           | "WAITING"
           | "STOPPED"
           | "ERROR"
+          | "PAUSED"
           | "CANCELLED",
       );
       if (
@@ -741,7 +751,17 @@ export function createAgentRunner({
           );
           return "";
         });
-      const memoryContext = [formatMemoryContext(recalledMemory), proceduralContext, failureMemoryContext, actionContext]
+      const resumeContext = await latestCheckpointContext({ runId: taskId, store }).catch((err) => {
+        logger.warn({ err, taskId }, "Failed to load resume checkpoint context; continuing without it");
+        return "";
+      });
+      const memoryContext = [
+        formatMemoryContext(recalledMemory),
+        proceduralContext,
+        failureMemoryContext,
+        resumeContext,
+        actionContext,
+      ]
         .filter((item) => item.trim().length > 0)
         .join("\n\n");
 
@@ -798,6 +818,7 @@ export function createAgentRunner({
       }
 
       const memoryProject = normalizeMemoryProjectContext(project);
+      let trajectoryStepCount = 0;
       const agentContext = {
         backend,
         ...(memoryProject && runContext.conversationId
@@ -806,8 +827,17 @@ export function createAgentRunner({
         ...(memoryContext ? { memoryContext } : {}),
         ...(memoryProject ? { memoryProject } : {}),
         ...(project?.id ? { projectId: project.id } : {}),
-        recordTrajectoryStep: (step: TrajectoryStepRecord) =>
-          recordTrajectoryStep({ agentRunId: taskId, step, store }),
+        recordTrajectoryStep: async (step: TrajectoryStepRecord) => {
+          await recordTrajectoryStep({ agentRunId: taskId, step, store });
+          trajectoryStepCount += 1;
+          if (trajectoryStepCount % 5 === 0) {
+            await createAgentRunCheckpoint({
+              reason: `Automatic checkpoint after ${trajectoryStepCount} tool calls`,
+              runId: taskId,
+              store,
+            });
+          }
+        },
         taskId,
         sandbox,
         trustedDomains,
@@ -882,6 +912,28 @@ export function createAgentRunner({
       });
     } catch (err) {
       if (runControl.signal.aborted || isAgentRunCancelledError(err)) {
+        if (isAgentRunPausedSignal(runControl.signal)) {
+          const reason = pauseReason(runControl.signal);
+          logger.info({ taskId }, "Agent run pause observed");
+          await createAgentRunCheckpoint({ reason, runId: taskId, store });
+          await updateRun(store, taskId, {
+            result: reason,
+            status: "PAUSED",
+          }).catch((updateErr) => {
+            logger.warn(
+              { err: updateErr, taskId },
+              "Failed to mark task as paused",
+            );
+          });
+          emitEvent({
+            type: "status_update",
+            detail: reason,
+            status: "PAUSED",
+            taskId,
+          });
+          return;
+        }
+
         const reason = cancelReason(runControl.signal);
         logger.info({ taskId }, "Agent run cancellation observed");
 

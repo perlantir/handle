@@ -336,6 +336,105 @@ test.describe("Workspace UI regressions", () => {
     expect(composerBox).not.toBeNull();
     expect(Math.abs((chatBox?.width ?? 0) - (composerBox?.width ?? 0))).toBeLessThan(2);
   });
+
+  test("shows pause and resume controls for active and paused runs", async ({ page }) => {
+    const taskId = "task-ui-pause";
+    const requests: Array<{ body: unknown; method: string; path: string }> = [];
+    let taskStatus = "RUNNING";
+
+    await page.route("**/api/tasks/*", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/stream")) {
+        await route.fallback();
+        return;
+      }
+      await jsonRoute(route, 200, {
+        backend: "local",
+        conversationId: "conversation-ui",
+        conversationTitle: "Pause smoke",
+        goal: "Pause smoke",
+        id: taskId,
+        messages: [{ content: "Pause smoke", id: "message-user", role: "USER" }],
+        projectId: "project-ui",
+        projectName: "Personal",
+        providerId: "anthropic",
+        providerModel: "claude-opus-4-7",
+        status: taskStatus,
+      });
+    });
+    await page.route("**/api/stream/*", async (route) => {
+      await route.fulfill({
+        body: "",
+        headers: { "Cache-Control": "no-cache", "Content-Type": "text/event-stream" },
+        status: 200,
+      });
+    });
+    await page.route("**/api/agent-runs/*/pause", async (route) => {
+      const request = route.request();
+      requests.push({
+        body: request.postData() ? JSON.parse(request.postData() ?? "{}") : null,
+        method: request.method(),
+        path: new URL(request.url()).pathname,
+      });
+      taskStatus = "PAUSED";
+      await jsonRoute(route, 200, { active: true, paused: true, status: "PAUSED" });
+    });
+    await page.route("**/api/agent-runs/*/resume", async (route) => {
+      const request = route.request();
+      requests.push({
+        body: request.postData() ? JSON.parse(request.postData() ?? "{}") : null,
+        method: request.method(),
+        path: new URL(request.url()).pathname,
+      });
+      taskStatus = "RUNNING";
+      await jsonRoute(route, 200, { resumed: true, status: "RUNNING" });
+    });
+    await page.route("**/api/approvals/pending", async (route) => {
+      await jsonRoute(route, 200, { approvals: [] });
+    });
+    await page.route("**/api/projects", async (route) => {
+      await jsonRoute(route, 200, {
+        projects: [
+          {
+            browserMode: "SEPARATE_PROFILE",
+            customScopePath: null,
+            defaultBackend: "LOCAL",
+            id: "project-ui",
+            memoryScope: "GLOBAL_AND_PROJECT",
+            name: "Personal",
+            permissionMode: "ASK",
+            workspaceScope: "DEFAULT_WORKSPACE",
+          },
+        ],
+      });
+    });
+    await page.route("**/api/projects/*/conversations", async (route) => {
+      await jsonRoute(route, 200, { conversations: [] });
+    });
+    await page.route("**/api/settings/providers", async (route) => {
+      await jsonRoute(route, 200, { providers: [] });
+    });
+
+    await page.goto(`/tasks/${taskId}`);
+    await page.getByRole("button", { name: "Pause active run" }).click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({
+        body: { reason: "Paused by user" },
+        method: "POST",
+        path: `/api/agent-runs/${taskId}/pause`,
+      });
+
+    await page.reload();
+    await page.getByRole("button", { name: "Resume paused run" }).click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({
+        body: {},
+        method: "POST",
+        path: `/api/agent-runs/${taskId}/resume`,
+      });
+  });
 });
 
 test.describe("Project control regressions", () => {

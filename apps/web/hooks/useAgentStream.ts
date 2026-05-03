@@ -79,7 +79,7 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
         pendingApproval: event.status === 'WAITING' ? state.pendingApproval : null,
         status: event.status,
         thought:
-          event.status === 'STOPPED' || event.status === 'ERROR' || event.status === 'CANCELLED'
+          event.status === 'STOPPED' || event.status === 'ERROR' || event.status === 'CANCELLED' || event.status === 'PAUSED'
             ? ''
             : state.thought,
       };
