@@ -155,7 +155,7 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
         const result = `Wrote ${parsed.content.length} bytes to ${parsed.path}`;
         emitToolResult(context, callId, result);
         const workspaceDir = context.backend.getWorkspaceDir();
-        const reversible = !existed && parsed.path.startsWith(workspaceDir);
+        const reversible = context.backend.id === 'local' && !existed && parsed.path.startsWith(workspaceDir);
         await appendActionLog({
           ...actionContext(context),
           description: `${existed ? 'Modified' : 'Created'} file ${parsed.path}`,
