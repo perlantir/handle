@@ -137,22 +137,35 @@ export async function appendMessageToZep(
       sessionId: session.id,
       userId,
     });
-    if (inferredFact) {
+    let existingMessages: ZepMemoryMessage[] = [];
+    if (inferredFact || session.source !== "conversation") {
       const existing = await client.getSessionMemory({ sessionId: session.id });
-      const existingMessages = existing.ok && existing.value ? existing.value : [];
+      existingMessages = existing.ok && existing.value ? existing.value : [];
+    }
+    if (inferredFact) {
       const nextMessages = invalidateContradictedMessages(existingMessages, {
         invalidAt: validAt,
         key: inferredFact.key,
         nextValue: inferredFact.value,
       });
       if (nextMessages.changed) {
+        const messages = hasActiveDuplicateMemoryMessage(nextMessages.messages, message)
+          ? nextMessages.messages
+          : [...nextMessages.messages, message];
         await client.deleteSessionMemory({ sessionId: session.id });
         await client.addMemoryMessages({
-          messages: [...nextMessages.messages, message],
+          messages,
           sessionId: session.id,
         });
         continue;
       }
+    }
+
+    if (
+      session.source !== "conversation" &&
+      hasActiveDuplicateMemoryMessage(existingMessages, message)
+    ) {
+      continue;
     }
 
     await client.addMemoryMessages({ messages: [message], sessionId: session.id });
@@ -319,6 +332,21 @@ function invalidateContradictedMessages(
     return message;
   });
   return { changed, messages: nextMessages };
+}
+
+function hasActiveDuplicateMemoryMessage(
+  messages: ZepMemoryMessage[],
+  nextMessage: ZepMemoryMessage,
+) {
+  const nextKey = normalizeMemoryContentKey(nextMessage.content);
+  return messages.some((message) => {
+    if (typeof message.metadata?.invalid_at === "string") return false;
+    return normalizeMemoryContentKey(message.content) === nextKey;
+  });
+}
+
+function normalizeMemoryContentKey(content: string) {
+  return content.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function formatFactForPrompt(fact: MemoryFact) {

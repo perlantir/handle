@@ -138,6 +138,40 @@ describe("session memory", () => {
     );
   });
 
+  it("deduplicates identical facts in global and project memory namespaces", async () => {
+    const fakeClient = client({
+      getSessionMemory: vi.fn().mockImplementation(({ sessionId }) =>
+        Promise.resolve({
+          ok: true,
+          value: sessionId.startsWith("conv_")
+            ? []
+            : [
+                {
+                  content: "My favorite color is teal",
+                  metadata: { role: "USER" },
+                  role: "user",
+                },
+              ],
+        }),
+      ),
+    });
+
+    await appendMessageToZep(
+      {
+        content: "  My   favorite color is TEAL  ",
+        conversationId: "conversation-1",
+        project: { id: "project-1", memoryScope: "GLOBAL_AND_PROJECT" },
+        role: "USER",
+      },
+      fakeClient as never,
+    );
+
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledTimes(1);
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "conv_conversation-1" }),
+    );
+  });
+
   it("skips client calls when memory is disabled for a message", async () => {
     const fakeClient = client();
 
