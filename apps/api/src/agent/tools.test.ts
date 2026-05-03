@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { subscribeToTask } from '../lib/eventBus';
 import { createPhase1ToolDefinitions } from './tools';
+import { ShellRateLimitError } from '../execution/localBackend';
 import type { E2BSandboxLike, ExecutionBackend } from '../execution/types';
 import type { ToolExecutionContext } from './toolRegistry';
 
@@ -110,6 +111,41 @@ describe('phase 1 tools', () => {
         expect.objectContaining({ type: 'tool_stream', channel: 'stdout', content: 'hello' }),
         expect.objectContaining({ type: 'tool_stream', channel: 'stderr', content: 'warn' }),
         expect.objectContaining({ type: 'tool_result' }),
+      ]),
+    );
+  });
+
+  it('returns shell rate limits as tool observations so the agent can respond', async () => {
+    const events: unknown[] = [];
+    const unsubscribe = subscribeToTask('task-rate-limit-tool', (event) => events.push(event));
+    const shellExec = createPhase1ToolDefinitions().find((definition) => definition.name === 'shell_exec');
+
+    if (!shellExec) throw new Error('shell_exec definition missing');
+
+    const backend = createMockBackend();
+    backend.shellExec = async () => {
+      throw new ShellRateLimitError();
+    };
+
+    const result = await shellExec.implementation(
+      { command: 'echo too-fast' },
+      {
+        backend,
+        sandbox: createMockSandbox(),
+        taskId: 'task-rate-limit-tool',
+      },
+    );
+
+    unsubscribe();
+
+    expect(JSON.parse(result)).toMatchObject({
+      exitCode: 429,
+      stderr: 'Shell execution rate limit exceeded; max 10 commands per second per task.',
+      stdout: '',
+    });
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'tool_result', exitCode: 429 }),
       ]),
     );
   });

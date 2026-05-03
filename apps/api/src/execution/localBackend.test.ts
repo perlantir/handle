@@ -412,8 +412,18 @@ describe('LocalBackend shell execution', () => {
 
     const rejected = results.filter((result) => result.status === 'rejected');
     const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const audit = (await fs.readFile(auditLogPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    const rateLimitedAudit = audit.filter((entry) => entry.matchedPattern === 'rate_limit');
+
     expect(fulfilled).toHaveLength(10);
     expect(rejected.length).toBeGreaterThan(0);
+    expect(rateLimitedAudit).toHaveLength(40);
+    expect(rateLimitedAudit[0]).toMatchObject({
+      action: 'shell_exec',
+      decision: 'deny',
+      matchedPattern: 'rate_limit',
+      taskId: 'task-local-shell-rate-test',
+    });
     expect(rejected[0]).toMatchObject({
       reason: expect.objectContaining({
         message: 'Shell execution rate limit exceeded; max 10 commands per second per task.',

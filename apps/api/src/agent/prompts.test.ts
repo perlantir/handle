@@ -42,6 +42,17 @@ describe("agent prompts", () => {
     expect(prompt).toContain("answer directly without tools");
     expect(prompt).toContain("Do not use");
     expect(prompt).toContain("shell_exec for simple math");
-    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v9");
+    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v10");
+  });
+
+  it("instructs the agent to surface local shell rate limits", () => {
+    const prompt = buildHandleSystemPrompt({
+      backendId: "local",
+      workspaceDir: "/Users/perlantir/Documents/Handle/workspaces/task-local",
+    });
+
+    expect(prompt).toContain("Shell execution rate limit exceeded");
+    expect(prompt).toContain("batching commands");
+    expect(prompt).toContain("do not assume files, shell state, browser tabs, or sandbox state");
   });
 });

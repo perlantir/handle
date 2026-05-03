@@ -5,6 +5,8 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { awaitApproval, type ApprovalDecision } from '../approvals/approvalWaiter';
 import { hasApprovalGrant } from '../approvals/approvalGrants';
+import { logger } from '../lib/logger';
+import { redactSecrets } from '../lib/redact';
 import type { BrowserSession } from './browserSession';
 import { createLocalBrowserSession, type LocalBrowserMode } from './localBrowser';
 import {
@@ -63,6 +65,28 @@ export interface LocalBackendOptions {
 
 const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 const SHELL_RATE_LIMIT_PER_SECOND = 10;
+export const SHELL_RATE_LIMIT_MESSAGE = 'Shell execution rate limit exceeded; max 10 commands per second per task.';
+
+export class ShellRateLimitError extends Error {
+  readonly code = 'SHELL_RATE_LIMIT_EXCEEDED';
+
+  constructor() {
+    super(SHELL_RATE_LIMIT_MESSAGE);
+    this.name = 'ShellRateLimitError';
+  }
+}
+
+export function isShellRateLimitError(err: unknown): err is ShellRateLimitError {
+  if (err instanceof ShellRateLimitError) return true;
+  if (!(err instanceof Error)) return false;
+
+  const maybeCode = 'code' in err ? err.code : undefined;
+  return (
+    err.name === 'ShellRateLimitError' ||
+    maybeCode === 'SHELL_RATE_LIMIT_EXCEEDED' ||
+    err.message === SHELL_RATE_LIMIT_MESSAGE
+  );
+}
 
 function defaultWorkspaceDir(taskId: string) {
   return join(homedir(), 'Documents', 'Handle', 'workspaces', taskId);
@@ -185,7 +209,7 @@ export class LocalBackend implements ExecutionBackend {
   }
 
   async shellExec(command: string, opts: ExecutionCommandOptions): Promise<ExecutionCommandResult> {
-    this.checkShellRateLimit();
+    await this.enforceShellRateLimit(command);
 
     const result = this.safetyGovernor.checkShellExec(command);
     await this.enforceShellDecision(result);
@@ -330,14 +354,33 @@ export class LocalBackend implements ExecutionBackend {
     await this.audit('shell_exec', result, 'allow');
   }
 
-  private checkShellRateLimit() {
+  private async enforceShellRateLimit(command: string) {
     const now = Date.now();
     while (this.shellCallTimestamps.length > 0 && now - this.shellCallTimestamps[0]! >= 1000) {
       this.shellCallTimestamps.shift();
     }
 
     if (this.shellCallTimestamps.length >= SHELL_RATE_LIMIT_PER_SECOND) {
-      throw new Error('Shell execution rate limit exceeded; max 10 commands per second per task.');
+      logger.warn(
+        {
+          command: redactSecrets(command),
+          projectId: this.projectId,
+          queueDepth: this.shellCallTimestamps.length,
+          taskId: this.taskId,
+          throwReason: SHELL_RATE_LIMIT_MESSAGE,
+          timestamp: new Date(now).toISOString(),
+        },
+        'Local shell execution rate limit hit',
+      );
+
+      await this.safetyGovernor.writeAuditEntry({
+        action: 'shell_exec',
+        decision: 'deny',
+        matchedPattern: 'rate_limit',
+        target: command,
+      });
+
+      throw new ShellRateLimitError();
     }
 
     this.shellCallTimestamps.push(now);

@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v9";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v10";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -35,6 +35,10 @@ tools, observing results, and continuing until the goal is met.
 - If your second attempt produces wrong output, including empty results, malformed
   data, or data that does not match the user's request, you must make a third
   attempt before declaring failure.
+- If shell_exec reports "Shell execution rate limit exceeded; max 10 commands
+  per second per task", stop issuing rapid individual shell calls. Tell the user
+  you hit the local shell rate limit and offer to continue by batching commands
+  or waiting before continuing.
 - Each recovery attempt must use a meaningfully different approach. Do not just
   tweak class names, selectors, flags, or small constants from the previous attempt.
 - Running code and checking its output is what counts as an attempt. Merely editing
@@ -116,6 +120,9 @@ function localEnvironmentPrompt(workspaceDir: string) {
   user explicitly asks for them. This is not an E2B Ubuntu sandbox.
 - Local host-affecting actions are checked by SafetyGovernor and may be denied or
   require approval. If a local path is denied, recover by using the workspace path.
+- This prompt is rebuilt for each run. If previous turns used another backend,
+  do not assume files, shell state, browser tabs, or sandbox state from that
+  backend exist in this local workspace.
 </execution_environment>
 `.trim();
 }

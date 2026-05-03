@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { ToolDefinition, ToolExecutionContext } from './toolRegistry';
 import { displayToolName } from './toolRegistry';
+import { isShellRateLimitError } from '../execution/localBackend';
 import { emitTaskEvent } from '../lib/eventBus';
 import { redactSecrets } from '../lib/redact';
 
@@ -90,6 +91,16 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
         return output;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        if (isShellRateLimitError(err)) {
+          const output = JSON.stringify({
+            exitCode: 429,
+            stderr: redactSecrets(message),
+            stdout: '',
+          });
+          emitToolResult(context, callId, output, 429, message);
+          return output;
+        }
+
         emitToolResult(context, callId, '', undefined, message);
         throw err;
       }
