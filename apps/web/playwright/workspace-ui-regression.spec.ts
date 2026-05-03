@@ -181,7 +181,10 @@ async function mockSidebarManagement(page: Page) {
       browserMode: "SEPARATE_PROFILE",
       customScopePath: null as string | null,
       defaultBackend: "LOCAL",
+      defaultModel: "claude-opus-4-7",
+      defaultProvider: "anthropic",
       id: "project-alpha",
+      memoryScope: "PROJECT_ONLY",
       name: "Personal",
       permissionMode: "ASK",
       workspaceScope: "DEFAULT_WORKSPACE",
@@ -190,7 +193,10 @@ async function mockSidebarManagement(page: Page) {
       browserMode: "SEPARATE_PROFILE",
       customScopePath: null as string | null,
       defaultBackend: "E2B",
+      defaultModel: null as string | null,
+      defaultProvider: null as string | null,
       id: "project-beta",
+      memoryScope: "GLOBAL_AND_PROJECT",
       name: "Website Work",
       permissionMode: "ASK",
       workspaceScope: "DEFAULT_WORKSPACE",
@@ -217,7 +223,22 @@ async function mockSidebarManagement(page: Page) {
     });
   });
   await page.route("**/api/settings/providers", async (route) => {
-    await jsonRoute(route, 200, { providers: [] });
+    await jsonRoute(route, 200, {
+      providers: [
+        {
+          authMode: "apiKey",
+          baseURL: null,
+          description: "Anthropic",
+          enabled: true,
+          fallbackOrder: 1,
+          hasApiKey: true,
+          id: "anthropic",
+          modelName: null,
+          primaryModel: "claude-opus-4-7",
+          updatedAt: "2026-05-02T00:00:00.000Z",
+        },
+      ],
+    });
   });
   await page.route("**/api/projects**", async (route) => {
     const request = route.request();
@@ -482,6 +503,18 @@ test.describe("Project control regressions", () => {
     await expect(page.getByText("Landing page")).toBeVisible();
 
     await page.getByLabel("Project actions for Personal").click();
+    await page.getByRole("button", { exact: true, name: "Edit" }).click();
+    await page.getByLabel("Project memory scope").selectOption("GLOBAL_AND_PROJECT");
+    await page.getByRole("button", { exact: true, name: "Save project" }).click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({
+        body: expect.objectContaining({ memoryScope: "GLOBAL_AND_PROJECT", name: "Personal" }),
+        method: "PUT",
+        path: "/api/projects/project-alpha",
+      });
+
+    await page.getByLabel("Project actions for Personal").click();
     await page.getByRole("button", { exact: true, name: "Rename" }).click();
     await page.getByRole("textbox", { name: "Project name" }).fill("Renamed Personal");
     await page.getByLabel("Save project name").click();
@@ -508,5 +541,34 @@ test.describe("Project control regressions", () => {
     await expect
       .poll(() => requests)
       .toContainEqual({ body: null, method: "DELETE", path: "/api/projects/project-beta" });
+  });
+
+  test("keeps long project lists scrollable with Settings reachable", async ({ page }) => {
+    const { requests } = await mockSidebarManagement(page);
+    void requests;
+
+    await page.route("**/api/projects", async (route) => {
+      await jsonRoute(route, 200, {
+        projects: Array.from({ length: 24 }, (_, index) => ({
+          browserMode: "SEPARATE_PROFILE",
+          customScopePath: null,
+          defaultBackend: "E2B",
+          defaultModel: null,
+          defaultProvider: null,
+          id: `project-scroll-${index}`,
+          memoryScope: "PROJECT_ONLY",
+          name: `Scroll Project ${index + 1}`,
+          permissionMode: "ASK",
+          workspaceScope: "DEFAULT_WORKSPACE",
+        })),
+      });
+    });
+
+    await page.goto("/?projectId=project-scroll-0");
+
+    await expect(page.getByText("Scroll Project 1")).toBeVisible();
+    await page.getByText("Scroll Project 24").scrollIntoViewIfNeeded();
+    await expect(page.getByText("Scroll Project 24")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
   });
 });

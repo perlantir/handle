@@ -44,6 +44,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const memoryTouchedRef = useRef(false);
+  const previousProjectIdRef = useRef<string | null>(null);
 
   const activeProject =
     projects.find((project) => project.id === searchParams.get("projectId")) ??
@@ -88,9 +89,15 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
   }, []);
 
   useEffect(() => {
+    const projectId = activeProject?.id ?? null;
+    if (previousProjectIdRef.current !== projectId) {
+      memoryTouchedRef.current = false;
+      previousProjectIdRef.current = projectId;
+    }
     setCustomScopePath(activeProject?.customScopePath ?? "");
-    memoryTouchedRef.current = false;
-    setMemoryEnabled(defaultMemoryEnabled(activeProject));
+    if (!memoryTouchedRef.current) {
+      setMemoryEnabled(defaultMemoryEnabled(activeProject));
+    }
   }, [activeProject?.customScopePath, activeProject?.id, activeProject?.memoryScope]);
 
   useEffect(() => {
