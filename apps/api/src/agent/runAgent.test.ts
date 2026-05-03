@@ -156,6 +156,7 @@ describe("createAgentRunner", () => {
         id: "anthropic",
         model: "claude-sonnet-4-5",
       },
+      signal: expect.any(AbortSignal),
     });
     expect(createAgent).toHaveBeenCalledWith(
       { backend, sandbox: testSandbox, taskId: "task-test", trustedDomains: [] },
@@ -279,7 +280,7 @@ describe("createAgentRunner", () => {
         ],
         input: "Now run it",
       },
-      { version: "v2" },
+      { signal: expect.any(AbortSignal), version: "v2" },
     );
     expect(store.agentRun.update).toHaveBeenCalledWith({
       data: expect.objectContaining({

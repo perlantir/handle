@@ -1,5 +1,5 @@
 import type { ApprovalPayload } from '@handle/shared';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { promises as defaultFs } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -91,6 +91,7 @@ function approvalPayloadForAction(action: AuditLogAction, result: SafetyCheckRes
 export class LocalBackend implements ExecutionBackend {
   readonly id = 'local' as const;
   private readonly approvalTimeoutMs: number;
+  private readonly activeShellProcesses = new Set<ChildProcess>();
   private browser: BrowserSession | null = null;
   private readonly browserMode: LocalBrowserMode;
   private readonly fs: LocalBackendFilesystem;
@@ -127,6 +128,9 @@ export class LocalBackend implements ExecutionBackend {
   }
 
   async shutdown(_taskId = this.taskId) {
+    for (const child of this.activeShellProcesses) {
+      if (!child.killed) child.kill('SIGTERM');
+    }
     await this.browser?.destroy();
     this.browser = null;
     // Local workspaces persist for user inspection.
@@ -191,6 +195,7 @@ export class LocalBackend implements ExecutionBackend {
         cwd: opts.cwd ?? this.workspaceDir,
         env: { ...process.env, HANDLE_TASK_ID: this.taskId },
       });
+      this.activeShellProcesses.add(child);
       let stdout = '';
       let stderr = '';
       let timedOut = false;
@@ -216,11 +221,13 @@ export class LocalBackend implements ExecutionBackend {
       });
 
       child.on('error', (err) => {
+        this.activeShellProcesses.delete(child);
         if (timeout) clearTimeout(timeout);
         reject(err);
       });
 
       child.on('exit', (code) => {
+        this.activeShellProcesses.delete(child);
         if (timeout) clearTimeout(timeout);
         resolvePromise({
           exitCode: code ?? (timedOut ? 124 : 1),

@@ -19,6 +19,11 @@ import { createHandleAgent } from "./createAgent";
 import { createComputerUseToolDefinitions } from "./computerUseTools";
 import { parseAgentFinalResult } from "./finalResult";
 import { emitInitialPlan } from "./plan";
+import {
+  beginAgentRun,
+  cancelReason,
+  isAgentRunCancelledError,
+} from "./runControl";
 import { isSmokeAgentEnabled, runSmokeAgent } from "./smokeAgent";
 
 const PLAN_GENERATION_TIMEOUT_MS = Number.parseInt(
@@ -70,7 +75,7 @@ interface AgentStreamEvent {
 interface AgentLike {
   streamEvents(
     input: { chat_history: unknown[]; input: string },
-    options: { version: "v2" },
+    options: { signal?: AbortSignal; version: "v2" },
   ): AsyncIterable<AgentStreamEvent>;
 }
 
@@ -194,9 +199,12 @@ function backendToDb(value: "e2b" | "local") {
   return value === "local" ? "LOCAL" : "E2B";
 }
 
-function runStatusToDb(status: "RUNNING" | "WAITING" | "STOPPED" | "ERROR") {
+function runStatusToDb(
+  status: "RUNNING" | "WAITING" | "STOPPED" | "ERROR" | "CANCELLED",
+) {
   if (status === "STOPPED") return "COMPLETED";
   if (status === "ERROR") return "FAILED";
+  if (status === "CANCELLED") return "CANCELLED";
   return status;
 }
 
@@ -236,9 +244,18 @@ async function updateRun(store: TaskStore, taskId: string, data: Record<string, 
     const nextData = { ...data };
     if (typeof nextData.status === "string") {
       nextData.status = runStatusToDb(
-        nextData.status as "RUNNING" | "WAITING" | "STOPPED" | "ERROR",
+        nextData.status as
+          | "RUNNING"
+          | "WAITING"
+          | "STOPPED"
+          | "ERROR"
+          | "CANCELLED",
       );
-      if (nextData.status === "COMPLETED" || nextData.status === "FAILED") {
+      if (
+        nextData.status === "COMPLETED" ||
+        nextData.status === "FAILED" ||
+        nextData.status === "CANCELLED"
+      ) {
         nextData.completedAt = new Date();
       }
     }
@@ -403,8 +420,28 @@ export function createAgentRunner({
     goal: string,
     options: RunAgentOptions = {},
   ) {
+    const runControl = beginAgentRun(taskId);
+
     if (isSmokeEnabled()) {
-      await runSmoke(taskId, goal);
+      try {
+        await runSmoke(taskId, goal, { signal: runControl.signal });
+      } catch (err) {
+        if (runControl.signal.aborted || isAgentRunCancelledError(err)) {
+          await updateRun(store, taskId, {
+            result: cancelReason(runControl.signal),
+            status: "CANCELLED",
+          }).catch((updateErr) => {
+            logger.warn(
+              { err: updateErr, taskId },
+              "Failed to mark smoke task as cancelled",
+            );
+          });
+          return;
+        }
+        throw err;
+      } finally {
+        runControl.unregister();
+      }
       return;
     }
 
@@ -413,10 +450,12 @@ export function createAgentRunner({
     let runContext: AgentRunContext | null = null;
 
     try {
+      runControl.throwIfCancelled();
       emitEvent({ type: "status_update", status: "RUNNING", taskId });
 
       runContext = await loadRunContext(store, taskId);
       if (!runContext) throw new Error("Agent run not found");
+      runControl.throwIfCancelled();
 
       const project = runContext.conversation?.project ?? null;
       const taskOverride =
@@ -445,6 +484,7 @@ export function createAgentRunner({
         modelName: provider.config.primaryModel,
         providerId: provider.id,
       });
+      runControl.throwIfCancelled();
 
       try {
         await withTimeout(
@@ -475,6 +515,7 @@ export function createAgentRunner({
                 id: provider.id,
                 model: provider.config.primaryModel,
               },
+              signal: runControl.signal,
             });
           })(),
           PLAN_GENERATION_TIMEOUT_MS,
@@ -493,6 +534,7 @@ export function createAgentRunner({
         );
         throw err;
       }
+      runControl.throwIfCancelled();
 
       const shouldUseDesktopSandbox =
         selectedBackend === "e2b" && PHASE_3_DESKTOP_GOAL_PATTERN.test(goal);
@@ -523,6 +565,7 @@ export function createAgentRunner({
             project.workspaceScope as NonNullable<LocalBackendOptions["workspaceScope"]>;
         }
         backend = createLocalBackend(taskId, localBackendOptions);
+        runControl.setBackend(backend);
         await backend.initialize(taskId);
         sandbox = localSandboxPlaceholder(taskId);
       } else if (shouldUseDesktopSandbox) {
@@ -534,16 +577,19 @@ export function createAgentRunner({
           sandbox: desktopSandbox,
         });
         backend = e2bBackend;
+        runControl.setBackend(backend);
         await e2bBackend.initialize(taskId);
         sandbox = e2bBackend.getSandbox();
       } else {
         const e2bBackend = createBackend();
         backend = e2bBackend;
+        runControl.setBackend(backend);
         await e2bBackend.initialize(taskId);
         sandbox = e2bBackend.getSandbox();
       }
       if (!sandbox) throw new Error("Execution backend did not expose context");
       await updateRun(store, taskId, { sandboxId: sandbox.sandboxId });
+      runControl.throwIfCancelled();
 
       const trustedDomains = await loadTrustedDomains(store);
 
@@ -552,6 +598,7 @@ export function createAgentRunner({
           { taskId },
           "Routing task directly to Anthropic computer-use",
         );
+        runControl.throwIfCancelled();
         const computerUseTool = createComputerUseTools()[0];
         if (!computerUseTool) {
           throw new Error("computer_use tool definition is unavailable");
@@ -562,6 +609,7 @@ export function createAgentRunner({
             { backend, sandbox, taskId, trustedDomains },
           ),
         );
+        runControl.throwIfCancelled();
 
         await createAssistantMessage(store, taskId, runContext, finalMessage, provider);
         await updateRun(store, taskId, {
@@ -582,16 +630,18 @@ export function createAgentRunner({
         { backend, taskId, sandbox, trustedDomains },
         { llm: model },
       );
+      runControl.throwIfCancelled();
       const stream = await agent.streamEvents(
         {
           chat_history: conversationHistory(runContext, goal),
           input: redactSecrets(goal),
         },
-        { version: "v2" },
+        { signal: runControl.signal, version: "v2" },
       );
       let finalAnswer = "";
 
       for await (const event of stream) {
+        runControl.throwIfCancelled();
         if (event.event === "on_chat_model_stream") {
           const chunk = event.data?.chunk;
           const content = eventContentToString(chunk?.content);
@@ -608,6 +658,7 @@ export function createAgentRunner({
           if (output) finalAnswer = redactSecrets(output);
         }
       }
+      runControl.throwIfCancelled();
 
       const finalResult = parseAgentFinalResult(finalAnswer);
       const finalStatus = finalResult.success ? "STOPPED" : "ERROR";
@@ -641,6 +692,30 @@ export function createAgentRunner({
         taskId,
       });
     } catch (err) {
+      if (runControl.signal.aborted || isAgentRunCancelledError(err)) {
+        const reason = cancelReason(runControl.signal);
+        logger.info({ taskId }, "Agent run cancellation observed");
+
+        await updateRun(store, taskId, {
+          result: reason,
+          status: "CANCELLED",
+        }).catch((updateErr) => {
+          logger.warn(
+            { err: updateErr, taskId },
+            "Failed to mark task as cancelled",
+          );
+        });
+
+        emitEvent({ type: "agent_run_cancelled", reason, taskId });
+        emitEvent({
+          type: "status_update",
+          detail: reason,
+          status: "CANCELLED",
+          taskId,
+        });
+        return;
+      }
+
       logger.error({ err, taskId }, "Agent run failed");
 
       const message = redactSecrets(
@@ -663,6 +738,7 @@ export function createAgentRunner({
           logger.warn({ err, taskId }, "Failed to shut down execution backend");
         });
       }
+      runControl.unregister();
     }
   };
 }

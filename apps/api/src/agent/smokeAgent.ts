@@ -10,7 +10,11 @@ export function isSmokeAgentEnabled() {
   );
 }
 
-export async function runSmokeAgent(taskId: string, goal: string) {
+export async function runSmokeAgent(
+  taskId: string,
+  goal: string,
+  options: { signal?: AbortSignal } = {},
+) {
   emitTaskEvent({ type: "status_update", status: "RUNNING", taskId });
 
   await prisma.agentRun.update({
@@ -18,7 +22,12 @@ export async function runSmokeAgent(taskId: string, goal: string) {
     where: { id: taskId },
   });
 
-  await delay(5_000);
+  if (goal.includes("__HANDLE_SMOKE_HANG__")) {
+    await delay(60 * 60 * 1000, undefined, { signal: options.signal });
+    return;
+  }
+
+  await delay(5_000, undefined, { signal: options.signal });
   emitTaskEvent({
     type: "plan_update",
     steps: [
@@ -37,7 +46,7 @@ export async function runSmokeAgent(taskId: string, goal: string) {
     taskId,
   });
 
-  await delay(500);
+  await delay(500, undefined, { signal: options.signal });
   const callId = randomUUID();
   emitTaskEvent({
     type: "tool_call",
@@ -47,7 +56,7 @@ export async function runSmokeAgent(taskId: string, goal: string) {
     toolName: "file.write",
   });
 
-  await delay(150);
+  await delay(150, undefined, { signal: options.signal });
   emitTaskEvent({
     type: "tool_stream",
     callId,
@@ -56,7 +65,7 @@ export async function runSmokeAgent(taskId: string, goal: string) {
     taskId,
   });
 
-  await delay(150);
+  await delay(150, undefined, { signal: options.signal });
   emitTaskEvent({
     type: "tool_result",
     callId,

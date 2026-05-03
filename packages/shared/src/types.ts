@@ -1,4 +1,10 @@
-export type TaskStatus = 'RUNNING' | 'WAITING' | 'STOPPED' | 'ERROR' | 'PAUSED';
+export type TaskStatus =
+  | 'RUNNING'
+  | 'WAITING'
+  | 'STOPPED'
+  | 'ERROR'
+  | 'PAUSED'
+  | 'CANCELLED';
 
 export type MessageRole = 'USER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL';
 
@@ -55,6 +61,12 @@ export interface AgentErrorEvent {
   taskId: string;
 }
 
+export interface AgentRunCancelledEvent {
+  type: 'agent_run_cancelled';
+  reason: string;
+  taskId: string;
+}
+
 export interface ApprovalRequestEvent {
   type: 'approval_request';
   approvalId: string;
@@ -96,6 +108,7 @@ export type SSEEvent =
   | StatusUpdateEvent
   | AssistantMessageEvent
   | AgentErrorEvent
+  | AgentRunCancelledEvent
   | ApprovalRequestEvent
   | BrowserScreenshotEvent
   | PlanUpdateEvent
@@ -239,6 +252,7 @@ export interface AgentRunSummary {
 
 export interface SendConversationMessageResponse {
   agentRunId: string;
+  cancelledRunId?: string;
   conversationId: string;
   messageId: string;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUp, Mic, Paperclip, Sparkles } from 'lucide-react';
+import { ArrowUp, Mic, Paperclip, Sparkles, Square } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { ProjectSummary, TaskDetailResponse } from '@handle/shared';
@@ -21,7 +21,17 @@ function IconButton({ children, label }: { children: React.ReactNode; label: str
   );
 }
 
-export function BottomComposer({ task }: { task: TaskDetailResponse | null }) {
+export function BottomComposer({
+  cancelling = false,
+  isRunActive = false,
+  onCancelRun,
+  task,
+}: {
+  cancelling?: boolean;
+  isRunActive?: boolean;
+  onCancelRun?: () => void;
+  task: TaskDetailResponse | null;
+}) {
   const router = useRouter();
   const { getToken } = useHandleAuth();
   const [value, setValue] = useState('');
@@ -259,6 +269,18 @@ export function BottomComposer({ task }: { task: TaskDetailResponse | null }) {
         <IconButton label="Voice input">
           <Mic className="h-[13px] w-[13px]" />
         </IconButton>
+        {isRunActive ? (
+          <button
+            aria-label="Stop active run"
+            className="flex h-[34px] items-center gap-1.5 rounded-pill border border-status-error/30 bg-status-error/5 px-3 text-[11.5px] font-medium text-status-error transition-colors duration-fast hover:bg-status-error/10 disabled:opacity-60"
+            disabled={cancelling}
+            onClick={onCancelRun}
+            type="button"
+          >
+            <Square className="h-[13px] w-[13px]" />
+            Stop
+          </button>
+        ) : null}
         <button
           aria-label="Send instruction"
           className="flex h-[34px] w-[34px] items-center justify-center rounded-pill bg-bg-inverse text-text-onAccent transition-colors duration-fast hover:bg-text-primary"

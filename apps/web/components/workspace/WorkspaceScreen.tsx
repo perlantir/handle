@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { PendingApproval, TaskDetailResponse } from "@handle/shared";
 import { useAgentStream } from "@/hooks/useAgentStream";
 import { useHandleAuth } from "@/lib/handleAuth";
-import { getTask, listPendingApprovals } from "@/lib/api";
+import { cancelAgentRun, getTask, listPendingApprovals } from "@/lib/api";
 import { ApprovalModal } from "./ApprovalModal";
 import { BottomComposer } from "./BottomComposer";
 import { CenterPane } from "./CenterPane";
@@ -36,6 +36,7 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
     () => new Set(),
   );
   const [chatWidth, setChatWidth] = useState(64);
+  const [cancellingRun, setCancellingRun] = useState(false);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("handle.workspace.chatWidth");
@@ -103,16 +104,40 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
       ? selectedApproval
       : (approvals.find((approval) => approval.status === "pending") ?? null);
 
+  const effectiveStatus = state.status === "IDLE" && task ? task.status : state.status;
+  const isRunActive = effectiveStatus === "RUNNING" || effectiveStatus === "WAITING";
+
+  async function handleCancelRun() {
+    if (!taskId || cancellingRun) return;
+    setCancellingRun(true);
+    try {
+      const token = await getToken();
+      await cancelAgentRun(taskId, { token });
+    } finally {
+      setCancellingRun(false);
+    }
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <StatusBarHeader state={state} task={task} />
+      <StatusBarHeader
+        cancelling={cancellingRun}
+        onCancel={handleCancelRun}
+        state={state}
+        task={task}
+      />
       <div
         className="grid min-h-0 flex-1 overflow-hidden"
         style={{ gridTemplateColumns: `${chatWidth}% 6px minmax(0, 1fr)` }}
       >
         <div className="flex min-h-0 flex-col overflow-hidden" data-testid="workspace-chat-shell">
           <LeftPane state={state} task={task} />
-          <BottomComposer task={task} />
+          <BottomComposer
+            cancelling={cancellingRun}
+            isRunActive={isRunActive}
+            onCancelRun={handleCancelRun}
+            task={task}
+          />
         </div>
         <button
           aria-label="Resize chat pane"

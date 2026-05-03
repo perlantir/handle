@@ -74,7 +74,8 @@ function backendToDb(value: "e2b" | "local") {
 
 function taskStatusFromRun(status: string | undefined) {
   if (status === "COMPLETED") return "STOPPED";
-  if (status === "FAILED" || status === "CANCELLED") return "ERROR";
+  if (status === "FAILED") return "ERROR";
+  if (status === "CANCELLED") return "CANCELLED";
   if (status === "WAITING") return "WAITING";
   return "RUNNING";
 }

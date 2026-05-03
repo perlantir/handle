@@ -7,12 +7,15 @@ import { cn } from '@/lib/utils';
 import { ApprovalPill, StatusDot } from '@/components/design-system';
 
 interface StatusBarHeaderProps {
+  cancelling?: boolean;
+  onCancel?: () => void;
   state: AgentStreamState;
   task: TaskDetailResponse | null;
 }
 
 function dotStatus(status: AgentStreamState['status'] | TaskStatus) {
   if (status === 'ERROR') return 'error';
+  if (status === 'CANCELLED') return 'paused';
   if (status === 'PAUSED') return 'paused';
   if (status === 'STOPPED') return 'success';
   if (status === 'WAITING') return 'waiting';
@@ -33,6 +36,7 @@ function statusSubtitle(state: AgentStreamState) {
   }
 
   if (state.error) return state.error;
+  if (state.status === 'CANCELLED') return 'Cancelled';
   if (state.status === 'WAITING') return state.pendingApproval?.reason ?? 'Waiting for approval';
   if (state.status === 'STOPPED') return 'Complete';
   if (latestTool) return `${runningTool ? 'Running' : 'Last ran'} ${latestTool.toolName}`;
@@ -74,14 +78,19 @@ function modelValue(task: TaskDetailResponse | null) {
   return task?.providerModel ? `${provider} · ${task.providerModel}` : provider;
 }
 
-export function StatusBarHeader({ state, task }: StatusBarHeaderProps) {
+export function StatusBarHeader({ cancelling = false, onCancel, state, task }: StatusBarHeaderProps) {
   const status = state.status === 'IDLE' && task ? task.status : state.status;
   const hasPendingApproval = state.status === 'WAITING' || Boolean(state.pendingApproval);
   const backend = task?.backend ?? 'e2b';
+  const isActive = status === 'RUNNING' || status === 'WAITING';
 
   return (
     <header className="mt-8 flex h-14 shrink-0 items-center gap-[14px] border-b border-border-subtle px-8 pr-6">
-      <StatusDot status={dotStatus(status)} pulsing={status !== 'STOPPED' && status !== 'ERROR'} size="lg" />
+      <StatusDot
+        status={dotStatus(status)}
+        pulsing={status !== 'STOPPED' && status !== 'ERROR' && status !== 'CANCELLED'}
+        size="lg"
+      />
       <div className="flex min-w-0 flex-col gap-px">
         <h1 className="truncate text-[13.5px] font-medium tracking-[-0.01em] text-text-primary">
           {task?.projectName ?? 'Project'}
@@ -121,13 +130,17 @@ export function StatusBarHeader({ state, task }: StatusBarHeaderProps) {
       >
         <Pause className="h-[13px] w-[13px]" />
       </button>
-      <button
-        aria-label="Stop task"
-        className="flex h-8 w-8 items-center justify-center rounded-pill border border-border-subtle bg-bg-surface text-status-error transition-colors duration-fast hover:bg-bg-subtle"
-        type="button"
-      >
-        <Square className="h-[13px] w-[13px]" />
-      </button>
+      {isActive ? (
+        <button
+          aria-label="Stop task"
+          className="flex h-8 w-8 items-center justify-center rounded-pill border border-border-subtle bg-bg-surface text-status-error transition-colors duration-fast hover:bg-bg-subtle disabled:opacity-60"
+          disabled={cancelling}
+          onClick={onCancel}
+          type="button"
+        >
+          <Square className="h-[13px] w-[13px]" />
+        </button>
+      ) : null}
     </header>
   );
 }

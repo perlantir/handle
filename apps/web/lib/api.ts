@@ -98,6 +98,25 @@ export async function getTask(taskId: string, { token }: AuthenticatedRequestInp
   return response.json() as Promise<TaskDetailResponse>;
 }
 
+export async function cancelAgentRun(
+  agentRunId: string,
+  { token }: AuthenticatedRequestInput,
+): Promise<{ active: boolean; cancelled: boolean; status: string }> {
+  const response = await fetch(`${apiBaseUrl}/api/agent-runs/${agentRunId}/cancel`, {
+    body: JSON.stringify({ reason: 'Cancelled by user' }),
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to cancel run');
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<{ active: boolean; cancelled: boolean; status: string }>;
+}
+
+
 export async function listPendingApprovals({ token }: AuthenticatedRequestInput): Promise<PendingApproval[]> {
   const response = await fetch(`${apiBaseUrl}/api/approvals/pending`, {
     headers: authHeaders(token),
