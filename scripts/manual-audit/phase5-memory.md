@@ -171,7 +171,65 @@ Verify:
 - [ ] `/actions` shows a later `file_deleted` entry for the undo.
 - [ ] `~/Library/Logs/Handle/actions.log` contains both JSON Lines entries.
 
-## Section L: Prior Phase Regression
+## Section L: Procedural Memory
+
+1. Submit: `Write a Python script that prints the first 10 primes.`
+2. Verify the task succeeds.
+3. Submit: `Write a Python script that prints the first 10 fibonacci numbers.`
+4. Open `/memory`.
+5. Select the Procedures view.
+6. Run template synthesis if needed: `pnpm memory:synthesize-templates`
+
+Verify:
+
+- [ ] The second run can reference a similar prior approach.
+- [ ] `/memory` Procedures view shows a successful procedure template.
+- [ ] Template usage count and success rate are visible.
+- [ ] Template detail/pattern includes file write and shell execution style steps.
+
+## Section M: Failure Memory
+
+1. Submit a task expected to fail safely, such as: `Delete /System/test.txt.`
+2. Verify the SafetyGovernor denies the operation.
+3. Submit a similar task: `Delete /System/foo.txt.`
+
+Verify:
+
+- [ ] First run records a failed trajectory with root cause.
+- [ ] Second run's prompt/context includes failure memory for the prior denied pattern.
+- [ ] Agent does not repeat the exact dangerous path without acknowledging the denial.
+- [ ] `/memory` Procedures view shows the failure pattern visually distinct from successful templates.
+
+## Section N: Resumability
+
+1. Start a long-running task, for example: `Run 30 separate echo commands with a 1 second pause between each command.`
+2. Click Pause mid-run.
+3. Wait 30 seconds.
+4. Click Resume.
+5. Let the task complete.
+
+Verify:
+
+- [ ] Task status changes to `PAUSED`.
+- [ ] Backend resources are released while paused (no orphaned E2B sandbox or local shell process).
+- [ ] Resume continues the same run from a checkpoint.
+- [ ] Final result reflects work from before and after pause.
+- [ ] `AgentRunCheckpoint` rows exist for the run.
+
+## Section O: Sub-Agent Coordination Primitive
+
+1. Run: `pnpm smoke:shared-memory-primitive`
+2. Inspect logs for namespace creation, optimistic conflict, lock, unlock, and final write.
+
+Verify:
+
+- [ ] Smoke passes.
+- [ ] Version conflict is detected for stale writes.
+- [ ] Locked key write fails while the lock is held.
+- [ ] Unlock allows the next valid write.
+- [ ] No UI expectation in Phase 5; real sub-agent wiring is Phase 6+.
+
+## Section P: Prior Phase Regression
 
 Run the existing regression smokes:
 
@@ -179,6 +237,14 @@ Run the existing regression smokes:
 - [ ] `pnpm smoke:browser-tools`
 - [ ] `pnpm smoke:computer-use-agent`
 - [ ] `pnpm smoke:local-backend-basic`
+
+Run the Phase 5 expansion smokes:
+
+- [ ] `pnpm smoke:trajectory-recording`
+- [ ] `pnpm smoke:procedural-memory`
+- [ ] `pnpm smoke:failure-memory`
+- [ ] `pnpm smoke:resumability`
+- [ ] `pnpm smoke:shared-memory-primitive`
 
 ## Failure Handling
 
