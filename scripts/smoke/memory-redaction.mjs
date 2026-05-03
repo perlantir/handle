@@ -46,4 +46,10 @@ assert(!serialized.includes("123-45-6789"), "SSN was stored in Zep");
 assert(!serialized.includes(`sk-${"r".repeat(30)}`), "API key was stored in Zep");
 assert(serialized.includes("[REDACTED]"), "Stored memory did not include redaction marker");
 
+const projectSession = memorySessionIds({ conversationId, project }).find((item) => item.source === "project");
+assert(projectSession, "Project session id was not derived");
+const projectMemory = await client.getSessionMemory({ sessionId: projectSession.id });
+const projectSerialized = JSON.stringify(projectMemory.value ?? []);
+assert(!projectSerialized.includes("[REDACTED]"), "Redacted content was stored as a project fact");
+
 console.log("[memory-redaction] PASS");

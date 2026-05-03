@@ -15,6 +15,7 @@ const projectA = { id: `memory-project-a-${suffix}`, memoryScope: "GLOBAL_AND_PR
 const projectB = { id: `memory-project-b-${suffix}`, memoryScope: "GLOBAL_AND_PROJECT" };
 const projectC = { id: `memory-project-c-${suffix}`, memoryScope: "PROJECT_ONLY" };
 const fact = `My favorite color is teal-${suffix}`;
+const normalizedFact = `User's favorite color is teal-${suffix}.`;
 
 console.log("[memory-recall] checking Zep connection");
 const client = getZepClient();
@@ -38,7 +39,7 @@ const sameProject = await getRelevantMemoryForTask({
   taskId: `run-a-${suffix}`,
 });
 assert(
-  sameProject.some((item) => item.content.includes(fact)),
+  sameProject.some((item) => item.content.includes(normalizedFact)),
   "Same project did not recall written fact",
 );
 
@@ -49,7 +50,7 @@ const globalProject = await getRelevantMemoryForTask({
   taskId: `run-b-${suffix}`,
 });
 assert(
-  globalProject.some((item) => item.content.includes(fact)),
+  globalProject.some((item) => item.content.includes(normalizedFact)),
   "GLOBAL_AND_PROJECT project did not recall global fact",
 );
 
@@ -60,7 +61,7 @@ const projectOnly = await getRelevantMemoryForTask({
   taskId: `run-c-${suffix}`,
 });
 assert(
-  !projectOnly.some((item) => item.content.includes(fact)),
+  !projectOnly.some((item) => item.content.includes(normalizedFact)),
   "PROJECT_ONLY project unexpectedly recalled global fact",
 );
 

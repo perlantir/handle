@@ -18,6 +18,7 @@ const suffix = Date.now();
 const project = { id: `memory-dedup-${suffix}`, memoryScope: "PROJECT_ONLY" };
 const conversationId = `memory-dedup-${suffix}`;
 const fact = "My favorite color is teal";
+const normalizedFact = "User's favorite color is teal.";
 
 console.log("[memory-dedup] checking Zep connection");
 const client = getZepClient();
@@ -46,7 +47,7 @@ const projectMemory = await client.getSessionMemory({ sessionId: projectSession.
 assert(projectMemory.ok, projectMemory.detail ?? "Could not read project memory");
 const duplicateFacts = (projectMemory.value ?? []).filter(
   (message) =>
-    normalized(message.content) === normalized(fact) &&
+    normalized(message.content) === normalized(normalizedFact) &&
     typeof message.metadata?.invalid_at !== "string",
 );
 assert(

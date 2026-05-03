@@ -14,6 +14,7 @@ const suffix = Date.now();
 const project = { id: `memory-no-assistant-facts-${suffix}`, memoryScope: "GLOBAL_AND_PROJECT" };
 const conversationId = `memory-no-assistant-facts-${suffix}`;
 const userFact = `My favorite color is teal-${suffix}`;
+const normalizedUserFact = `User's favorite color is teal-${suffix}.`;
 const assistantReply =
   `Got it — teal it is for assistant-fact-smoke-${suffix}! I already have that saved in memory from before, so no need to re-save it.`;
 
@@ -49,7 +50,7 @@ for (const session of globalAndProjectSessions) {
   const stored = await client.getSessionMemory({ sessionId: session.id });
   assert(stored.ok, stored.detail ?? `Could not read ${session.id}`);
   const serialized = JSON.stringify(stored.value ?? []);
-  assert(serialized.includes(userFact), `${session.id} did not store user fact`);
+  assert(serialized.includes(normalizedUserFact), `${session.id} did not store user fact`);
   assert(!serialized.includes(assistantReply), `${session.id} stored assistant response as fact`);
 }
 

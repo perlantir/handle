@@ -23,6 +23,7 @@ console.log("[memory-tools] saving fact");
 await appendMessageToZep({
   content: fact,
   conversationId: `memory-tools-conversation-${suffix}`,
+  extractionMode: "explicit_fact",
   project,
   role: "USER",
 });
