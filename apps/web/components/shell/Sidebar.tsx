@@ -3,7 +3,7 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { ConversationSummary, ProjectSummary } from '@handle/shared';
-import { Brain, Calendar, Check, Folder, Home, MoreHorizontal, Pencil, Plug, Plus, Settings, Sparkles, Trash2, X } from 'lucide-react';
+import { Brain, Calendar, Check, Folder, History, Home, MoreHorizontal, Pencil, Plug, Plus, Settings, Sparkles, Trash2, X } from 'lucide-react';
 import {
   createProject,
   deleteConversation,
@@ -24,6 +24,7 @@ const primaryNavItems = [
   { href: '/', icon: Home, label: 'Home' },
   { href: '/tasks', icon: Folder, label: 'Tasks' },
   { href: '/memory', icon: Brain, label: 'Memory' },
+  { href: '/actions', icon: History, label: 'Actions' },
   { href: '/skills', icon: Sparkles, label: 'Skills' },
   { href: '/schedules', icon: Calendar, label: 'Schedules' },
   { href: '/integrations', icon: Plug, label: 'Integrations' },

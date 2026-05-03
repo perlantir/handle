@@ -14,6 +14,7 @@ export interface ToolExecutionContext {
   conversationId?: string;
   memoryContext?: string;
   memoryProject?: MemoryProjectContext | null;
+  projectId?: string;
   sandbox: E2BSandboxLike;
   trustedDomains?: string[];
 }

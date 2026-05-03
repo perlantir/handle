@@ -42,7 +42,7 @@ describe("agent prompts", () => {
     expect(prompt).toContain("answer directly without tools");
     expect(prompt).toContain("Do not use");
     expect(prompt).toContain("shell_exec for simple math");
-    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v12");
+    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v13");
   });
 
   it("injects recalled memory context when available", () => {
@@ -53,6 +53,15 @@ describe("agent prompts", () => {
     expect(prompt).toContain("Favorite color is teal");
     expect(prompt).toContain("valid since");
     expect(prompt).toContain("Historical facts provide context");
+  });
+
+  it("injects recent action context when available", () => {
+    const prompt = buildHandleSystemPrompt({
+      memoryContext: "<recent_actions>\nRecent actions you've taken in this conversation:\n- Created file /tmp/a.txt\n</recent_actions>",
+    });
+
+    expect(prompt).toContain("Recent actions you've taken in this conversation");
+    expect(prompt).toContain("Created file /tmp/a.txt");
   });
 
   it("instructs the agent to surface local shell rate limits", () => {

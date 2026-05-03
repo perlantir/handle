@@ -5,6 +5,7 @@ import { displayToolName } from './toolRegistry';
 import { isShellRateLimitError } from '../execution/localBackend';
 import { emitTaskEvent } from '../lib/eventBus';
 import { redactSecrets } from '../lib/redact';
+import { appendActionLog } from '../lib/actionLog';
 
 const shellExecInput = z.object({
   command: z.string().min(1).describe('The bash command to run'),
@@ -48,6 +49,18 @@ function emitToolResult(context: ToolExecutionContext, callId: string, result: s
   });
 }
 
+function actionContext(context: ToolExecutionContext) {
+  return {
+    conversationId: context.conversationId ?? context.taskId,
+    projectId: context.projectId ?? context.memoryProject?.id ?? 'unknown',
+    taskId: context.taskId,
+  };
+}
+
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 export function createPhase1ToolDefinitions(): ToolDefinition[] {
   const shellExec: ToolDefinition = {
     name: 'shell_exec',
@@ -88,6 +101,15 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
         });
 
         emitToolResult(context, callId, output, result.exitCode);
+        await appendActionLog({
+          ...actionContext(context),
+          description: `Ran shell command: ${parsed.command}`,
+          metadata: { exitCode: result.exitCode },
+          outcomeType: 'shell_command_executed',
+          reversible: false,
+          target: parsed.command,
+          timestamp: new Date().toISOString(),
+        });
         return output;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -122,9 +144,28 @@ export function createPhase1ToolDefinitions(): ToolDefinition[] {
       });
 
       try {
+        let existed = false;
+        try {
+          await context.backend.fileRead(parsed.path);
+          existed = true;
+        } catch {
+          existed = false;
+        }
         await context.backend.fileWrite(parsed.path, parsed.content);
         const result = `Wrote ${parsed.content.length} bytes to ${parsed.path}`;
         emitToolResult(context, callId, result);
+        const workspaceDir = context.backend.getWorkspaceDir();
+        const reversible = !existed && parsed.path.startsWith(workspaceDir);
+        await appendActionLog({
+          ...actionContext(context),
+          description: `${existed ? 'Modified' : 'Created'} file ${parsed.path}`,
+          metadata: { byteCount: parsed.content.length },
+          outcomeType: existed ? 'file_modified' : 'file_created',
+          reversible,
+          target: parsed.path,
+          timestamp: new Date().toISOString(),
+          ...(reversible ? { undoCommand: `rm ${shellQuote(parsed.path)}` } : {}),
+        });
         return result;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

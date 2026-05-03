@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v12";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v13";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;

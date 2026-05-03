@@ -6,6 +6,7 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { emitTaskEvent } from "../lib/eventBus";
+import { recentActionLogContext } from "../lib/actionLog";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
@@ -687,7 +688,18 @@ export function createAgentRunner({
       } catch (err) {
         logger.warn({ err, taskId }, "Memory recall failed; continuing without memory");
       }
-      const memoryContext = formatMemoryContext(recalledMemory);
+      const actionContext = await recentActionLogContext({
+        conversationId: runContext.conversationId,
+      }).catch((err) => {
+        logger.warn(
+          { conversationId: runContext?.conversationId, err, taskId },
+          "Failed to load recent action log context; continuing without actions",
+        );
+        return "";
+      });
+      const memoryContext = [formatMemoryContext(recalledMemory), actionContext]
+        .filter((item) => item.trim().length > 0)
+        .join("\n\n");
 
       if (selectedBackend === "e2b" && shouldRunDirectComputerUse(goal)) {
         logger.info(
@@ -730,6 +742,7 @@ export function createAgentRunner({
           : {}),
         ...(memoryContext ? { memoryContext } : {}),
         ...(memoryProject ? { memoryProject } : {}),
+        ...(project?.id ? { projectId: project.id } : {}),
         taskId,
         sandbox,
         trustedDomains,

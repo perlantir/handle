@@ -135,6 +135,29 @@ export interface MemoryFactSummary {
   validAt?: string | null;
 }
 
+export type ActionOutcomeType =
+  | 'browser_navigated'
+  | 'file_created'
+  | 'file_deleted'
+  | 'file_modified'
+  | 'memory_forgotten'
+  | 'memory_saved'
+  | 'shell_command_executed';
+
+export interface ActionLogSummary {
+  id: string;
+  timestamp: string;
+  taskId: string;
+  conversationId: string;
+  projectId: string;
+  outcomeType: ActionOutcomeType;
+  description: string;
+  target: string;
+  metadata: Record<string, unknown>;
+  reversible: boolean;
+  undoCommand?: string;
+}
+
 export type SSEEvent =
   | ThoughtEvent
   | ToolCallEvent

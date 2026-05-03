@@ -1,5 +1,7 @@
 import type {
   ApprovalDecision,
+  ActionLogSummary,
+  ActionOutcomeType,
   ChatMessage,
   ConversationSummary,
   CreateTaskResponse,
@@ -115,6 +117,59 @@ export async function deleteMemorySession({
     const message = await parseApiError(response, 'Failed to delete memory');
     throw new Error(message);
   }
+}
+
+export async function listActions({
+  conversationId,
+  from,
+  outcomeType,
+  projectId,
+  q,
+  to,
+  token,
+}: AuthenticatedRequestInput & {
+  conversationId?: string;
+  from?: string;
+  outcomeType?: ActionOutcomeType | '';
+  projectId?: string;
+  q?: string;
+  to?: string;
+}): Promise<ActionLogSummary[]> {
+  const params = new URLSearchParams();
+  if (conversationId) params.set('conversationId', conversationId);
+  if (from) params.set('from', from);
+  if (outcomeType) params.set('outcomeType', outcomeType);
+  if (projectId) params.set('projectId', projectId);
+  if (q) params.set('q', q);
+  if (to) params.set('to', to);
+  const response = await fetch(`${apiBaseUrl}/api/actions${params.size > 0 ? `?${params.toString()}` : ''}`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load actions');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { actions?: ActionLogSummary[] };
+  return body.actions ?? [];
+}
+
+export async function undoAction({
+  actionId,
+  token,
+}: AuthenticatedRequestInput & { actionId: string }): Promise<{ undone: boolean }> {
+  const response = await fetch(`${apiBaseUrl}/api/actions/${encodeURIComponent(actionId)}/undo`, {
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to undo action');
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<{ undone: boolean }>;
 }
 
 export async function createTask({

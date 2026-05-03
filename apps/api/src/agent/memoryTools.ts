@@ -3,6 +3,7 @@ import { z } from "zod";
 import { awaitApproval } from "../approvals/approvalWaiter";
 import { emitTaskEvent } from "../lib/eventBus";
 import { redactSecrets } from "../lib/redact";
+import { appendActionLog } from "../lib/actionLog";
 import {
   appendMessageToZep,
   forgetMemoryForProject,
@@ -67,6 +68,14 @@ function memoryDisabledMessage() {
   return "Memory is disabled for this project or message.";
 }
 
+function actionContext(context: ToolExecutionContext) {
+  return {
+    conversationId: context.conversationId ?? context.taskId,
+    projectId: context.projectId ?? context.memoryProject?.id ?? "unknown",
+    taskId: context.taskId,
+  };
+}
+
 export function createMemoryToolDefinitions(): ToolDefinition[] {
   return [
     {
@@ -97,6 +106,16 @@ export function createMemoryToolDefinitions(): ToolDefinition[] {
         });
         const result = "Saved memory.";
         emitMemoryToolResult(context, callId, result);
+        await appendActionLog({
+          ...actionContext(context),
+          description: "Saved memory",
+          metadata: { factLength: parsed.fact.length },
+          outcomeType: "memory_saved",
+          reversible: true,
+          target: parsed.fact,
+          timestamp: new Date().toISOString(),
+          undoCommand: `memory_forget ${parsed.fact}`,
+        });
         return result;
       },
     },
@@ -171,6 +190,15 @@ export function createMemoryToolDefinitions(): ToolDefinition[] {
         });
         const message = `Forgot memory namespace(s): ${result.deletedSessions}.`;
         emitMemoryToolResult(context, callId, message);
+        await appendActionLog({
+          ...actionContext(context),
+          description: `Forgot memory matching ${parsed.query}`,
+          metadata: { deletedSessions: result.deletedSessions, scope: parsed.scope },
+          outcomeType: "memory_forgotten",
+          reversible: false,
+          target: parsed.query,
+          timestamp: new Date().toISOString(),
+        });
         return message;
       },
     },
