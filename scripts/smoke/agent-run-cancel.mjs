@@ -131,39 +131,17 @@ async function createLongRunningTask() {
 }
 
 async function waitForRunning(taskId) {
-  const response = await apiFetch(`/api/tasks/${taskId}/stream`);
-  if (!response.ok || !response.body) {
-    throw new Error(`/api/tasks/${taskId}/stream returned ${response.status}`);
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
   const startedAt = Date.now();
-  let buffer = "";
-
   while (Date.now() - startedAt < TIMEOUT_MS) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let boundary = buffer.indexOf("\n\n");
-    while (boundary >= 0) {
-      const rawEvent = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      const data = rawEvent
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trimStart())
-        .join("\n");
-      if (data) {
-        const event = JSON.parse(data);
-        if (event.type === "status_update" && event.status === "RUNNING") {
-          await reader.cancel().catch(() => undefined);
-          return;
-        }
-      }
-      boundary = buffer.indexOf("\n\n");
+    const response = await apiFetch(`/api/tasks/${taskId}`);
+    if (!response.ok) throw new Error(`/api/tasks/${taskId} returned ${response.status}`);
+    const body = await response.json();
+    if (body.status === "RUNNING") return body;
+    if (body.status === "ERROR" || body.status === "CANCELLED" || body.status === "STOPPED") {
+      throw new Error(`Task ${taskId} reached ${body.status} before cancel could run`);
     }
+    await delay(250);
   }
-  await reader.cancel().catch(() => undefined);
   throw new Error(`Timed out waiting for task ${taskId} to enter RUNNING`);
 }
 
