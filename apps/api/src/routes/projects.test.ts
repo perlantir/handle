@@ -103,6 +103,44 @@ describe("projects routes", () => {
     });
   });
 
+  it("creates projects with memory and model defaults from settings", async () => {
+    const store = createStore();
+    store.memorySettings = {
+      findUnique: vi.fn().mockResolvedValue({
+        defaultScopeForNewProjects: "PROJECT_ONLY",
+      }),
+    };
+    store.providerConfig = {
+      findMany: vi.fn().mockResolvedValue([
+        {
+          enabled: true,
+          fallbackOrder: 1,
+          id: "anthropic",
+          modelName: null,
+          primaryModel: "claude-opus-4-7",
+        },
+      ]),
+    };
+    const { app } = createApp(store);
+
+    await request(app)
+      .post("/api/projects")
+      .send({
+        name: "With defaults",
+        workspaceScope: "DEFAULT_WORKSPACE",
+      })
+      .expect(201);
+
+    expect(store.project.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        defaultModel: "claude-opus-4-7",
+        defaultProvider: "anthropic",
+        memoryScope: "PROJECT_ONLY",
+        name: "With defaults",
+      }),
+    });
+  });
+
   it("rejects missing specific folder paths and accepts Desktop scope", async () => {
     const store = createStore();
     const { app } = createApp(store);

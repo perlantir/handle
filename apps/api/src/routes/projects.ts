@@ -74,6 +74,20 @@ export interface ProjectRouteStore {
     update(args: unknown): Promise<unknown>;
     upsert(args: unknown): Promise<unknown>;
   };
+  memorySettings?: {
+    findUnique(args: unknown): Promise<{ defaultScopeForNewProjects: string } | null>;
+  };
+  providerConfig?: {
+    findMany(args: unknown): Promise<
+      Array<{
+        enabled: boolean;
+        fallbackOrder: number;
+        id: string;
+        modelName: string | null;
+        primaryModel: string;
+      }>
+    >;
+  };
 }
 
 interface CreateProjectsRouterOptions {
@@ -169,6 +183,35 @@ async function ensureDefaultProject(store: ProjectRouteStore) {
   });
 }
 
+async function projectDefaultsFromSettings(store: ProjectRouteStore) {
+  const data: Partial<z.infer<typeof projectSchema>> = {};
+  const memorySettings = await store.memorySettings
+    ?.findUnique({ where: { id: "global" } })
+    .catch(() => null);
+
+  if (
+    memorySettings?.defaultScopeForNewProjects === "PROJECT_ONLY" ||
+    memorySettings?.defaultScopeForNewProjects === "NONE" ||
+    memorySettings?.defaultScopeForNewProjects === "GLOBAL_AND_PROJECT"
+  ) {
+    data.memoryScope = memorySettings.defaultScopeForNewProjects;
+  }
+
+  const providers = await store.providerConfig
+    ?.findMany({
+      orderBy: { fallbackOrder: "asc" },
+      where: { enabled: true },
+    })
+    .catch(() => []);
+  const provider = providers?.find((row) => row.enabled && isProviderId(row.id));
+  if (provider && isProviderId(provider.id)) {
+    data.defaultProvider = provider.id;
+    data.defaultModel = provider.modelName ?? provider.primaryModel;
+  }
+
+  return data;
+}
+
 export function createProjectsRouter({
   getUserId = getAuthenticatedUserId,
   runAgent = defaultRunAgent,
@@ -252,7 +295,11 @@ export function createProjectsRouter({
           .json({ error: "Invalid request", details: parsed.error.flatten() });
       }
 
-      const normalized = await projectInputFromRequest(parsed.data);
+      const defaults = await projectDefaultsFromSettings(store);
+      const normalized = await projectInputFromRequest({
+        ...defaults,
+        ...parsed.data,
+      });
       if (normalized.error) {
         return res.status(400).json({
           error: normalized.error,
