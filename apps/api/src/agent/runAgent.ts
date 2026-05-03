@@ -674,8 +674,10 @@ export function createAgentRunner({
           emitEvent({
             facts: recalledMemory.map((fact) => ({
               content: fact.content,
+              ...(fact.invalidAt ? { invalidAt: fact.invalidAt } : {}),
               source: fact.source,
               ...(typeof fact.score === "number" ? { score: fact.score } : {}),
+              ...(fact.validAt ? { validAt: fact.validAt } : {}),
             })),
             taskId,
             timestamp: new Date().toISOString(),

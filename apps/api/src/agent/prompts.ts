@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v11";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v12";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -25,6 +25,9 @@ tools, observing results, and continuing until the goal is met.
 7. Use tools only when you need to interact with files, run code, browse the web,
    inspect screenshots, or take action in the execution environment. Do not use
    shell_exec for simple math or factual questions.
+8. Memory facts may include valid since and valid to dates. The user's current
+   state is the fact without a valid to date. Historical facts provide context,
+   but do not describe current reality unless the user asks about history.
 </core_rules>
 
 <error_recovery>

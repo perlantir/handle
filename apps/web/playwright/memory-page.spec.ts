@@ -27,11 +27,13 @@ async function mockMemoryApi(page: Page) {
           confidence: 0.86,
           content: "Favorite color is teal",
           id: "global_handle-local-user:0",
+          invalidAt: null,
           lastUpdated: "2026-05-02T00:00:00.000Z",
           sessionId: "global_handle-local-user",
           source: "global",
           sourceLabel: "Global",
           type: "Preference",
+          validAt: "2026-03-15T00:00:00.000Z",
         },
       ],
       status: { provider: "self-hosted", status: "online" },
@@ -49,6 +51,7 @@ test.describe("Memory page", () => {
     await expect(page.getByRole("heading", { name: "Memory" })).toBeVisible();
     await expect(page.getByText("Memory online")).toBeVisible();
     await expect(page.getByText("Favorite color is teal").first()).toBeVisible();
+    await expect(page.getByText(/since/).first()).toBeVisible();
     await page.getByRole("button", { name: "Graph" }).click();
     await expect(page.getByText("Global").first()).toBeVisible();
   });

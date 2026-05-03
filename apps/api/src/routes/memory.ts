@@ -9,10 +9,12 @@ export interface MemoryFactRow {
   confidence: number;
   content: string;
   lastUpdated: string;
+  invalidAt?: string | null;
   source: "global" | "project";
   sourceLabel: string;
   sessionId: string;
   type: string;
+  validAt?: string | null;
 }
 
 export function createMemoryRouter({
@@ -52,7 +54,7 @@ export function createMemoryRouter({
         const memory = await zepClient.getSessionMemory({ sessionId: session.sessionId });
         if (!memory.ok || !memory.value) continue;
         for (const [index, message] of memory.value.entries()) {
-          facts.push({
+          const fact: MemoryFactRow = {
             confidence: 0.8,
             content: redactSecrets(message.content),
             id: `${session.sessionId}:${index}`,
@@ -61,7 +63,10 @@ export function createMemoryRouter({
             source: session.sessionId.startsWith("global_") ? "global" : "project",
             sourceLabel: sourceLabel(session.sessionId),
             type: memoryType(message.metadata),
-          });
+          };
+          if (typeof message.metadata?.valid_at === "string") fact.validAt = message.metadata.valid_at;
+          if (typeof message.metadata?.invalid_at === "string") fact.invalidAt = message.metadata.invalid_at;
+          facts.push(fact);
         }
       }
 

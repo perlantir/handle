@@ -17,6 +17,7 @@ export interface MemoryProjectContext {
 export interface MemoryMessageContext {
   content: string;
   conversationId?: string | null | undefined;
+  validAt?: string | null | undefined;
   memoryEnabled?: boolean | null | undefined;
   project?: MemoryProjectContext | null | undefined;
   role: "ASSISTANT" | "SYSTEM" | "TOOL" | "USER";
@@ -34,8 +35,11 @@ export interface MemoryRecallContext {
 
 export interface MemoryFact {
   content: string;
+  invalidAt?: string | null;
   source: "global" | "project";
   score?: number;
+  sourceType?: "inferred" | "stated";
+  validAt?: string | null;
 }
 
 const DEFAULT_MEMORY_USER_ID = "handle-local-user";
@@ -95,6 +99,8 @@ export async function appendMessageToZep(
   if (!isMemoryEnabled(context)) return { ok: true, skipped: true };
 
   const userId = context.userId ?? memoryUserId();
+  const validAt = normalizeIsoTimestamp(context.validAt) ?? new Date().toISOString();
+  const inferredFact = inferBitemporalFact(context.content);
   const status = await client.checkConnection();
   if (status.status !== "online") {
     emitMemoryStatus(context.conversationId ?? "memory", status);
@@ -106,7 +112,10 @@ export async function appendMessageToZep(
   const message: ZepMemoryMessage = {
     content: redactSecrets(context.content),
     metadata: {
+      ...(inferredFact ? { bitemporalKey: inferredFact.key, bitemporalValue: inferredFact.value } : {}),
       conversationId: context.conversationId ?? null,
+      source_type: "stated",
+      valid_at: validAt,
       projectId: context.project?.id ?? null,
       role: context.role,
     },
@@ -128,10 +137,25 @@ export async function appendMessageToZep(
       sessionId: session.id,
       userId,
     });
-    await client.addMemoryMessages({
-      messages: [message],
-      sessionId: session.id,
-    });
+    if (inferredFact) {
+      const existing = await client.getSessionMemory({ sessionId: session.id });
+      const existingMessages = existing.ok && existing.value ? existing.value : [];
+      const nextMessages = invalidateContradictedMessages(existingMessages, {
+        invalidAt: validAt,
+        key: inferredFact.key,
+        nextValue: inferredFact.value,
+      });
+      if (nextMessages.changed) {
+        await client.deleteSessionMemory({ sessionId: session.id });
+        await client.addMemoryMessages({
+          messages: [...nextMessages.messages, message],
+          sessionId: session.id,
+        });
+        continue;
+      }
+    }
+
+    await client.addMemoryMessages({ messages: [message], sessionId: session.id });
   }
 
   return { ok: true, skipped: false };
@@ -206,7 +230,7 @@ export function formatMemoryContext(facts: MemoryFact[]) {
   return [
     "<memory_context>",
     "Relevant memory recalled for this run:",
-    ...facts.map((fact, index) => `${index + 1}. [${fact.source}] ${fact.content}`),
+    ...facts.map((fact, index) => `${index + 1}. ${formatFactForPrompt(fact)}`),
     "</memory_context>",
   ].join("\n");
 }
@@ -231,6 +255,11 @@ function memoryFactFromSearch(
     source: source === "project" ? "project" : "global",
   };
   if (typeof item.score === "number") fact.score = item.score;
+  if (typeof item.metadata?.valid_at === "string") fact.validAt = item.metadata.valid_at;
+  if (typeof item.metadata?.invalid_at === "string") fact.invalidAt = item.metadata.invalid_at;
+  if (item.metadata?.source_type === "inferred" || item.metadata?.source_type === "stated") {
+    fact.sourceType = item.metadata.source_type;
+  }
   return fact;
 }
 
@@ -246,4 +275,68 @@ function dedupeFacts(facts: MemoryFact[]) {
 
 function sanitizeId(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function normalizeIsoTimestamp(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function inferBitemporalFact(content: string) {
+  const normalized = content.trim();
+  const match =
+    normalized.match(/\b(?:i\s+live\s+in|i\s+moved\s+to|i\s+now\s+live\s+in)\s+([A-Za-z][A-Za-z\s.'-]{1,80})/i) ??
+    normalized.match(/\bmy\s+(?:current\s+)?city\s+is\s+([A-Za-z][A-Za-z\s.'-]{1,80})/i);
+  if (!match?.[1]) return null;
+  return {
+    key: "residence",
+    value: match[1].replace(/[.!,;:]+$/g, "").trim().toLowerCase(),
+  };
+}
+
+function invalidateContradictedMessages(
+  messages: ZepMemoryMessage[],
+  input: { invalidAt: string; key: string; nextValue: string },
+) {
+  let changed = false;
+  const nextMessages = messages.map((message) => {
+    const metadata = message.metadata ?? {};
+    if (
+      metadata.bitemporalKey === input.key &&
+      metadata.bitemporalValue !== input.nextValue &&
+      typeof metadata.invalid_at !== "string"
+    ) {
+      changed = true;
+      return {
+        ...message,
+        metadata: {
+          ...metadata,
+          invalid_at: input.invalidAt,
+        },
+      };
+    }
+    return message;
+  });
+  return { changed, messages: nextMessages };
+}
+
+function formatFactForPrompt(fact: MemoryFact) {
+  const sourceType = fact.sourceType ?? "stated";
+  const validAt = formatPromptDate(fact.validAt);
+  const invalidAt = formatPromptDate(fact.invalidAt);
+  const validity =
+    validAt && invalidAt
+      ? `valid ${validAt} to ${invalidAt}`
+      : validAt
+        ? `valid since ${validAt}`
+        : "validity unknown";
+  return `[${sourceType}, ${validity}] ${fact.content}`;
+}
+
+function formatPromptDate(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
 }

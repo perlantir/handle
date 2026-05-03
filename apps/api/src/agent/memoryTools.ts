@@ -13,6 +13,12 @@ import { displayToolName } from "./toolRegistry";
 
 const saveInput = z.object({
   fact: z.string().min(1).describe("The concise fact or preference to save to memory."),
+  valid_at: z
+    .string()
+    .datetime()
+    .nullable()
+    .optional()
+    .describe("Optional ISO timestamp for when this fact became true."),
 });
 
 const searchInput = z.object({
@@ -87,6 +93,7 @@ export function createMemoryToolDefinitions(): ToolDefinition[] {
           conversationId: context.conversationId,
           project: context.memoryProject,
           role: "USER",
+          ...(parsed.valid_at ? { validAt: parsed.valid_at } : {}),
         });
         const result = "Saved memory.";
         emitMemoryToolResult(context, callId, result);

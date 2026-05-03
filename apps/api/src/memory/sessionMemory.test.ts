@@ -18,6 +18,7 @@ function client(overrides: Record<string, unknown> = {}) {
     }),
     ensureSession: vi.fn().mockResolvedValue({ ok: true }),
     ensureUser: vi.fn().mockResolvedValue({ ok: true }),
+    getSessionMemory: vi.fn().mockResolvedValue({ ok: true, value: [] }),
     searchMemory: vi.fn().mockResolvedValue({
       ok: true,
       value: [{ content: "Favorite color is teal", score: 0.2 }],
@@ -147,7 +148,61 @@ describe("session memory", () => {
     expect(facts).toEqual([
       { content: "Favorite color is teal", score: 0.2, source: "global" },
     ]);
-    expect(formatMemoryContext(facts)).toContain("[global] Favorite color is teal");
+    expect(formatMemoryContext(facts)).toContain("[stated, validity unknown] Favorite color is teal");
+  });
+
+  it("marks older contradictory residence facts historical", async () => {
+    const fakeClient = client({
+      getSessionMemory: vi.fn().mockResolvedValue({
+        ok: true,
+        value: [
+          {
+            content: "I live in Chicago",
+            metadata: {
+              bitemporalKey: "residence",
+              bitemporalValue: "chicago",
+              valid_at: "2026-01-01T00:00:00.000Z",
+            },
+            role: "user",
+          },
+        ],
+      }),
+    });
+
+    await appendMessageToZep(
+      {
+        content: "I moved to Austin",
+        conversationId: "conversation-1",
+        project: { id: "project-1", memoryScope: "PROJECT_ONLY" },
+        role: "USER",
+        validAt: "2026-03-15T00:00:00.000Z",
+      },
+      fakeClient as never,
+    );
+
+    expect(fakeClient.deleteSessionMemory).toHaveBeenCalledWith({
+      sessionId: "conv_conversation-1",
+    });
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            content: "I live in Chicago",
+            metadata: expect.objectContaining({
+              invalid_at: "2026-03-15T00:00:00.000Z",
+            }),
+          }),
+          expect.objectContaining({
+            content: "I moved to Austin",
+            metadata: expect.objectContaining({
+              bitemporalKey: "residence",
+              bitemporalValue: "austin",
+              valid_at: "2026-03-15T00:00:00.000Z",
+            }),
+          }),
+        ]),
+      }),
+    );
   });
 
   it("gracefully returns no context when Zep is offline", async () => {

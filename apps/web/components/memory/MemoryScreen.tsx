@@ -191,16 +191,19 @@ function MemoryTable({
 
   return (
     <div className="overflow-hidden rounded-[8px] border border-border-subtle bg-bg-canvas">
-      <div className="grid grid-cols-[1fr_140px_100px_90px_110px] border-b border-border-subtle px-4 py-2 text-[11px] uppercase tracking-[0.04em] text-text-muted">
+      <div className="grid grid-cols-[1fr_140px_120px_90px_110px] border-b border-border-subtle px-4 py-2 text-[11px] uppercase tracking-[0.04em] text-text-muted">
         <div>Fact</div>
         <div>Source</div>
-        <div>Type</div>
+        <div>Validity</div>
         <div>Confidence</div>
         <div>Actions</div>
       </div>
       {facts.slice(0, 100).map((fact) => (
         <div
-          className="grid w-full grid-cols-[1fr_140px_100px_90px_110px] items-center border-b border-border-subtle px-4 py-3 text-left text-[13px] last:border-b-0 hover:bg-bg-subtle/50"
+          className={cn(
+            "grid w-full grid-cols-[1fr_140px_120px_90px_110px] items-center border-b border-border-subtle px-4 py-3 text-left text-[13px] last:border-b-0 hover:bg-bg-subtle/50",
+            fact.invalidAt && "opacity-60",
+          )}
           key={fact.id}
           onClick={() => onSelect(fact)}
           onKeyDown={(event) => {
@@ -214,7 +217,7 @@ function MemoryTable({
         >
           <div className="min-w-0 pr-4 text-text-primary">{fact.content}</div>
           <div className="truncate text-text-secondary">{fact.sourceLabel}</div>
-          <div className="text-text-secondary">{fact.type}</div>
+          <div className="text-text-secondary">{validityLabel(fact)}</div>
           <div className="text-text-secondary">{Math.round(fact.confidence * 100)}%</div>
           <div>
             <PillButton
@@ -273,8 +276,35 @@ function DetailPanel({ fact }: { fact: MemoryFactSummary | null }) {
         <div>Source: {fact.sourceLabel}</div>
         <div>Type: {fact.type}</div>
         <div>Confidence: {Math.round(fact.confidence * 100)}%</div>
+        <div>Validity: {validityLabel(fact)}</div>
         <div>Updated: {new Date(fact.lastUpdated).toLocaleString()}</div>
+      </div>
+      <div className="mt-5 border-t border-border-subtle pt-4">
+        <div className="mb-2 text-[11px] uppercase tracking-[0.04em] text-text-muted">Timeline</div>
+        <div className="space-y-2 text-[12px] text-text-secondary">
+          <div>{fact.validAt ? `Became valid ${formatDate(fact.validAt)}` : "Validity start unknown"}</div>
+          {fact.invalidAt ? (
+            <div>Marked historical {formatDate(fact.invalidAt)}</div>
+          ) : (
+            <div>Current fact</div>
+          )}
+        </div>
       </div>
     </div>
   );
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function validityLabel(fact: MemoryFactSummary) {
+  const since = fact.validAt ? `since ${formatDate(fact.validAt)}` : "validity unknown";
+  return fact.invalidAt ? `${since} (historical)` : since;
 }

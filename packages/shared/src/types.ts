@@ -114,8 +114,10 @@ export interface MemoryRecallEvent {
   taskId: string;
   facts: Array<{
     content: string;
+    invalidAt?: string | null;
     source: 'global' | 'project';
     score?: number;
+    validAt?: string | null;
   }>;
   timestamp: string;
 }
@@ -125,10 +127,12 @@ export interface MemoryFactSummary {
   confidence: number;
   content: string;
   lastUpdated: string;
+  invalidAt?: string | null;
   source: 'global' | 'project';
   sourceLabel: string;
   sessionId: string;
   type: string;
+  validAt?: string | null;
 }
 
 export type SSEEvent =
