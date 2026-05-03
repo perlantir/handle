@@ -216,9 +216,17 @@ async function run() {
       project,
       role: "USER",
     });
+    await appendMessageToZep({
+      content: "User's API key is [REDACTED].",
+      conversationId: `${scenario}-explicit-conversation-${suffix}`,
+      extractionMode: "explicit_fact",
+      project,
+      role: "USER",
+    });
     await delay(500);
     const projectFacts = await factMessages(client, project);
     assert(projectFacts.length === 0, `Expected no redacted project fact, got ${JSON.stringify(projectFacts.map((message) => message.content))}`);
+    assert(!JSON.stringify(projectFacts).includes("[REDACTED]"), "Redacted marker should not be stored as a fact");
     const conversationSession = memorySessionIds({ conversationId: `${scenario}-conversation-${suffix}`, project }).find((item) => item.source === "conversation");
     assert(conversationSession, "No conversation session");
     const conversation = await activeMessages(client, conversationSession.id);

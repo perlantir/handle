@@ -195,7 +195,11 @@ describe("session memory", () => {
         },
         fakeClient as never,
       ),
-    ).resolves.toEqual({ ok: true, skipped: true });
+    ).resolves.toEqual({
+      ok: true,
+      skipped: true,
+      skippedReason: "memory_disabled",
+    });
     expect(fakeClient.checkConnection).not.toHaveBeenCalled();
   });
 
@@ -431,6 +435,37 @@ describe("session memory", () => {
         messages: [expect.objectContaining({ content: expect.stringMatching(/^Remember that/i) })],
         sessionId: "project_project-1",
       }),
+    );
+  });
+
+  it("skips explicit fact extraction when content already contains a redaction marker", async () => {
+    const fakeClient = client();
+
+    await expect(
+      appendMessageToZep(
+        {
+          content: "User's API key is [REDACTED].",
+          conversationId: "conversation-redacted-explicit",
+          extractionMode: "explicit_fact",
+          project: { id: "project-1", memoryScope: "PROJECT_ONLY" },
+          role: "USER",
+        },
+        fakeClient as never,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        factsWritten: 0,
+        ok: true,
+        skippedReason: "redaction_marker_present",
+      }),
+    );
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "conv_conversation-redacted-explicit",
+      }),
+    );
+    expect(fakeClient.addMemoryMessages).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "project_project-1" }),
     );
   });
 });

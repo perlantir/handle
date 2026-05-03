@@ -44,6 +44,19 @@ export interface MemoryFact {
   validAt?: string | null;
 }
 
+export interface AppendMemoryResult {
+  factsWritten?: number;
+  ok: boolean;
+  skipped: boolean;
+  skippedReason?:
+    | "memory_disabled"
+    | "memory_offline"
+    | "not_fact_worthy"
+    | "redaction_marker_present"
+    | "redaction_triggered"
+    | "non_user_message";
+}
+
 const DEFAULT_MEMORY_USER_ID = "handle-local-user";
 
 export function memoryUserId() {
@@ -96,9 +109,13 @@ export function memorySessionIds({
 export async function appendMessageToZep(
   context: MemoryMessageContext,
   client: HandleZepClient = getZepClient(),
-) {
-  if (!context.project) return { ok: true, skipped: true };
-  if (!isMemoryEnabled(context)) return { ok: true, skipped: true };
+): Promise<AppendMemoryResult> {
+  if (!context.project) {
+    return { ok: true, skipped: true, skippedReason: "memory_disabled" };
+  }
+  if (!isMemoryEnabled(context)) {
+    return { ok: true, skipped: true, skippedReason: "memory_disabled" };
+  }
 
   const userId = context.userId ?? memoryUserId();
   const validAt = normalizeIsoTimestamp(context.validAt) ?? new Date().toISOString();
@@ -107,7 +124,7 @@ export async function appendMessageToZep(
   const status = await client.checkConnection();
   if (status.status !== "online") {
     emitMemoryStatus(context.conversationId ?? "memory", status);
-    return { ok: false, skipped: true };
+    return { ok: false, skipped: true, skippedReason: "memory_offline" };
   }
   emitMemoryStatus(context.conversationId ?? "memory", status);
 
@@ -156,21 +173,33 @@ export async function appendMessageToZep(
     await client.addMemoryMessages({ messages: [conversationMessage], sessionId: session.id });
   }
 
-  if (context.role !== "USER") return { ok: true, skipped: false };
+  if (context.role !== "USER") {
+    return { ok: true, skipped: false, skippedReason: "non_user_message" };
+  }
 
-  if (redaction.redactionTriggered) {
+  const redactionMarkerPresent = containsRedactionMarker(context.content);
+  if (redaction.redactionTriggered || redactionMarkerPresent) {
     logMemoryDiagnostic({
       context,
       details: {
         operation: "memory.extraction_skipped",
         patterns: redaction.matchedPatterns,
-        reason: "redaction_triggered",
+        reason: redaction.redactionTriggered
+          ? "redaction_triggered"
+          : "redaction_marker_present",
       },
       durationMs: Date.now() - startedAt,
       operation: "memory.extraction_skipped",
       status: "ok",
     });
-    return { ok: true, skipped: false };
+    return {
+      factsWritten: 0,
+      ok: true,
+      skipped: false,
+      skippedReason: redaction.redactionTriggered
+        ? "redaction_triggered"
+        : "redaction_marker_present",
+    };
   }
 
   const factMessages = extractMemoryFactMessages(context, validAt);
@@ -186,10 +215,16 @@ export async function appendMessageToZep(
       operation: "memory.extraction_skipped",
       status: "ok",
     });
-    return { ok: true, skipped: false };
+    return {
+      factsWritten: 0,
+      ok: true,
+      skipped: false,
+      skippedReason: "not_fact_worthy",
+    };
   }
 
   const factSessions = sessions.filter((session) => session.source === "global" || session.source === "project");
+  let factsWritten = 0;
   for (const session of factSessions) {
     await client.ensureSession({
       metadata: {
@@ -242,11 +277,12 @@ export async function appendMessageToZep(
       }
 
       await client.addMemoryMessages({ messages: [message], sessionId: session.id });
+      factsWritten += 1;
       existingMessages = [...existingMessages, message];
     }
   }
 
-  return { ok: true, skipped: false };
+  return { factsWritten, ok: true, skipped: false };
 }
 
 export async function getRelevantMemoryForTask(
@@ -468,6 +504,10 @@ function ensureSentence(value: string | null) {
   const cleaned = value.trim();
   if (!cleaned) return null;
   return /[.!?]$/.test(cleaned) ? cleaned : `${cleaned}.`;
+}
+
+function containsRedactionMarker(content: string) {
+  return /\[REDACTED\]/i.test(content);
 }
 
 export async function forgetMemoryForProject(
