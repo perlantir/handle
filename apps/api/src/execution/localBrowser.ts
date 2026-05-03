@@ -43,6 +43,7 @@ export interface LocalBrowserSessionOptions {
   profileDir?: string;
   requestApproval?: ActualChromeApprovalRequester;
   safetyGovernor?: SafetyGovernor;
+  testActualChromeConnection?: typeof testActualChromeConnection;
   taskId: string;
   userAgent?: string;
   viewport?: { height: number; width: number };
@@ -56,7 +57,7 @@ interface ActionSummary {
 }
 
 const DEFAULT_VIEWPORT = { height: 800, width: 1280 };
-const DEFAULT_ACTUAL_CHROME_ENDPOINT = 'http://127.0.0.1:9222';
+export const DEFAULT_ACTUAL_CHROME_ENDPOINT = 'http://127.0.0.1:9222';
 const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -65,6 +66,69 @@ const ACTUAL_CHROME_REASON =
 
 export function defaultLocalBrowserProfileDir() {
   return join(homedir(), '.config', 'handle', 'chrome-profile');
+}
+
+export interface ActualChromeConnectionResult {
+  connected: boolean;
+  detail: string | null;
+}
+
+function actualChromeSetupHint(endpoint: string) {
+  return `Couldn't connect to Chrome at ${endpoint}. Verify Chrome was started with --remote-debugging-port=9222 and that port 9222 is reachable.`;
+}
+
+function errorMessage(err: unknown) {
+  if (err instanceof Error) {
+    if (err.cause instanceof Error) return err.cause.message;
+    if (typeof err.cause === 'string') return err.cause;
+    return err.message;
+  }
+  if (typeof err === 'string') return err;
+  return 'Unknown error';
+}
+
+export async function testActualChromeConnection(
+  endpoint = DEFAULT_ACTUAL_CHROME_ENDPOINT,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ActualChromeConnectionResult> {
+  const normalizedEndpoint = endpoint.replace(/\/$/, '');
+  const url = `${normalizedEndpoint}/json/version`;
+  const startedAt = Date.now();
+
+  logger.info({ endpoint: normalizedEndpoint, url }, 'Actual Chrome connection test started');
+
+  try {
+    const response = await fetchImpl(url, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(2_500),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      const detail = `Chrome debug endpoint returned HTTP ${response.status}${body ? `: ${body.slice(0, 200)}` : ''}`;
+      logger.warn({ detail, durationMs: durationSince(startedAt), endpoint: normalizedEndpoint, status: response.status }, 'Actual Chrome connection test failed');
+      return { connected: false, detail };
+    }
+
+    const body = (await response.json().catch(() => null)) as {
+      Browser?: string;
+      webSocketDebuggerUrl?: string;
+    } | null;
+
+    if (!body?.webSocketDebuggerUrl) {
+      const detail = 'Chrome debug endpoint is reachable but did not expose webSocketDebuggerUrl.';
+      logger.warn({ body, detail, durationMs: durationSince(startedAt), endpoint: normalizedEndpoint }, 'Actual Chrome connection test failed');
+      return { connected: false, detail };
+    }
+
+    const detail = body.Browser ?? 'Chrome debug endpoint reachable';
+    logger.info({ detail, durationMs: durationSince(startedAt), endpoint: normalizedEndpoint }, 'Actual Chrome connection test complete');
+    return { connected: true, detail };
+  } catch (err) {
+    const detail = `${actualChromeSetupHint(normalizedEndpoint)} ${errorMessage(err)}`;
+    logger.warn({ detail, durationMs: durationSince(startedAt), endpoint: normalizedEndpoint, err }, 'Actual Chrome connection test failed');
+    return { connected: false, detail };
+  }
 }
 
 function durationSince(startedAt: number) {
@@ -86,6 +150,7 @@ export class LocalBrowserSession implements BrowserSession {
   private destroyed = false;
   private page: Page | null = null;
   private ready = false;
+  private actualChromeApprovedForSession = false;
 
   private readonly browserChannel: string;
   private readonly actualChromeEndpoint: string;
@@ -280,10 +345,20 @@ export class LocalBrowserSession implements BrowserSession {
 
     if (this.mode === 'actual-chrome') {
       await this.requireActualChromeApproval();
-      this.browser = await this.chromium.connectOverCDP(this.actualChromeEndpoint, { timeout: 10_000 });
-      this.context = this.browser.contexts()[0] ?? null;
-      if (!this.context) {
-        throw new Error('Actual Chrome CDP connection exposed no browser contexts');
+      const connection = await (this.options.testActualChromeConnection ?? testActualChromeConnection)(
+        this.actualChromeEndpoint,
+      );
+      if (!connection.connected) {
+        throw new Error(connection.detail ?? actualChromeSetupHint(this.actualChromeEndpoint));
+      }
+      try {
+        this.browser = await this.chromium.connectOverCDP(this.actualChromeEndpoint, { timeout: 10_000 });
+        this.context = this.browser.contexts()[0] ?? null;
+        if (!this.context) {
+          throw new Error('Actual Chrome CDP connection exposed no browser contexts');
+        }
+      } catch (err) {
+        throw new Error(`${actualChromeSetupHint(this.actualChromeEndpoint)} ${errorMessage(err)}`, { cause: err });
       }
     } else {
       await fs.mkdir(this.profileDir, { recursive: true });
@@ -351,7 +426,7 @@ export class LocalBrowserSession implements BrowserSession {
         'Local browser action failed',
       );
 
-      if (!options.idempotent) throw err;
+      if (!options.idempotent || this.mode === 'actual-chrome') throw err;
 
       this.logger.warn?.(
         { action, mode: this.mode, target: options.target, taskId: this.taskId },
@@ -429,6 +504,8 @@ export class LocalBrowserSession implements BrowserSession {
   }
 
   private async requireActualChromeApproval() {
+    if (this.actualChromeApprovedForSession) return;
+
     const requestApproval = this.options.requestApproval;
     const safetyGovernor = this.options.safetyGovernor;
     if (!requestApproval || !safetyGovernor) {
@@ -462,6 +539,8 @@ export class LocalBrowserSession implements BrowserSession {
     if (!approved) {
       throw new Error(decision === 'timeout' ? 'Actual Chrome approval timed out' : 'User denied actual Chrome connection');
     }
+
+    this.actualChromeApprovedForSession = true;
   }
 
   private browserActionApprovalRequest(

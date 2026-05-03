@@ -14,7 +14,11 @@ import { asyncHandler } from "../lib/http";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
-import { defaultLocalBrowserProfileDir } from "../execution/localBrowser";
+import {
+  DEFAULT_ACTUAL_CHROME_ENDPOINT,
+  defaultLocalBrowserProfileDir,
+  testActualChromeConnection as defaultTestActualChromeConnection,
+} from "../execution/localBrowser";
 import { chatGptOAuthFailureMessage } from "../providers/openaiChatgptAuth";
 import {
   createChatGptOAuthService,
@@ -35,7 +39,7 @@ import {
 const TEST_PROMPT = "Hello, respond with OK.";
 const GLOBAL_SETTINGS_ID = "global";
 const WORKSPACE_BASE_DIR = join(homedir(), "Documents", "Handle", "workspaces");
-const ACTUAL_CHROME_ENDPOINT = "http://127.0.0.1:9222";
+const ACTUAL_CHROME_ENDPOINT = DEFAULT_ACTUAL_CHROME_ENDPOINT;
 
 const updateProviderSchema = z
   .object({
@@ -289,32 +293,6 @@ async function defaultOpenPathInFinder(path: string) {
 
 async function defaultResetBrowserProfile(path: string) {
   await fs.rm(path, { force: true, recursive: true });
-}
-
-async function defaultTestActualChromeConnection(endpoint: string) {
-  try {
-    const response = await fetch(`${endpoint.replace(/\/$/, "")}/json/version`, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(2_500),
-    });
-    if (!response.ok) {
-      return {
-        connected: false,
-        detail: `Chrome debug endpoint returned ${response.status}`,
-      };
-    }
-
-    const body = (await response.json().catch(() => null)) as {
-      Browser?: string;
-      webSocketDebuggerUrl?: string;
-    } | null;
-    return {
-      connected: Boolean(body?.webSocketDebuggerUrl),
-      detail: body?.Browser ?? "Chrome debug endpoint reachable",
-    };
-  } catch (err) {
-    return { connected: false, detail: errorMessage(err) };
-  }
 }
 
 async function ensureExecutionSettings(store: SettingsRouteStore) {

@@ -19,6 +19,7 @@
     "smoke:approval-flow": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/approval-flow.mjs",
     "smoke:approval-modal-types": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/approval-modal-types.spec.ts",
     "smoke:agent-run-cancel": "node scripts/smoke/agent-run-cancel.mjs",
+    "smoke:actual-chrome-connection-error": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/actual-chrome-connection-error.mjs",
     "smoke:browser-tools": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/browser-tools.mjs",
     "smoke:conversation-multi-turn": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/conversation-multi-turn.mjs",
     "smoke:conversation-history-persistence": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/conversation-history-persistence.mjs",

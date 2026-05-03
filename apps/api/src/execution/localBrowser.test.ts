@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { createLocalBrowserSession, defaultLocalBrowserProfileDir } from './localBrowser';
+import { createLocalBrowserSession, defaultLocalBrowserProfileDir, testActualChromeConnection } from './localBrowser';
 import type { BrowserSessionLogger } from './browserSession';
 import { SafetyGovernor } from './safetyGovernor';
 
@@ -158,6 +158,7 @@ describe('LocalBrowserSession separate profile mode', () => {
         taskId: 'task-actual-chrome-test',
         workspaceDir: dir,
       }),
+      testActualChromeConnection: vi.fn(async () => ({ connected: true, detail: 'Chrome/147' })),
       taskId: 'task-actual-chrome-test',
     });
 
@@ -211,6 +212,7 @@ describe('LocalBrowserSession separate profile mode', () => {
         mode: 'actual-chrome',
         requestApproval,
         safetyGovernor,
+        testActualChromeConnection: vi.fn(async () => ({ connected: true, detail: 'Chrome/147' })),
         taskId: 'task-repeat-approval-test',
       });
       await session.screenshot();
@@ -236,6 +238,7 @@ describe('LocalBrowserSession separate profile mode', () => {
         taskId: 'task-actual-chrome-deny-test',
         workspaceDir: dir,
       }),
+      testActualChromeConnection: vi.fn(async () => ({ connected: true, detail: 'Chrome/147' })),
       taskId: 'task-actual-chrome-deny-test',
     });
 
@@ -254,5 +257,68 @@ describe('LocalBrowserSession separate profile mode', () => {
     );
 
     await rm(dir, { force: true, recursive: true });
+  });
+
+  it('returns a clean actual Chrome connection error without repeating approval', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'handle-local-browser-connect-fail-'));
+    const { page } = fakePlaywrightPage();
+    const { chromium } = fakeChromium(page);
+    const requestApproval = vi.fn(async () => 'approved' as const);
+    const session = await createLocalBrowserSession({
+      chromium: chromium as never,
+      logger: noopLogger(),
+      mode: 'actual-chrome',
+      requestApproval,
+      safetyGovernor: new SafetyGovernor({
+        auditLogPath: join(dir, 'audit.log'),
+        taskId: 'task-actual-chrome-connect-fail',
+        workspaceDir: dir,
+      }),
+      testActualChromeConnection: vi.fn(async () => ({
+        connected: false,
+        detail:
+          "Couldn't connect to Chrome at http://127.0.0.1:9222. Verify Chrome was started with --remote-debugging-port=9222 and that port 9222 is reachable. connect ECONNREFUSED",
+      })),
+      taskId: 'task-actual-chrome-connect-fail',
+    });
+
+    await expect(session.screenshot()).rejects.toThrow("Couldn't connect to Chrome at http://127.0.0.1:9222");
+    expect(requestApproval).toHaveBeenCalledTimes(1);
+    expect(chromium.connectOverCDP).not.toHaveBeenCalled();
+
+    await rm(dir, { force: true, recursive: true });
+  });
+
+  it('tests actual Chrome through /json/version with actionable failure detail', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('connect ECONNREFUSED 127.0.0.1:9222');
+    });
+
+    const result = await testActualChromeConnection('http://127.0.0.1:9222', fetchImpl as never);
+
+    expect(result.connected).toBe(false);
+    expect(result.detail).toContain("Couldn't connect to Chrome at http://127.0.0.1:9222");
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:9222/json/version',
+      expect.objectContaining({ cache: 'no-store' }),
+    );
+  });
+
+  it('reports actual Chrome connected when /json/version exposes a debugger websocket', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      json: async () => ({
+        Browser: 'Chrome/147.0.0.0',
+        webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/browser/test',
+      }),
+      ok: true,
+      status: 200,
+    }));
+
+    const result = await testActualChromeConnection('http://127.0.0.1:9222', fetchImpl as never);
+
+    expect(result).toEqual({
+      connected: true,
+      detail: 'Chrome/147.0.0.0',
+    });
   });
 });
