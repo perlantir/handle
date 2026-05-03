@@ -89,14 +89,43 @@ export async function latestCheckpointContext({
   const state = checkpoint.state as Partial<CheckpointState> | undefined;
   const stepCount = Number(state?.stepCount ?? checkpoint.stepIndex ?? 0);
   const lastSteps = normalizeSteps(state?.lastSteps);
+  const hasIncompleteStep = lastSteps.some((step) => step.status !== "success");
   return [
-    "<resume_checkpoint>",
-    `This run was resumed from checkpoint step ${stepCount}.`,
-    "Completed work before pause:",
+    "<resumption>",
+    `This run was paused and resumed from checkpoint step ${stepCount}.`,
+    state?.goal ? `Original goal: ${redactSecrets(state.goal)}` : null,
+    hasIncompleteStep
+      ? "The checkpoint includes at least one incomplete or failed tool step. Treat the original task as incomplete until you verify the actual output."
+      : "The checkpoint may only contain partial evidence. Treat the original task as incomplete until you verify the actual output against the original goal.",
+    "Rules for this resumed run:",
+    "- Do not declare completion based on prior conversation or checkpoint text alone.",
+    "- Check the actual output/artifacts against the original goal.",
+    "- Partial output is not completion.",
+    "- If prior output is partial, continue from the first missing step instead of claiming the work already finished.",
+    "- If a previous shell command stopped early, rerun or continue it so the requested full output is produced.",
+    "Checkpoint evidence before pause:",
     lastSteps.length > 0
-      ? lastSteps.map((step) => `  ${step.step}. ${step.subgoal || `Used ${step.toolName}`}`).join("\n")
+      ? lastSteps.map(formatCheckpointStep).join("\n")
       : "  No completed tool steps were recorded before pause.",
-    "Continue from this point. Do not repeat completed work unless verification requires it.",
-    "</resume_checkpoint>",
-  ].join("\n");
+    "</resumption>",
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+}
+
+function formatCheckpointStep(step: StoredTrajectoryStep) {
+  const output = summarizeToolOutput(step.toolOutput);
+  return [
+    `  ${step.step}. ${step.subgoal || `Used ${step.toolName}`} (${step.toolName}, status=${step.status})`,
+    step.errorReason ? `     error: ${redactSecrets(step.errorReason)}` : null,
+    output ? `     output: ${output}` : null,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+}
+
+function summarizeToolOutput(value: unknown) {
+  if (value === null || value === undefined) return "";
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return redactSecrets(text.trim().replace(/\s+/g, " ")).slice(0, 500);
 }

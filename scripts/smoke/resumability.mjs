@@ -82,7 +82,11 @@ assert(pausedRun?.status === "PAUSED", `Expected PAUSED, got ${pausedRun?.status
 const checkpoint = await prisma.agentRunCheckpoint.findFirst({ where: { agentRunId: run.id } });
 assert(checkpoint, "Expected checkpoint after pause");
 const checkpointContext = await latestCheckpointContext({ runId: run.id, store: prisma });
-assert(checkpointContext.includes("<resume_checkpoint>"), "Checkpoint prompt context missing");
+assert(checkpointContext.includes("<resumption>"), "Checkpoint prompt context missing");
+assert(
+  checkpointContext.includes("Verify") || checkpointContext.includes("verify"),
+  "Checkpoint context must tell the agent to verify completion after resume",
+);
 
 console.log("[resumability] resuming paused run");
 const resumeResult = await resumeAgentRunById({

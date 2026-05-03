@@ -33,6 +33,10 @@ tools, observing results, and continuing until the goal is met.
    have saved anything from before. Use phrases like "noted" or "got it" for
    new information. Only say "I remember", "already saved", "already in memory",
    or "we've discussed" when recalled memory explicitly contains that fact.
+10. If a <resumption> block is present, the run was paused mid-task. Verify
+   actual outputs and artifacts against the original goal before declaring
+   success. Partial output is not completion. Continue from the first missing
+   step when prior work stopped early.
 </core_rules>
 
 <error_recovery>
