@@ -172,8 +172,9 @@ async function run() {
   if (scenario === "project-only-isolation-read") {
     const globalProject = { id: `global-writer-${suffix}`, memoryScope: "GLOBAL_AND_PROJECT" };
     const projectOnly = { id: `project-only-reader-${suffix}`, memoryScope: "PROJECT_ONLY" };
+    const season = `winter-${suffix}`;
     await appendMessageToZep({
-      content: "My favorite season is winter",
+      content: `My favorite season is ${season}`,
       conversationId: `global-writer-conversation-${suffix}`,
       project: globalProject,
       role: "USER",
@@ -184,14 +185,15 @@ async function run() {
       project: projectOnly,
       taskId: `project-only-reader-run-${suffix}`,
     });
-    assert(!recalled.some((item) => normalize(item.content).includes("winter")), `PROJECT_ONLY recalled global fact: ${JSON.stringify(recalled)}`);
+    assert(!recalled.some((item) => normalize(item.content).includes(season)), `PROJECT_ONLY recalled global fact: ${JSON.stringify(recalled)}`);
     return;
   }
 
   if (scenario === "forget-both-layers") {
     const project = { id: `${scenario}-${suffix}`, memoryScope: "GLOBAL_AND_PROJECT" };
+    const color = `violet-${suffix}`;
     await appendMessageToZep({
-      content: "My favorite color is violet",
+      content: `My favorite color is ${color}`,
       conversationId: `${scenario}-conversation-${suffix}`,
       project,
       role: "USER",
@@ -201,8 +203,8 @@ async function run() {
     assert(result.deletedSessions >= 2, `Expected both layers deleted, got ${result.deletedSessions}`);
     const projectFacts = await factMessages(client, project);
     const globalFacts = await globalMessages(client);
-    assert(!projectFacts.some((message) => /violet/i.test(message.content)), "Project layer still has forgotten fact");
-    assert(!globalFacts.some((message) => /violet/i.test(message.content)), "Global layer still has forgotten fact");
+    assert(!projectFacts.some((message) => message.content.includes(color)), "Project layer still has forgotten fact");
+    assert(!globalFacts.some((message) => message.content.includes(color)), "Global layer still has forgotten fact");
     return;
   }
 
