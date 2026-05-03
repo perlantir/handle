@@ -64,6 +64,7 @@
     "smoke:memory-recall": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-recall.mjs",
     "smoke:memory-redaction": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-redaction.mjs",
     "smoke:memory-tools": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-tools.mjs",
+    "smoke:memory-save-cross-provider": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-save-cross-provider.mjs",
     "smoke:mid-conversation-backend-switch": "node scripts/smoke/mid-conversation-backend-switch.mjs",
     "smoke:project-creation-rename": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/project-creation-rename.mjs",
     "smoke:project-edit-scope": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/project-memory-controls.mjs project-edit-scope",
