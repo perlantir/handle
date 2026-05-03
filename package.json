@@ -20,6 +20,7 @@
     "smoke:e2e-canonical": "node scripts/smoke/e2e-task.mjs --canonical",
     "smoke:e2e-providers": "node scripts/smoke/e2e-providers.mjs",
     "smoke:e2e-task": "node scripts/smoke/e2e-task.mjs",
+    "smoke:failure-memory": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/failure-memory.mjs",
     "smoke:approval-flow": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/approval-flow.mjs",
     "smoke:approval-modal-types": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/approval-modal-types.spec.ts",
     "smoke:action-log": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/action-log.mjs && playwright test --config apps/web/playwright.config.ts apps/web/playwright/actions-page.spec.ts",

@@ -2,7 +2,7 @@ import { Router } from "express";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
 import { asyncHandler } from "../lib/http";
 import { redactSecrets } from "../lib/redact";
-import { listProcedureTemplates } from "../memory/proceduralMemory";
+import { listFailurePatterns, listProcedureTemplates } from "../memory/proceduralMemory";
 import { getZepClient } from "../memory/zepClient";
 
 export interface MemoryFactRow {
@@ -104,6 +104,17 @@ export function createMemoryRouter({
 
       const procedures = await listProcedureTemplates();
       return res.json({ procedures });
+    }),
+  );
+
+  router.get(
+    "/memory/failures",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const failures = await listFailurePatterns();
+      return res.json({ failures });
     }),
   );
 

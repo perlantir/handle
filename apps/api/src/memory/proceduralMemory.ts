@@ -28,8 +28,18 @@ export interface ProcedureTemplateSummary {
   updatedAt?: string;
 }
 
+export interface FailurePatternSummary {
+  agentRunId: string;
+  goal: string;
+  outcomeReason?: string | null;
+  similarity?: number;
+  steps: StoredTrajectoryStep[];
+  createdAt?: string;
+}
+
 interface RawTrajectory {
   agentRunId?: string;
+  createdAt?: Date | string;
   goal?: string;
   outcome?: string;
   outcomeReason?: string | null;
@@ -137,6 +147,26 @@ export function formatProceduralMemoryContext(matches: ProceduralTrajectoryMatch
   ].join("\n");
 }
 
+export function formatFailureMemoryContext(matches: ProceduralTrajectoryMatch[]) {
+  if (matches.length === 0) return "";
+  return [
+    "<failure_memory>",
+    "Past attempts at similar tasks have failed. Avoid these patterns:",
+    "",
+    ...matches.flatMap((match, index) => [
+      `Failure ${index + 1} (similarity ${Math.round(match.similarity * 100)}%):`,
+      `  Goal: "${match.goal}"`,
+      "  Approach:",
+      indent(summarizeStepsForPrompt(match.steps), 4),
+      `  Outcome: FAILED${match.outcomeReason ? ` - ${match.outcomeReason}` : ""}`,
+      "  Lesson: choose a different path if the current plan would repeat this failure.",
+      "",
+    ]),
+    "Failure memory shows past dead-ends. Treat them as cautionary, not prohibitive. If this task genuinely requires a similar approach, explicitly justify why this case differs.",
+    "</failure_memory>",
+  ].join("\n");
+}
+
 export async function synthesizeTrajectoryTemplates({
   projectId,
   store = prisma,
@@ -216,6 +246,27 @@ export async function listProcedureTemplates({
     successRate: row.successRate ?? 0,
     ...(row.updatedAt ? { updatedAt: new Date(row.updatedAt).toISOString() } : {}),
     usageCount: row.usageCount ?? 0,
+  }));
+}
+
+export async function listFailurePatterns({
+  store = prisma,
+}: {
+  store?: TrajectoryStore;
+} = {}): Promise<FailurePatternSummary[]> {
+  if (!store.agentRunTrajectory?.findMany) return [];
+  const rows = await store.agentRunTrajectory.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    where: { outcome: "FAILED" },
+  }) as RawTrajectory[];
+
+  return rows.map((row) => ({
+    ...(row.createdAt ? { createdAt: new Date(row.createdAt).toISOString() } : {}),
+    agentRunId: String(row.agentRunId ?? ""),
+    goal: redactSecrets(row.goal ?? "Failed task"),
+    outcomeReason: row.outcomeReason ?? null,
+    steps: normalizeSteps(row.steps),
   }));
 }
 

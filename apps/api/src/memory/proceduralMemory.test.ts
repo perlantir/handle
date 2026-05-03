@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  findSimilarFailedTrajectories,
   findSimilarSuccessfulTrajectories,
+  formatFailureMemoryContext,
   formatProceduralMemoryContext,
   synthesizeTrajectoryTemplates,
 } from "./proceduralMemory";
@@ -46,6 +48,43 @@ describe("proceduralMemory", () => {
     expect(context).toContain("<procedural_memory>");
     expect(context).toContain("fibonacci");
     expect(context).toContain("Created fib.py");
+  });
+
+  it("retrieves similar failed trajectories and formats cautionary context", async () => {
+    const store = {
+      agentRunTrajectory: {
+        findMany: vi.fn(async () => [
+          {
+            agentRunId: "run-system-delete",
+            goal: "Delete /System/test.txt",
+            outcome: "FAILED",
+            outcomeReason: "Safety governor denied forbidden path",
+            steps: [
+              {
+                durationMs: 2,
+                status: "tool_error",
+                step: 1,
+                subgoal: "Attempted forbidden delete",
+                toolInput: {},
+                toolName: "file_delete",
+                toolOutput: "denied",
+              },
+            ],
+          },
+        ]),
+      },
+    };
+
+    const matches = await findSimilarFailedTrajectories({
+      goal: "Delete /System/foo.txt",
+      store,
+    });
+
+    expect(matches).toHaveLength(1);
+    const context = formatFailureMemoryContext(matches);
+    expect(context).toContain("<failure_memory>");
+    expect(context).toContain("Safety governor denied forbidden path");
+    expect(context).toContain("Attempted forbidden delete");
   });
 
   it("synthesizes templates from repeated successful trajectories", async () => {

@@ -146,6 +146,15 @@ export interface ProcedureTemplateSummary {
   updatedAt?: string;
 }
 
+export interface FailurePatternSummary {
+  agentRunId: string;
+  goal: string;
+  outcomeReason?: string | null;
+  similarity?: number;
+  steps: unknown[];
+  createdAt?: string;
+}
+
 export type ActionOutcomeType =
   | 'browser_navigated'
   | 'file_created'

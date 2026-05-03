@@ -58,6 +58,19 @@ async function mockMemoryApi(page: Page) {
       ],
     });
   });
+  await page.route("**/api/memory/failures", async (route) => {
+    await jsonRoute(route, 200, {
+      failures: [
+        {
+          agentRunId: "failed-run-1",
+          createdAt: "2026-05-03T00:00:00.000Z",
+          goal: "Delete /System/test.txt",
+          outcomeReason: "Safety governor denied forbidden path",
+          steps: [{ subgoal: "Attempted forbidden delete", toolName: "file_delete" }],
+        },
+      ],
+    });
+  });
   return { deletes };
 }
 
@@ -76,6 +89,8 @@ test.describe("Memory page", () => {
     await page.getByRole("button", { name: "Procedures" }).click();
     await expect(page.getByText("Procedure: python script")).toBeVisible();
     await expect(page.getByText("Created script.py")).toBeVisible();
+    await expect(page.getByText("Delete /System/test.txt")).toBeVisible();
+    await expect(page.getByText(/Safety governor denied/)).toBeVisible();
   });
 
   test("deletes a memory namespace from the list", async ({ page }) => {

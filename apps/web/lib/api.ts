@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ConversationSummary,
   CreateTaskResponse,
+  FailurePatternSummary,
   MemoryFactSummary,
   ProcedureTemplateSummary,
   PendingApproval,
@@ -134,6 +135,22 @@ export async function listProcedureTemplates({
 
   const body = (await response.json()) as { procedures?: ProcedureTemplateSummary[] };
   return body.procedures ?? [];
+}
+
+export async function listFailurePatterns({
+  token,
+}: AuthenticatedRequestInput): Promise<FailurePatternSummary[]> {
+  const response = await fetch(`${apiBaseUrl}/api/memory/failures`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load failure patterns');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { failures?: FailurePatternSummary[] };
+  return body.failures ?? [];
 }
 
 export async function listActions({

@@ -17,7 +17,9 @@ import {
   type MemoryFact,
 } from "../memory/sessionMemory";
 import {
+  findSimilarFailedTrajectories,
   findSimilarSuccessfulTrajectories,
+  formatFailureMemoryContext,
   formatProceduralMemoryContext,
 } from "../memory/proceduralMemory";
 import {
@@ -726,7 +728,20 @@ export function createAgentRunner({
           );
           return "";
         });
-      const memoryContext = [formatMemoryContext(recalledMemory), proceduralContext, actionContext]
+      const failureMemoryContext = await findSimilarFailedTrajectories({
+        goal,
+        projectId: project?.id ?? null,
+        store,
+      })
+        .then(formatFailureMemoryContext)
+        .catch((err) => {
+          logger.warn(
+            { err, projectId: project?.id ?? null, taskId },
+            "Failure memory recall failed; continuing without failure context",
+          );
+          return "";
+        });
+      const memoryContext = [formatMemoryContext(recalledMemory), proceduralContext, failureMemoryContext, actionContext]
         .filter((item) => item.trim().length > 0)
         .join("\n\n");
 

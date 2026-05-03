@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { MemoryFactSummary, ProcedureTemplateSummary, ProjectSummary } from "@handle/shared";
-import { Brain, Circle, List, Network, Search, Trash2, Workflow } from "lucide-react";
+import type { FailurePatternSummary, MemoryFactSummary, ProcedureTemplateSummary, ProjectSummary } from "@handle/shared";
+import { AlertTriangle, Brain, Circle, List, Network, Search, Trash2, Workflow } from "lucide-react";
 import { PillButton } from "@/components/design-system";
-import { deleteMemorySession, listMemoryFacts, listProcedureTemplates, listProjects } from "@/lib/api";
+import { deleteMemorySession, listFailurePatterns, listMemoryFacts, listProcedureTemplates, listProjects } from "@/lib/api";
 import { useHandleAuth } from "@/lib/handleAuth";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,7 @@ type ViewMode = "graph" | "list" | "procedures";
 
 export function MemoryScreen() {
   const { getToken, isLoaded } = useHandleAuth();
+  const [failures, setFailures] = useState<FailurePatternSummary[]>([]);
   const [facts, setFacts] = useState<MemoryFactSummary[]>([]);
   const [procedures, setProcedures] = useState<ProcedureTemplateSummary[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -37,12 +38,14 @@ export function MemoryScreen() {
         token,
         ...(scope !== "all" && scope !== "global" ? { projectId: scope } : {}),
       } as const;
-      const [loadedProjects, memory, loadedProcedures] = await Promise.all([
+      const [loadedProjects, memory, loadedProcedures, loadedFailures] = await Promise.all([
         listProjects({ token }).catch(() => []),
         listMemoryFacts(memoryInput),
         listProcedureTemplates({ token }).catch(() => []),
+        listFailurePatterns({ token }).catch(() => []),
       ]);
       if (cancelled) return;
+      setFailures(loadedFailures);
       setProjects(loadedProjects);
       setFacts(memory.facts);
       setProcedures(loadedProcedures);
@@ -51,6 +54,7 @@ export function MemoryScreen() {
     }
     void load().catch(() => {
       if (!cancelled) {
+        setFailures([]);
         setFacts([]);
         setProcedures([]);
         setStatus({ status: "offline", detail: "Memory API unavailable" });
@@ -81,6 +85,16 @@ export function MemoryScreen() {
       ),
     );
   }, [procedures, query]);
+
+  const filteredFailures = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return failures;
+    return failures.filter((failure) =>
+      [failure.goal, failure.outcomeReason ?? "", JSON.stringify(failure.steps)].some((value) =>
+        value.toLowerCase().includes(needle),
+      ),
+    );
+  }, [failures, query]);
 
   async function deleteFact(fact: MemoryFactSummary) {
     if (!window.confirm(`Delete memory namespace "${fact.sourceLabel}"?`)) return;
@@ -148,7 +162,7 @@ export function MemoryScreen() {
           )}
 
           {view === "procedures" ? (
-            <ProceduresTable loading={loading} procedures={filteredProcedures} />
+            <ProceduresTable failures={filteredFailures} loading={loading} procedures={filteredProcedures} />
           ) : view === "list" ? (
             <MemoryTable facts={filteredFacts} loading={loading} onDelete={deleteFact} onSelect={setSelected} />
           ) : (
@@ -282,43 +296,73 @@ function MemoryGraph({ facts, onSelect }: { facts: MemoryFactSummary[]; onSelect
 }
 
 function ProceduresTable({
+  failures,
   loading,
   procedures,
 }: {
+  failures: FailurePatternSummary[];
   loading: boolean;
   procedures: ProcedureTemplateSummary[];
 }) {
   if (loading) return <div className="text-[13px] text-text-secondary">Loading procedures...</div>;
-  if (procedures.length === 0) {
-    return <div className="text-[13px] text-text-secondary">No procedural memory templates found.</div>;
+  if (procedures.length === 0 && failures.length === 0) {
+    return <div className="text-[13px] text-text-secondary">No procedural or failure memory patterns found.</div>;
   }
 
   return (
-    <div className="overflow-hidden rounded-[8px] border border-border-subtle bg-bg-canvas">
-      <div className="grid grid-cols-[1fr_110px_110px_160px] border-b border-border-subtle px-4 py-2 text-[11px] uppercase tracking-[0.04em] text-text-muted">
-        <div>Procedure</div>
-        <div>Usage</div>
-        <div>Success</div>
-        <div>Updated</div>
-      </div>
-      {procedures.map((procedure) => (
-        <div
-          className="grid grid-cols-[1fr_110px_110px_160px] items-start border-b border-border-subtle px-4 py-3 text-[13px] last:border-b-0"
-          key={procedure.id}
-        >
-          <div className="min-w-0 pr-4">
-            <div className="font-medium text-text-primary">{procedure.name}</div>
-            <div className="mt-1 max-h-16 overflow-hidden text-[12px] leading-[17px] text-text-secondary">
-              {formatProcedurePattern(procedure.pattern)}
-            </div>
-          </div>
-          <div className="text-text-secondary">{procedure.usageCount}</div>
-          <div className="text-text-secondary">{Math.round(procedure.successRate * 100)}%</div>
-          <div className="text-text-secondary">
-            {procedure.updatedAt ? new Date(procedure.updatedAt).toLocaleString() : "Unknown"}
-          </div>
+    <div className="space-y-4">
+      <div className="overflow-hidden rounded-[8px] border border-border-subtle bg-bg-canvas">
+        <div className="grid grid-cols-[1fr_110px_110px_160px] border-b border-border-subtle px-4 py-2 text-[11px] uppercase tracking-[0.04em] text-text-muted">
+          <div>Procedure</div>
+          <div>Usage</div>
+          <div>Success</div>
+          <div>Updated</div>
         </div>
-      ))}
+        {procedures.length === 0 ? (
+          <div className="px-4 py-3 text-[13px] text-text-secondary">No successful procedure templates found.</div>
+        ) : (
+          procedures.map((procedure) => (
+            <div
+              className="grid grid-cols-[1fr_110px_110px_160px] items-start border-b border-border-subtle px-4 py-3 text-[13px] last:border-b-0"
+              key={procedure.id}
+            >
+              <div className="min-w-0 pr-4">
+                <div className="font-medium text-text-primary">{procedure.name}</div>
+                <div className="mt-1 max-h-16 overflow-hidden text-[12px] leading-[17px] text-text-secondary">
+                  {formatProcedurePattern(procedure.pattern)}
+                </div>
+              </div>
+              <div className="text-text-secondary">{procedure.usageCount}</div>
+              <div className="text-text-secondary">{Math.round(procedure.successRate * 100)}%</div>
+              <div className="text-text-secondary">
+                {procedure.updatedAt ? new Date(procedure.updatedAt).toLocaleString() : "Unknown"}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="overflow-hidden rounded-[8px] border border-border-subtle bg-bg-canvas">
+        <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-2 text-[11px] uppercase tracking-[0.04em] text-text-muted">
+          <AlertTriangle className="h-3.5 w-3.5 text-status-error" />
+          Failure patterns
+        </div>
+        {failures.length === 0 ? (
+          <div className="px-4 py-3 text-[13px] text-text-secondary">No failed trajectory patterns found.</div>
+        ) : (
+          failures.map((failure) => (
+            <div className="border-b border-border-subtle px-4 py-3 text-[13px] last:border-b-0" key={failure.agentRunId}>
+              <div className="font-medium text-text-primary">{failure.goal}</div>
+              <div className="mt-1 text-[12px] leading-[17px] text-text-secondary">
+                {failure.outcomeReason ? `Failed because: ${failure.outcomeReason}` : "Failed without a recorded reason"}
+              </div>
+              <div className="mt-1 max-h-16 overflow-hidden text-[12px] leading-[17px] text-text-muted">
+                {formatFailureSteps(failure.steps)}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -356,6 +400,19 @@ function DetailPanel({ fact }: { fact: MemoryFactSummary | null }) {
 function formatProcedurePattern(pattern: unknown) {
   if (!Array.isArray(pattern)) return "Pattern unavailable";
   return pattern
+    .slice(0, 4)
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
+      const record = item as { subgoal?: unknown; toolName?: unknown };
+      return `${String(record.subgoal ?? "Step")} (${String(record.toolName ?? "tool")})`;
+    })
+    .filter(Boolean)
+    .join(" -> ");
+}
+
+function formatFailureSteps(steps: unknown[]) {
+  if (!Array.isArray(steps) || steps.length === 0) return "No recorded steps.";
+  return steps
     .slice(0, 4)
     .map((item) => {
       if (!item || typeof item !== "object") return "";
