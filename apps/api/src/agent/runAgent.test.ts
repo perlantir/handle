@@ -159,7 +159,13 @@ describe("createAgentRunner", () => {
       signal: expect.any(AbortSignal),
     });
     expect(createAgent).toHaveBeenCalledWith(
-      { backend, sandbox: testSandbox, taskId: "task-test", trustedDomains: [] },
+      {
+        backend,
+        recordTrajectoryStep: expect.any(Function),
+        sandbox: testSandbox,
+        taskId: "task-test",
+        trustedDomains: [],
+      },
       { llm: fakeModel },
     );
     expect(store.task.update).toHaveBeenCalledWith({
@@ -351,6 +357,7 @@ describe("createAgentRunner", () => {
     expect(createAgent).toHaveBeenCalledWith(
       {
         backend: expect.objectContaining({ id: "e2b" }),
+        recordTrajectoryStep: expect.any(Function),
         sandbox: desktopSandbox,
         taskId: "task-desktop-test",
         trustedDomains: [],
@@ -535,6 +542,7 @@ describe("createAgentRunner", () => {
     expect(createAgent).toHaveBeenCalledWith(
       {
         backend,
+        recordTrajectoryStep: expect.any(Function),
         sandbox: expect.objectContaining({ sandboxId: "local:task-local-test" }),
         taskId: "task-local-test",
         trustedDomains: [],

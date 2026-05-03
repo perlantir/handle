@@ -63,6 +63,7 @@
     "smoke:settings-providers-ui": "playwright test --config apps/web/playwright.config.ts --workers=1",
     "smoke:workspace-backend-pill": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-backend-pill.spec.ts",
     "smoke:workspace-ui-regression": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-ui-regression.spec.ts",
+    "smoke:trajectory-recording": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/trajectory-recording.mjs",
     "smoke:trivial-question-no-tools": "node scripts/smoke/trivial-question-no-tools.mjs",
     "smoke:web-signin": "node scripts/smoke/web-signin.mjs",
     "smoke:zep-client-connect": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/zep-client-connect.mjs",

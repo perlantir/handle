@@ -159,6 +159,9 @@ model AgentRun {
   updatedAt      DateTime       @updatedAt
   conversation   Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   messages       Message[]
+  checkpoints    AgentRunCheckpoint[]
+  trajectory     AgentRunTrajectory?
+  sharedMemoryNamespaces SharedMemoryNamespace[]
 
   @@index([conversationId, startedAt])
   @@index([status])
@@ -167,9 +170,76 @@ model AgentRun {
 enum AgentRunStatus {
   RUNNING
   WAITING
+  PAUSED
   COMPLETED
   FAILED
   CANCELLED
+}
+
+model AgentRunTrajectory {
+  id             String             @id @default(cuid())
+  agentRunId     String             @unique
+  agentRun       AgentRun           @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  steps          Json               @default("[]")
+  outcome        TrajectoryOutcome  @default(RUNNING)
+  outcomeReason  String?
+  outcomeMetrics Json               @default("{}")
+  goal           String             @default("")
+  goalEmbedding  Bytes?
+  templateId     String?
+  template       TrajectoryTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  createdAt      DateTime           @default(now())
+  completedAt    DateTime?
+
+  @@index([outcome, createdAt])
+  @@index([templateId])
+}
+
+enum TrajectoryOutcome {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  ABANDONED
+  CANCELLED
+}
+
+model TrajectoryTemplate {
+  id             String               @id @default(cuid())
+  name           String
+  pattern        Json
+  goalEmbedding  Bytes
+  successRate    Float
+  usageCount     Int                  @default(0)
+  createdFromIds String[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  trajectories   AgentRunTrajectory[]
+
+  @@index([updatedAt])
+}
+
+model AgentRunCheckpoint {
+  id         String   @id @default(cuid())
+  agentRunId String
+  agentRun   AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  stepIndex  Int
+  state      Json
+  sandboxRef String?
+  createdAt  DateTime @default(now())
+
+  @@index([agentRunId, stepIndex])
+}
+
+model SharedMemoryNamespace {
+  id          String   @id @default(cuid())
+  parentRunId String
+  parentRun   AgentRun @relation(fields: [parentRunId], references: [id], onDelete: Cascade)
+  entries     Json     @default("{}")
+  lockedKeys  String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([parentRunId])
 }
 
 model ApprovalRequest {

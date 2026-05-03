@@ -16,6 +16,15 @@ import {
   getRelevantMemoryForTask,
   type MemoryFact,
 } from "../memory/sessionMemory";
+import {
+  completeTrajectory,
+  failureReasonFromError,
+  initializeTrajectory,
+  recordTrajectoryStep,
+  trajectoryOutcomeFromStatus,
+  type TrajectoryStepRecord,
+  type TrajectoryStore,
+} from "../memory/trajectoryMemory";
 import { providerRegistry as defaultProviderRegistry } from "../providers/registry";
 import {
   isProviderId,
@@ -87,6 +96,7 @@ interface AgentLike {
 }
 
 interface TaskStore {
+  agentRunTrajectory?: TrajectoryStore["agentRunTrajectory"];
   message: {
     create(args: unknown): Promise<unknown>;
   };
@@ -158,6 +168,7 @@ interface RunAgentDependencies {
     context: {
       backend: ExecutionBackend;
       memoryContext?: string;
+      recordTrajectoryStep?: (step: TrajectoryStepRecord) => Promise<void>;
       sandbox: E2BSandboxLike;
       taskId: string;
       trustedDomains?: string[];
@@ -545,6 +556,7 @@ export function createAgentRunner({
         modelName: provider.config.primaryModel,
         providerId: provider.id,
       });
+      await initializeTrajectory({ agentRunId: taskId, goal, store });
       runControl.throwIfCancelled();
 
       try {
@@ -717,12 +729,31 @@ export function createAgentRunner({
             { backend, sandbox, taskId, trustedDomains },
           ),
         );
+        await recordTrajectoryStep({
+          agentRunId: taskId,
+          step: {
+            completedAt: new Date().toISOString(),
+            durationMs: 0,
+            startedAt: new Date().toISOString(),
+            status: "success",
+            subgoal: "Use computer-use directly for desktop screenshot task",
+            toolInput: { goal, maxIterations: 4 },
+            toolName: "computer_use",
+            toolOutput: finalMessage,
+          },
+          store,
+        });
         runControl.throwIfCancelled();
 
         await createAssistantMessage(store, taskId, runContext, finalMessage, provider);
         await updateRun(store, taskId, {
           result: finalMessage,
           status: "STOPPED",
+        });
+        await completeTrajectory({
+          agentRunId: taskId,
+          outcome: "SUCCEEDED",
+          store,
         });
         emitEvent({
           type: "message",
@@ -743,6 +774,8 @@ export function createAgentRunner({
         ...(memoryContext ? { memoryContext } : {}),
         ...(memoryProject ? { memoryProject } : {}),
         ...(project?.id ? { projectId: project.id } : {}),
+        recordTrajectoryStep: (step: TrajectoryStepRecord) =>
+          recordTrajectoryStep({ agentRunId: taskId, step, store }),
         taskId,
         sandbox,
         trustedDomains,
@@ -789,6 +822,12 @@ export function createAgentRunner({
         result: finalMessage,
         status: finalStatus,
       });
+      await completeTrajectory({
+        agentRunId: taskId,
+        outcome: trajectoryOutcomeFromStatus(finalStatus),
+        ...(finalResult.reason ? { outcomeReason: finalResult.reason } : {}),
+        store,
+      });
 
       emitEvent({
         type: "message",
@@ -821,7 +860,13 @@ export function createAgentRunner({
           logger.warn(
             { err: updateErr, taskId },
             "Failed to mark task as cancelled",
-          );
+            );
+          });
+        await completeTrajectory({
+          agentRunId: taskId,
+          outcome: "CANCELLED",
+          outcomeReason: reason,
+          store,
         });
 
         emitEvent({ type: "agent_run_cancelled", reason, taskId });
@@ -845,8 +890,15 @@ export function createAgentRunner({
           logger.warn(
             { err: updateErr, taskId },
             "Failed to mark task as errored",
-          );
-        });
+            );
+          });
+      const failureReason = failureReasonFromError(err);
+      await completeTrajectory({
+        agentRunId: taskId,
+        outcome: "FAILED",
+        ...(failureReason ? { outcomeReason: failureReason } : {}),
+        store,
+      });
 
       emitEvent({ type: "error", message, taskId });
       emitEvent({ type: "status_update", status: "ERROR", taskId });
