@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-import express from "express";
-import request from "supertest";
+import { createRequire } from "node:module";
 import { createProjectsRouter } from "../../apps/api/src/routes/projects.ts";
 import { prisma } from "../../apps/api/src/lib/prisma.ts";
 import { appendMessageToZep } from "../../apps/api/src/memory/sessionMemory.ts";
 
 const scenario = process.argv[2];
 if (!scenario) throw new Error("Usage: project-memory-controls.mjs <scenario>");
+const requireApi = createRequire(new URL("../../apps/api/package.json", import.meta.url));
+const express = requireApi("express");
+const request = requireApi("supertest");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
