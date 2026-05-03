@@ -1,5 +1,5 @@
 import { emitTaskEvent } from "../lib/eventBus";
-import { redactSecrets } from "../lib/redact";
+import { redactSecrets, redactSecretsWithReport } from "../lib/redact";
 import {
   getZepClient,
   type HandleZepClient,
@@ -18,6 +18,7 @@ export interface MemoryProjectContext {
 export interface MemoryMessageContext {
   content: string;
   conversationId?: string | null | undefined;
+  extractionMode?: "auto" | "explicit_fact";
   validAt?: string | null | undefined;
   memoryEnabled?: boolean | null | undefined;
   project?: MemoryProjectContext | null | undefined;
@@ -101,8 +102,8 @@ export async function appendMessageToZep(
 
   const userId = context.userId ?? memoryUserId();
   const validAt = normalizeIsoTimestamp(context.validAt) ?? new Date().toISOString();
-  const inferredFact = inferBitemporalFact(context.content);
   const startedAt = Date.now();
+  const redaction = redactSecretsWithReport(context.content);
   const status = await client.checkConnection();
   if (status.status !== "online") {
     emitMemoryStatus(context.conversationId ?? "memory", status);
@@ -111,12 +112,11 @@ export async function appendMessageToZep(
   emitMemoryStatus(context.conversationId ?? "memory", status);
 
   await client.ensureUser({ userId });
-  const message: ZepMemoryMessage = {
-    content: redactSecrets(context.content),
+  const conversationMessage: ZepMemoryMessage = {
+    content: redaction.redacted,
     metadata: {
-      ...(inferredFact ? { bitemporalKey: inferredFact.key, bitemporalValue: inferredFact.value } : {}),
       conversationId: context.conversationId ?? null,
-      source_type: "stated",
+      source_type: "conversation",
       valid_at: validAt,
       projectId: context.project?.id ?? null,
       role: context.role,
@@ -128,12 +128,13 @@ export async function appendMessageToZep(
     conversationId: context.conversationId,
     project: context.project,
     userId,
-  }).filter((session) => context.role === "USER" || session.source === "conversation");
-  for (const session of sessions) {
+  });
+  const conversationSessions = sessions.filter((session) => session.source === "conversation");
+  for (const session of conversationSessions) {
     logMemoryDiagnostic({
       context,
       details: {
-        factPreview: message.content.slice(0, 160),
+        factPreview: conversationMessage.content.slice(0, 160),
         operation: "memory.write",
         requestedProjectId: context.project?.id ?? null,
         targetGroupId: session.id,
@@ -152,38 +153,97 @@ export async function appendMessageToZep(
       sessionId: session.id,
       userId,
     });
-    let existingMessages: ZepMemoryMessage[] = [];
-    if (inferredFact || session.source !== "conversation") {
-      const existing = await client.getSessionMemory({ sessionId: session.id });
-      existingMessages = existing.ok && existing.value ? existing.value : [];
-    }
-    if (inferredFact) {
-      const nextMessages = invalidateContradictedMessages(existingMessages, {
-        invalidAt: validAt,
-        key: inferredFact.key,
-        nextValue: inferredFact.value,
+    await client.addMemoryMessages({ messages: [conversationMessage], sessionId: session.id });
+  }
+
+  if (context.role !== "USER") return { ok: true, skipped: false };
+
+  if (redaction.redactionTriggered) {
+    logMemoryDiagnostic({
+      context,
+      details: {
+        operation: "memory.extraction_skipped",
+        patterns: redaction.matchedPatterns,
+        reason: "redaction_triggered",
+      },
+      durationMs: Date.now() - startedAt,
+      operation: "memory.extraction_skipped",
+      status: "ok",
+    });
+    return { ok: true, skipped: false };
+  }
+
+  const factMessages = extractMemoryFactMessages(context, validAt);
+  if (factMessages.length === 0) {
+    logMemoryDiagnostic({
+      context,
+      details: {
+        factPreview: context.content.slice(0, 160),
+        operation: "memory.extraction_skipped",
+        reason: "not_fact_worthy",
+      },
+      durationMs: Date.now() - startedAt,
+      operation: "memory.extraction_skipped",
+      status: "ok",
+    });
+    return { ok: true, skipped: false };
+  }
+
+  const factSessions = sessions.filter((session) => session.source === "global" || session.source === "project");
+  for (const session of factSessions) {
+    await client.ensureSession({
+      metadata: {
+        conversationId: context.conversationId ?? null,
+        projectId: context.project?.id ?? null,
+        source: session.source,
+      },
+      sessionId: session.id,
+      userId,
+    });
+    const existing = await client.getSessionMemory({ sessionId: session.id });
+    let existingMessages = existing.ok && existing.value ? existing.value : [];
+
+    for (const message of factMessages) {
+      logMemoryDiagnostic({
+        context,
+        details: {
+          factPreview: message.content.slice(0, 160),
+          operation: "memory.write",
+          requestedProjectId: context.project?.id ?? null,
+          targetGroupId: session.id,
+          targetSource: session.source,
+        },
+        durationMs: Date.now() - startedAt,
+        operation: "memory.write",
+        status: "ok",
       });
-      if (nextMessages.changed) {
-        const messages = hasActiveDuplicateMemoryMessage(nextMessages.messages, message)
-          ? nextMessages.messages
-          : [...nextMessages.messages, message];
-        await client.deleteSessionMemory({ sessionId: session.id });
-        await client.addMemoryMessages({
-          messages,
-          sessionId: session.id,
+      const inferredFact = inferBitemporalFact(message.content);
+      if (inferredFact) {
+        const nextMessages = invalidateContradictedMessages(existingMessages, {
+          invalidAt: validAt,
+          key: inferredFact.key,
+          nextValue: inferredFact.value,
         });
+        if (nextMessages.changed) {
+          existingMessages = hasActiveDuplicateMemoryMessage(nextMessages.messages, message)
+            ? nextMessages.messages
+            : [...nextMessages.messages, message];
+          await client.deleteSessionMemory({ sessionId: session.id });
+          await client.addMemoryMessages({
+            messages: existingMessages,
+            sessionId: session.id,
+          });
+          continue;
+        }
+      }
+
+      if (hasActiveDuplicateMemoryMessage(existingMessages, message)) {
         continue;
       }
-    }
 
-    if (
-      session.source !== "conversation" &&
-      hasActiveDuplicateMemoryMessage(existingMessages, message)
-    ) {
-      continue;
+      await client.addMemoryMessages({ messages: [message], sessionId: session.id });
+      existingMessages = [...existingMessages, message];
     }
-
-    await client.addMemoryMessages({ messages: [message], sessionId: session.id });
   }
 
   return { ok: true, skipped: false };
@@ -270,6 +330,128 @@ function logMemoryDiagnostic({
   }).catch(() => undefined);
 }
 
+function extractMemoryFactMessages(
+  context: MemoryMessageContext,
+  validAt: string,
+): ZepMemoryMessage[] {
+  const facts =
+    context.extractionMode === "explicit_fact"
+      ? normalizeExplicitMemoryFact(context.content)
+      : normalizeAutomaticMemoryFacts(context.content);
+  const seen = new Set<string>();
+
+  return facts
+    .map((content) => content.trim())
+    .filter((content) => {
+      const key = normalizeMemoryContentKey(content);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((content) => {
+      const inferredFact = inferBitemporalFact(content);
+      return {
+        content,
+        metadata: {
+          ...(inferredFact ? { bitemporalKey: inferredFact.key, bitemporalValue: inferredFact.value } : {}),
+          conversationId: context.conversationId ?? null,
+          projectId: context.project?.id ?? null,
+          role: context.role,
+          source_type: "stated",
+          valid_at: validAt,
+        },
+        role: "user" as const,
+      };
+    });
+}
+
+function normalizeExplicitMemoryFact(content: string) {
+  const normalized =
+    normalizeDeclarativeFact(stripRememberPrefix(cleanMemoryInput(content))) ??
+    normalizeDeclarativeFact(cleanMemoryInput(content)) ??
+    ensureSentence(cleanMemoryInput(content));
+  return normalized ? [normalized] : [];
+}
+
+function normalizeAutomaticMemoryFacts(content: string) {
+  const cleaned = cleanMemoryInput(content);
+  if (cleaned.length < 10) return [];
+  if (/\b(?:test|audit)\b/i.test(cleaned)) return [];
+  if (/[?]\s*$/.test(cleaned)) return [];
+
+  const rememberMatch = cleaned.match(/^remember\s+(?:that\s+)?(.+)$/i);
+  if (rememberMatch?.[1]) {
+    const remembered = cleanMemoryInput(rememberMatch[1]);
+    const fact = normalizeDeclarativeFact(remembered);
+    return fact ? [fact] : [];
+  }
+
+  if (/^(?:tell me|suggest|run|list|show me|create|write|delete|open|navigate|click|use|submit)\b/i.test(cleaned)) {
+    return [];
+  }
+
+  const fact = normalizeDeclarativeFact(cleaned);
+  return fact ? [fact] : [];
+}
+
+function normalizeDeclarativeFact(content: string) {
+  const cleaned = cleanMemoryInput(content);
+  const favorite = cleaned.match(/^my favorite ([a-z0-9][a-z0-9\s_-]{1,80}) is (.+)$/i);
+  if (favorite?.[1] && favorite[2]) {
+    return ensureSentence(`User's favorite ${normalizeNoun(favorite[1])} is ${cleanFactValue(favorite[2])}`);
+  }
+
+  const myFact = cleaned.match(/^my ([a-z0-9][a-z0-9\s_-]{1,80}) is (.+)$/i);
+  if (myFact?.[1] && myFact[2]) {
+    return ensureSentence(`User's ${normalizeNoun(myFact[1])} is ${cleanFactValue(myFact[2])}`);
+  }
+
+  const patterns: Array<[RegExp, (value: string) => string]> = [
+    [/^i am (.+)$/i, (value) => `User is ${cleanFactValue(value)}`],
+    [/^i have (.+)$/i, (value) => `User has ${cleanFactValue(value)}`],
+    [/^i prefer (.+)$/i, (value) => `User prefers ${cleanFactValue(value)}`],
+    [/^i drive (.+)$/i, (value) => `User drives ${cleanFactValue(value)}`],
+    [/^i use (.+)$/i, (value) => `User uses ${cleanFactValue(value)}`],
+    [/^i live in (.+)$/i, (value) => `User lives in ${cleanPlaceValue(value)}`],
+    [/^i now live in (.+)$/i, (value) => `User lives in ${cleanPlaceValue(value)}`],
+    [/^i moved to (.+)$/i, (value) => `User lives in ${cleanPlaceValue(value)}`],
+  ];
+
+  for (const [pattern, format] of patterns) {
+    const match = cleaned.match(pattern);
+    if (match?.[1]) return ensureSentence(format(match[1]));
+  }
+
+  return null;
+}
+
+function stripRememberPrefix(content: string) {
+  return content.replace(/^remember\s+(?:that\s+)?/i, "");
+}
+
+function cleanMemoryInput(content: string) {
+  return content.trim().replace(/\s+/g, " ").replace(/^["']|["']$/g, "").replace(/[.!,;:]+$/g, "");
+}
+
+function cleanFactValue(value: string) {
+  return value.trim().replace(/\s+/g, " ").replace(/[.!,;:]+$/g, "");
+}
+
+function cleanPlaceValue(value: string) {
+  return cleanFactValue(value).replace(/\s+(?:last week|today|yesterday|now)$/i, "");
+}
+
+function normalizeNoun(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function ensureSentence(value: string | null) {
+  if (!value) return null;
+  const cleaned = value.trim();
+  if (!cleaned) return null;
+  return /[.!?]$/.test(cleaned) ? cleaned : `${cleaned}.`;
+}
+
 export async function forgetMemoryForProject(
   context: {
     project?: MemoryProjectContext | null | undefined;
@@ -282,7 +464,9 @@ export async function forgetMemoryForProject(
   if (effectiveMemoryScope(context.project) === "NONE") return { deletedSessions: 0 };
 
   const userId = context.userId ?? memoryUserId();
-  const scope = context.scope ?? "project";
+  const scope =
+    context.scope ??
+    (effectiveMemoryScope(context.project) === "GLOBAL_AND_PROJECT" ? "all" : "project");
   const sessions = memorySessionIds({ project: context.project, userId }).filter(
     (session) =>
       (scope === "all" && (session.source === "global" || session.source === "project")) ||
@@ -298,7 +482,7 @@ export async function forgetMemoryForProject(
 }
 
 export function formatMemoryContext(facts: MemoryFact[]) {
-  if (facts.length === 0) return "";
+  if (facts.length === 0) return "<memory_context>None recalled</memory_context>";
   return [
     "<memory_context>",
     "Relevant memory recalled for this run:",
@@ -359,6 +543,8 @@ function inferBitemporalFact(content: string) {
   const normalized = content.trim();
   const match =
     normalized.match(/\b(?:i\s+live\s+in|i\s+moved\s+to|i\s+now\s+live\s+in)\s+([A-Za-z][A-Za-z\s.'-]{1,80})/i) ??
+    normalized.match(/\buser\s+lives\s+in\s+([A-Za-z][A-Za-z\s.'-]{1,80})/i) ??
+    normalized.match(/\buser\s+moved\s+to\s+([A-Za-z][A-Za-z\s.'-]{1,80})/i) ??
     normalized.match(/\bmy\s+(?:current\s+)?city\s+is\s+([A-Za-z][A-Za-z\s.'-]{1,80})/i);
   if (!match?.[1]) return null;
   return {

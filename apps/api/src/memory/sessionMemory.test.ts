@@ -84,10 +84,16 @@ describe("session memory", () => {
 
     expect(fakeClient.ensureSession).toHaveBeenCalledTimes(3);
     expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "global_handle-local-user" }),
+      expect.objectContaining({
+        messages: [expect.objectContaining({ content: "User's favorite color is teal." })],
+        sessionId: "global_handle-local-user",
+      }),
     );
     expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "project_project-1" }),
+      expect.objectContaining({
+        messages: [expect.objectContaining({ content: "User's favorite color is teal." })],
+        sessionId: "project_project-1",
+      }),
     );
   });
 
@@ -114,7 +120,7 @@ describe("session memory", () => {
     );
   });
 
-  it("redacts secrets before writing memory messages", async () => {
+  it("redacts secrets in conversation history and skips fact memory writes", async () => {
     const fakeClient = client();
 
     await appendMessageToZep(
@@ -134,7 +140,11 @@ describe("session memory", () => {
             content: "My key is [REDACTED] and card is [REDACTED]",
           }),
         ],
+        sessionId: "conv_conversation-redact",
       }),
+    );
+    expect(fakeClient.addMemoryMessages).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "project_project-1" }),
     );
   });
 
@@ -147,7 +157,7 @@ describe("session memory", () => {
             ? []
             : [
                 {
-                  content: "My favorite color is teal",
+                  content: "User's favorite color is teal.",
                   metadata: { role: "USER" },
                   role: "user",
                 },
@@ -238,7 +248,7 @@ describe("session memory", () => {
     );
 
     expect(fakeClient.deleteSessionMemory).toHaveBeenCalledWith({
-      sessionId: "conv_conversation-1",
+      sessionId: "project_project-1",
     });
     expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -250,7 +260,7 @@ describe("session memory", () => {
             }),
           }),
           expect.objectContaining({
-            content: "I moved to Austin",
+            content: "User lives in Austin.",
             metadata: expect.objectContaining({
               bitemporalKey: "residence",
               bitemporalValue: "austin",
@@ -284,7 +294,7 @@ describe("session memory", () => {
     ).resolves.toEqual([]);
   });
 
-  it("forgets project memory by deleting the project namespace", async () => {
+  it("forgets all memory layers by default for global-and-project projects", async () => {
     const fakeClient = client();
 
     await expect(
@@ -292,9 +302,72 @@ describe("session memory", () => {
         { project: { id: "project-1", memoryScope: "GLOBAL_AND_PROJECT" } },
         fakeClient as never,
       ),
-    ).resolves.toEqual({ deletedSessions: 1 });
+    ).resolves.toEqual({ deletedSessions: 2 });
+    expect(fakeClient.deleteSessionMemory).toHaveBeenCalledWith({
+      sessionId: "global_handle-local-user",
+    });
     expect(fakeClient.deleteSessionMemory).toHaveBeenCalledWith({
       sessionId: "project_project-1",
     });
+  });
+
+  it("does not extract questions or ordinary imperatives as memory facts", async () => {
+    const fakeClient = client();
+
+    await appendMessageToZep(
+      {
+        content: "What's my favorite color?",
+        conversationId: "conversation-question",
+        project: { id: "project-1", memoryScope: "PROJECT_ONLY" },
+        role: "USER",
+      },
+      fakeClient as never,
+    );
+    await appendMessageToZep(
+      {
+        content: "Tell me a joke",
+        conversationId: "conversation-imperative",
+        project: { id: "project-1", memoryScope: "PROJECT_ONLY" },
+        role: "USER",
+      },
+      fakeClient as never,
+    );
+
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "conv_conversation-question" }),
+    );
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "conv_conversation-imperative" }),
+    );
+    expect(fakeClient.addMemoryMessages).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "project_project-1" }),
+    );
+  });
+
+  it("stores a normalized fact for remember statements without storing raw text", async () => {
+    const fakeClient = client();
+
+    await appendMessageToZep(
+      {
+        content: "Remember that I drive a 2018 Toyota Tacoma.",
+        conversationId: "conversation-remember",
+        project: { id: "project-1", memoryScope: "PROJECT_ONLY" },
+        role: "USER",
+      },
+      fakeClient as never,
+    );
+
+    expect(fakeClient.addMemoryMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [expect.objectContaining({ content: "User drives a 2018 Toyota Tacoma." })],
+        sessionId: "project_project-1",
+      }),
+    );
+    expect(fakeClient.addMemoryMessages).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [expect.objectContaining({ content: expect.stringMatching(/^Remember that/i) })],
+        sessionId: "project_project-1",
+      }),
+    );
   });
 });
