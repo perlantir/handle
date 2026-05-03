@@ -39,6 +39,7 @@ interface ProjectInput {
   defaultBackend?: ProjectSummary['defaultBackend'];
   defaultModel?: string | null;
   defaultProvider?: string | null;
+  memoryScope?: ProjectSummary['memoryScope'];
   name?: string;
   permissionMode?: ProjectSummary['permissionMode'];
   workspaceScope?: ProjectSummary['workspaceScope'];

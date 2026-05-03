@@ -20,6 +20,7 @@ const projectSchema = z.object({
   defaultBackend: z.enum(["E2B", "LOCAL"]).optional(),
   defaultModel: z.string().min(1).nullable().optional(),
   defaultProvider: z.string().refine(isProviderId).nullable().optional(),
+  memoryScope: z.enum(["GLOBAL_AND_PROJECT", "PROJECT_ONLY", "NONE"]).optional(),
   name: z.string().min(1).max(120).optional(),
   permissionMode: z.enum(["FULL_ACCESS", "ASK", "PLAN"]).optional(),
   workspaceScope: z

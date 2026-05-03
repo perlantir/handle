@@ -16,6 +16,7 @@ import {
   type CreateSettingsRouterOptions,
   type ExecutionSettingsRow,
   type KeychainLike,
+  type MemorySettingsRow,
   type ProviderConfigRow,
   type SettingsRouteStore,
 } from "./settings";
@@ -113,6 +114,33 @@ function browserSettingsStore(
   };
 }
 
+function memorySettingsStore(
+  overrides: Partial<MemorySettingsRow> = {},
+): SettingsRouteStore {
+  let record: MemorySettingsRow = {
+    cloudBaseURL: null,
+    defaultScopeForNewProjects: "GLOBAL_AND_PROJECT",
+    id: "global",
+    provider: "self-hosted",
+    selfHostedBaseURL: "http://127.0.0.1:8000",
+    updatedAt: new Date("2026-05-02T12:00:00.000Z"),
+    ...overrides,
+  };
+  const providerStore = store([row({ id: "openai" })]);
+
+  return {
+    ...providerStore,
+    memorySettings: {
+      update: vi.fn(async (args: unknown) => {
+        const { data } = args as { data: Partial<MemorySettingsRow> };
+        record = { ...record, ...data };
+        return record;
+      }),
+      upsert: vi.fn(async () => record),
+    },
+  };
+}
+
 function provider(
   config: ProviderConfig,
   model: BaseChatModel,
@@ -134,6 +162,7 @@ interface CreateAppOptions {
   keychain?: KeychainLike;
   openPathInFinder?: CreateSettingsRouterOptions["openPathInFinder"];
   resetBrowserProfile?: CreateSettingsRouterOptions["resetBrowserProfile"];
+  runMemoryComposeCommand?: CreateSettingsRouterOptions["runMemoryComposeCommand"];
   store?: SettingsRouteStore;
   testActualChromeConnection?: CreateSettingsRouterOptions["testActualChromeConnection"];
 }
@@ -146,6 +175,7 @@ function createApp({
   keychain,
   openPathInFinder,
   resetBrowserProfile,
+  runMemoryComposeCommand,
   store: routeStore = store([row({ id: "openai" })]),
   testActualChromeConnection,
 }: CreateAppOptions = {}) {
@@ -160,6 +190,9 @@ function createApp({
   if (keychain) routerOptions.keychain = keychain;
   if (openPathInFinder) routerOptions.openPathInFinder = openPathInFinder;
   if (resetBrowserProfile) routerOptions.resetBrowserProfile = resetBrowserProfile;
+  if (runMemoryComposeCommand) {
+    routerOptions.runMemoryComposeCommand = runMemoryComposeCommand;
+  }
   if (testActualChromeConnection) {
     routerOptions.testActualChromeConnection = testActualChromeConnection;
   }
@@ -321,6 +354,105 @@ describe("settings browser route", () => {
     expect(testActualChromeConnection).toHaveBeenCalledWith(
       "http://127.0.0.1:9222",
     );
+  });
+});
+
+describe("settings memory route", () => {
+  it("returns memory settings with connection status", async () => {
+    const routeStore = memorySettingsStore();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(".", { status: 200 }));
+
+    const response = await request(
+      createApp({
+        keychain: mockKeychain(""),
+        store: routeStore,
+      }),
+    )
+      .get("/api/settings/memory")
+      .expect(200);
+
+    expect(response.body.memory).toMatchObject({
+      defaultScopeForNewProjects: "GLOBAL_AND_PROJECT",
+      provider: "self-hosted",
+      selfHostedBaseURL: "http://127.0.0.1:8000",
+      status: { status: "online" },
+    });
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:8000/", expect.any(Object));
+    fetchMock.mockRestore();
+  });
+
+  it("updates memory provider and default scope", async () => {
+    const routeStore = memorySettingsStore();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(".", { status: 200 }));
+
+    const response = await request(
+      createApp({
+        keychain: mockKeychain("cloud-key"),
+        store: routeStore,
+      }),
+    )
+      .put("/api/settings/memory")
+      .send({
+        cloudBaseURL: "https://api.getzep.com",
+        defaultScopeForNewProjects: "PROJECT_ONLY",
+        provider: "cloud",
+      })
+      .expect(200);
+
+    expect(response.body.memory).toMatchObject({
+      defaultScopeForNewProjects: "PROJECT_ONLY",
+      hasCloudApiKey: true,
+      provider: "cloud",
+    });
+    expect(routeStore.memorySettings?.update).toHaveBeenCalledWith({
+      data: {
+        cloudBaseURL: "https://api.getzep.com",
+        defaultScopeForNewProjects: "PROJECT_ONLY",
+        provider: "cloud",
+      },
+      where: { id: "global" },
+    });
+    fetchMock.mockRestore();
+  });
+
+  it("saves the Zep Cloud key to Keychain", async () => {
+    const keychain = mockKeychain("");
+
+    await request(
+      createApp({
+        keychain,
+        store: memorySettingsStore(),
+      }),
+    )
+      .post("/api/settings/memory/cloud-key")
+      .send({ apiKey: "zep-test-key-not-real" })
+      .expect(200);
+
+    expect(keychain.setCredential).toHaveBeenCalledWith(
+      "zep:cloud:apiKey",
+      "zep-test-key-not-real",
+    );
+  });
+
+  it("runs self-hosted memory start and stop through injectable compose command", async () => {
+    const runMemoryComposeCommand = vi.fn().mockResolvedValue({
+      stderr: "",
+      stdout: "ok",
+    });
+    const app = createApp({
+      runMemoryComposeCommand,
+      store: memorySettingsStore(),
+    });
+
+    await request(app).post("/api/settings/memory/start").expect(200);
+    await request(app).post("/api/settings/memory/stop").expect(200);
+
+    expect(runMemoryComposeCommand).toHaveBeenNthCalledWith(1, "up");
+    expect(runMemoryComposeCommand).toHaveBeenNthCalledWith(2, "down");
   });
 });
 
