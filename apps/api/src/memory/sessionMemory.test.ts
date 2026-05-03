@@ -468,4 +468,30 @@ describe("session memory", () => {
       expect.objectContaining({ sessionId: "project_project-1" }),
     );
   });
+
+  it("skips explicit fact extraction for user secret-topic paraphrases", async () => {
+    const fakeClient = client();
+
+    await expect(
+      appendMessageToZep(
+        {
+          content: "User has an API key (not stored; redacted/secret).",
+          conversationId: "conversation-secret-topic",
+          extractionMode: "explicit_fact",
+          project: { id: "project-1", memoryScope: "PROJECT_ONLY" },
+          role: "USER",
+        },
+        fakeClient as never,
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        factsWritten: 0,
+        ok: true,
+        skippedReason: "secret_topic",
+      }),
+    );
+    expect(fakeClient.addMemoryMessages).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "project_project-1" }),
+    );
+  });
 });

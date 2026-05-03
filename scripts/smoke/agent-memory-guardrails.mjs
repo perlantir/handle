@@ -87,11 +87,48 @@ if (scenario === "no-misleading-secret-confirmation") {
   assert(result.includes("did not keep"), `Expected explicit not-kept response, got: ${result}`);
   assert(!/(securely stored|saved|memorized|updated and saved|stored in memory)/i.test(result), `Misleading secret confirmation: ${result}`);
 
+  const paraphraseResult = await save.implementation(
+    { fact: "User has an API key (not stored; redacted/secret)." },
+    {
+      backend: {
+        id: "local",
+        async browserSession() {
+          throw new Error("not used");
+        },
+        async fileDelete() {},
+        async fileList() {
+          return [];
+        },
+        async fileRead() {
+          return "";
+        },
+        async fileWrite() {},
+        getWorkspaceDir() {
+          return `/tmp/${project.id}`;
+        },
+        async initialize() {},
+        async shellExec() {
+          return { exitCode: 0, stderr: "", stdout: "" };
+        },
+        async shutdown() {},
+      },
+      conversationId: `${project.id}-conversation`,
+      memoryProject: project,
+      projectId: project.id,
+      taskId: `${project.id}-run`,
+    },
+  );
+  assert(
+    paraphraseResult.includes("Secret-shaped content was blocked"),
+    `Expected blocked secret-topic response, got: ${paraphraseResult}`,
+  );
+
   const projectSession = memorySessionIds({ project }).find((item) => item.source === "project");
   assert(projectSession, "No project session");
   const memory = await client.getSessionMemory({ sessionId: projectSession.id });
   const contents = memory.ok && memory.value ? memory.value.map((message) => message.content) : [];
   assert(!contents.some((content) => content.includes("[REDACTED]")), `Redacted fact was stored: ${JSON.stringify(contents)}`);
+  assert(!contents.some((content) => /api\s*key/i.test(content)), `Secret-topic fact was stored: ${JSON.stringify(contents)}`);
 
   console.log("[agent-memory-guardrails:no-misleading-secret-confirmation] PASS");
   process.exit(0);

@@ -54,6 +54,7 @@ export interface AppendMemoryResult {
     | "not_fact_worthy"
     | "redaction_marker_present"
     | "redaction_triggered"
+    | "secret_topic"
     | "non_user_message";
 }
 
@@ -178,7 +179,8 @@ export async function appendMessageToZep(
   }
 
   const redactionMarkerPresent = containsRedactionMarker(context.content);
-  if (redaction.redactionTriggered || redactionMarkerPresent) {
+  const secretTopicPresent = containsSecretMemoryTopic(context.content);
+  if (redaction.redactionTriggered || redactionMarkerPresent || secretTopicPresent) {
     logMemoryDiagnostic({
       context,
       details: {
@@ -186,7 +188,9 @@ export async function appendMessageToZep(
         patterns: redaction.matchedPatterns,
         reason: redaction.redactionTriggered
           ? "redaction_triggered"
-          : "redaction_marker_present",
+          : redactionMarkerPresent
+            ? "redaction_marker_present"
+            : "secret_topic",
       },
       durationMs: Date.now() - startedAt,
       operation: "memory.extraction_skipped",
@@ -198,7 +202,9 @@ export async function appendMessageToZep(
       skipped: false,
       skippedReason: redaction.redactionTriggered
         ? "redaction_triggered"
-        : "redaction_marker_present",
+        : redactionMarkerPresent
+          ? "redaction_marker_present"
+          : "secret_topic",
     };
   }
 
@@ -477,6 +483,12 @@ function normalizeDeclarativeFact(content: string) {
   }
 
   return null;
+}
+
+function containsSecretMemoryTopic(content: string) {
+  return /\b(?:api\s*key|access\s*token|refresh\s*token|bearer\s*token|auth\s*token|password|passphrase|credential|secret|ssn|social\s+security|credit\s+card|card\s+number)\b/i.test(
+    content,
+  );
 }
 
 function stripRememberPrefix(content: string) {

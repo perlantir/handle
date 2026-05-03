@@ -114,7 +114,8 @@ export function createMemoryToolDefinitions(): ToolDefinition[] {
         });
         if (
           writeResult.skippedReason === "redaction_triggered" ||
-          writeResult.skippedReason === "redaction_marker_present"
+          writeResult.skippedReason === "redaction_marker_present" ||
+          writeResult.skippedReason === "secret_topic"
         ) {
           const result = secretMemoryBlockedMessage();
           emitMemoryToolResult(context, callId, result);

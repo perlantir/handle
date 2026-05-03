@@ -99,6 +99,25 @@ describe("memory tools", () => {
     expect(result).not.toContain("Saved memory");
   });
 
+  it("does not report success when secret-topic paraphrases are blocked", async () => {
+    vi.mocked(appendMessageToZep).mockResolvedValueOnce({
+      factsWritten: 0,
+      ok: true,
+      skipped: false,
+      skippedReason: "secret_topic",
+    });
+    const save = createMemoryToolDefinitions().find((tool) => tool.name === "memory_save");
+    if (!save) throw new Error("memory_save missing");
+
+    const result = await save.implementation(
+      { fact: "User has an API key (not stored; redacted/secret)." },
+      context(),
+    );
+
+    expect(result).toContain("Secret-shaped content was blocked");
+    expect(result).not.toContain("Saved memory");
+  });
+
   it("reports memory offline instead of saved when the write layer fails", async () => {
     vi.mocked(appendMessageToZep).mockResolvedValueOnce({
       ok: false,
