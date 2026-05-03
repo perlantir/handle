@@ -10,6 +10,7 @@ export interface ToolExecutionContext {
   taskId: string;
   backend: ExecutionBackend;
   browserSession?: BrowserSession;
+  memoryContext?: string;
   sandbox: E2BSandboxLike;
   trustedDomains?: string[];
 }

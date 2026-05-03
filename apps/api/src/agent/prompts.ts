@@ -1,9 +1,10 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v10";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v11";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
+  memoryContext?: string | undefined;
   workspaceDir?: string;
 }
 
@@ -143,12 +144,15 @@ System prompt version: ${SYSTEM_PROMPT_VERSION}
 
 export function buildPhase1SystemPrompt({
   backendId = "e2b",
+  memoryContext = "",
   workspaceDir = "/home/user",
 }: PromptRuntimeContext = {}) {
   return `
 ${CORE_SYSTEM_PROMPT}
 
 ${backendId === "local" ? localEnvironmentPrompt(workspaceDir) : e2bEnvironmentPrompt()}
+
+${memoryContext}
 
 ${AVAILABLE_PHASE_1_TOOLS}
 `.trim();

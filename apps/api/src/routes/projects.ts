@@ -11,6 +11,7 @@ import { runAgent as defaultRunAgent } from "../agent/runAgent";
 import { asyncHandler } from "../lib/http";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
+import { appendMessageToZep } from "../memory/sessionMemory";
 import { isProviderId, type ProviderId } from "../providers/types";
 
 const projectSchema = z.object({
@@ -41,6 +42,7 @@ const updateConversationSchema = z.object({
 const sendMessageSchema = z.object({
   backend: z.enum(["e2b", "local"]).optional(),
   content: z.string().min(1).max(10_000),
+  memoryEnabled: z.boolean().optional(),
   modelName: z.string().min(1).max(200).optional(),
   providerId: z.string().refine(isProviderId).optional(),
 });
@@ -75,6 +77,7 @@ export interface ProjectRouteStore {
 }
 
 interface CreateProjectsRouterOptions {
+  appendMessageToMemory?: typeof appendMessageToZep;
   getUserId?: typeof getAuthenticatedUserId;
   runAgent?: (
     agentRunId: string,
@@ -168,6 +171,7 @@ async function ensureDefaultProject(store: ProjectRouteStore) {
 }
 
 export function createProjectsRouter({
+  appendMessageToMemory = appendMessageToZep,
   getUserId = getAuthenticatedUserId,
   runAgent = defaultRunAgent,
   store = prisma,
@@ -456,8 +460,25 @@ export function createProjectsRouter({
         data: {
           content: parsed.data.content,
           conversationId: req.params.conversationId,
+          ...(parsed.data.memoryEnabled === undefined
+            ? {}
+            : { memoryEnabled: parsed.data.memoryEnabled }),
           role: "USER",
         },
+      });
+      await appendMessageToMemory({
+        content: parsed.data.content,
+        conversationId: req.params.conversationId,
+        memoryEnabled: parsed.data.memoryEnabled ?? null,
+        project: (conversation as {
+          project?: { id?: string | null; memoryScope?: string | null };
+        }).project as { id?: string | null; memoryScope?: "GLOBAL_AND_PROJECT" | "PROJECT_ONLY" | "NONE" | null } | null,
+        role: "USER",
+      }).catch((err) => {
+        logger.warn(
+          { conversationId: req.params.conversationId, err },
+          "Failed to append user message to memory",
+        );
       });
 
       const activeRun = await store.agentRun.findFirst({

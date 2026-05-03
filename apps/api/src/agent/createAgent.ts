@@ -58,6 +58,7 @@ export async function createPhase1Agent(
   const llm = options.llm ?? createOpenAIChatModel();
   const systemPrompt = buildPhase1SystemPrompt({
     backendId: context.backend.id,
+    memoryContext: context.memoryContext,
     workspaceDir: context.backend.getWorkspaceDir(),
   });
   const prompt = ChatPromptTemplate.fromMessages([
@@ -99,6 +100,7 @@ export async function createHandleAgent(
   const llm = options.llm ?? createOpenAIChatModel();
   const systemPrompt = buildHandleSystemPrompt({
     backendId: context.backend.id,
+    memoryContext: context.memoryContext,
     workspaceDir: context.backend.getWorkspaceDir(),
   });
   const prompt = ChatPromptTemplate.fromMessages([

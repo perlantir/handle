@@ -39,6 +39,7 @@
     "smoke:rate-limit-error-surfaces": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/rate-limit-error-surfaces.mjs",
     "smoke:model-switching": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/model-switching.mjs",
     "smoke:message-interrupt": "node scripts/smoke/message-interrupt.mjs",
+    "smoke:memory-recall": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-recall.mjs",
     "smoke:mid-conversation-backend-switch": "node scripts/smoke/mid-conversation-backend-switch.mjs",
     "smoke:project-creation-rename": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/project-creation-rename.mjs",
     "smoke:projects-crud": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/projects-crud.mjs",

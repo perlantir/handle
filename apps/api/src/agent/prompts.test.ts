@@ -42,7 +42,15 @@ describe("agent prompts", () => {
     expect(prompt).toContain("answer directly without tools");
     expect(prompt).toContain("Do not use");
     expect(prompt).toContain("shell_exec for simple math");
-    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v10");
+    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v11");
+  });
+
+  it("injects recalled memory context when available", () => {
+    const prompt = buildHandleSystemPrompt({
+      memoryContext: "<memory_context>\n1. [global] Favorite color is teal\n</memory_context>",
+    });
+
+    expect(prompt).toContain("Favorite color is teal");
   });
 
   it("instructs the agent to surface local shell rate limits", () => {

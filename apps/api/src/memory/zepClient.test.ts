@@ -72,4 +72,59 @@ describe("HandleZepClient", () => {
     expect(log).toContain('"operation":"ensure_user"');
     expect(log).toContain('"status":"offline"');
   });
+
+  it("ensures sessions, writes memory, and normalizes search results", async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (target.endsWith("/api/v1/sessions/session-1/") && init?.method === "GET") {
+        return new Response("not found", { status: 404 });
+      }
+      if (target.endsWith("/api/v1/sessions") && init?.method === "POST") {
+        return jsonResponse({ session_id: "session-1" }, { status: 201 });
+      }
+      if (target.endsWith("/api/v1/sessions/session-1/memory") && init?.method === "POST") {
+        return new Response("OK");
+      }
+      if (target.endsWith("/api/v1/sessions/session-1/search?limit=3") && init?.method === "POST") {
+        return jsonResponse([
+          {
+            dist: 0.25,
+            message: {
+              content: "Favorite color is teal",
+              metadata: { projectId: "project-1" },
+              role: "user",
+            },
+          },
+        ]);
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const client = new HandleZepClient({ baseUrl: "http://zep.test" }, fetchImpl as typeof fetch);
+
+    await expect(
+      client.ensureSession({ sessionId: "session-1", userId: "user-1" }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      client.addMemoryMessages({
+        messages: [{ content: "Favorite color is teal", role: "user" }],
+        sessionId: "session-1",
+      }),
+    ).resolves.toMatchObject({ ok: true });
+
+    const result = await client.searchMemory({
+      limit: 3,
+      query: "favorite color",
+      sessionId: "session-1",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toEqual([
+      {
+        content: "Favorite color is teal",
+        metadata: { projectId: "project-1" },
+        role: "user",
+        score: 0.25,
+      },
+    ]);
+  });
 });

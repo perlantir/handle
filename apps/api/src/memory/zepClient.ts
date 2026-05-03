@@ -24,6 +24,19 @@ export interface ZepOperationResult<T = unknown> {
   detail?: string;
 }
 
+export interface ZepMemoryMessage {
+  role: "assistant" | "system" | "user";
+  content: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ZepMemorySearchResult {
+  content: string;
+  metadata?: Record<string, unknown>;
+  role?: string;
+  score?: number;
+}
+
 export interface MemoryStatusSnapshot {
   provider: MemoryProvider;
   status: MemoryConnectionStatus;
@@ -132,6 +145,89 @@ export class HandleZepClient {
     });
   }
 
+  async ensureSession(input: {
+    metadata?: Record<string, unknown>;
+    sessionId: string;
+    userId?: string;
+  }): Promise<ZepOperationResult> {
+    return this.safeOperation("ensure_session", async () => {
+      const existing = await this.request(
+        `/api/v1/sessions/${encodeURIComponent(input.sessionId)}/`,
+        { method: "GET" },
+      );
+      if (existing.ok) {
+        return existing.json().catch(() => ({}));
+      }
+
+      const created = await this.request("/api/v1/sessions", {
+        method: "POST",
+        body: JSON.stringify({
+          session_id: input.sessionId,
+          ...(input.userId ? { user_id: input.userId } : {}),
+          metadata: input.metadata ?? {},
+        }),
+      });
+
+      if (created.ok) {
+        return created.json().catch(() => ({}));
+      }
+
+      const body = await created.text();
+      if (created.status === 500 && body.toLowerCase().includes("duplicate")) {
+        return { session_id: input.sessionId };
+      }
+
+      throw new Error(`Zep session create failed: HTTP ${created.status} ${body.slice(0, 240)}`);
+    });
+  }
+
+  async addMemoryMessages(input: {
+    messages: ZepMemoryMessage[];
+    sessionId: string;
+  }): Promise<ZepOperationResult> {
+    return this.safeOperation("add_memory_messages", async () => {
+      const response = await this.request(
+        `/api/v1/sessions/${encodeURIComponent(input.sessionId)}/memory`,
+        {
+          method: "POST",
+          body: JSON.stringify({ messages: input.messages }),
+        },
+      );
+      if (response.ok) return response.text();
+      const body = await response.text();
+      throw new Error(`Zep memory write failed: HTTP ${response.status} ${body.slice(0, 240)}`);
+    });
+  }
+
+  async searchMemory(input: {
+    limit?: number;
+    query: string;
+    sessionId: string;
+  }): Promise<ZepOperationResult<ZepMemorySearchResult[]>> {
+    return this.safeOperation("search_memory", async () => {
+      const limit = input.limit ?? 8;
+      const response = await this.request(
+        `/api/v1/sessions/${encodeURIComponent(input.sessionId)}/search?limit=${limit}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            search_scope: "messages",
+            search_type: "similarity",
+            text: input.query,
+          }),
+        },
+      );
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`Zep memory search failed: HTTP ${response.status} ${body.slice(0, 240)}`);
+      }
+
+      const raw = (await response.json().catch(() => [])) as unknown;
+      if (!Array.isArray(raw)) return [];
+      return raw.flatMap((item) => normalizeSearchResult(item));
+    });
+  }
+
   private async safeOperation<T>(
     operation: string,
     fn: () => Promise<T>,
@@ -220,4 +316,30 @@ function errorName(error: unknown) {
 function errorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return redactSecrets(message);
+}
+
+function normalizeSearchResult(item: unknown): ZepMemorySearchResult[] {
+  if (!item || typeof item !== "object") return [];
+  const record = item as {
+    dist?: unknown;
+    message?: {
+      content?: unknown;
+      metadata?: unknown;
+      role?: unknown;
+    };
+  };
+  const content = record.message?.content;
+  if (typeof content !== "string" || !content.trim()) return [];
+
+  const result: ZepMemorySearchResult = { content };
+  if (typeof record.message?.role === "string") {
+    result.role = record.message.role;
+  }
+  if (record.message?.metadata && typeof record.message.metadata === "object") {
+    result.metadata = record.message.metadata as Record<string, unknown>;
+  }
+  if (typeof record.dist === "number") {
+    result.score = record.dist;
+  }
+  return [result];
 }

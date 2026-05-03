@@ -9,6 +9,12 @@ import { emitTaskEvent } from "../lib/eventBus";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
+import {
+  appendMessageToZep,
+  formatMemoryContext,
+  getRelevantMemoryForTask,
+  type MemoryFact,
+} from "../memory/sessionMemory";
 import { providerRegistry as defaultProviderRegistry } from "../providers/registry";
 import {
   isProviderId,
@@ -102,6 +108,7 @@ interface ProjectContext {
   defaultModel: string | null;
   defaultProvider: string | null;
   id: string;
+  memoryScope: string | null;
   permissionMode: string | null;
   workspaceScope: string | null;
 }
@@ -110,7 +117,7 @@ interface AgentRunContext {
   backend: string | null;
   conversationId: string;
   conversation?: {
-    messages?: Array<{ content: string; role: string }>;
+    messages?: Array<{ content: string; memoryEnabled?: boolean | null; role: string }>;
     project?: ProjectContext | null;
   } | null;
   providerId: string | null;
@@ -149,6 +156,7 @@ interface RunAgentDependencies {
   createAgent?: (
     context: {
       backend: ExecutionBackend;
+      memoryContext?: string;
       sandbox: E2BSandboxLike;
       taskId: string;
       trustedDomains?: string[];
@@ -291,6 +299,17 @@ async function createAssistantMessage(
         role: "ASSISTANT",
       },
     });
+    await appendMessageToZep({
+      content,
+      conversationId: context.conversationId,
+      project: normalizeMemoryProjectContext(context.conversation?.project),
+      role: "ASSISTANT",
+    }).catch((err) => {
+      logger.warn(
+        { conversationId: context.conversationId, err, taskId },
+        "Failed to append assistant message to memory",
+      );
+    });
     return;
   }
 
@@ -313,6 +332,31 @@ function conversationHistory(context: AgentRunContext | null, currentGoal: strin
     content: redactSecrets(message.content),
     role: message.role.toLowerCase(),
   }));
+}
+
+function currentMessageMemoryEnabled(
+  context: AgentRunContext | null,
+  currentGoal: string,
+) {
+  const messages = context?.conversation?.messages ?? [];
+  const current = messages.at(-1);
+  if (
+    current?.role === "USER" &&
+    current.content === currentGoal &&
+    typeof current.memoryEnabled === "boolean"
+  ) {
+    return current.memoryEnabled;
+  }
+  return null;
+}
+
+function normalizeMemoryProjectContext(project: ProjectContext | null | undefined) {
+  if (!project?.memoryScope) return null;
+  const memoryScope =
+    project.memoryScope === "PROJECT_ONLY" || project.memoryScope === "NONE"
+      ? project.memoryScope
+      : "GLOBAL_AND_PROJECT";
+  return { id: project.id, memoryScope } as const;
 }
 
 function localSandboxPlaceholder(taskId: string): E2BSandboxLike {
@@ -608,6 +652,28 @@ export function createAgentRunner({
       runControl.throwIfCancelled();
 
       const trustedDomains = await loadTrustedDomains(store);
+      let recalledMemory: MemoryFact[] = [];
+      try {
+        recalledMemory = await getRelevantMemoryForTask({
+          conversationId: runContext.conversationId,
+          goal,
+          memoryEnabled: currentMessageMemoryEnabled(runContext, goal),
+          project: normalizeMemoryProjectContext(project),
+          taskId,
+        });
+        logger.info(
+          {
+            count: recalledMemory.length,
+            memoryScope: project?.memoryScope ?? null,
+            projectId: project?.id ?? null,
+            taskId,
+          },
+          "Memory recall completed for agent run",
+        );
+      } catch (err) {
+        logger.warn({ err, taskId }, "Memory recall failed; continuing without memory");
+      }
+      const memoryContext = formatMemoryContext(recalledMemory);
 
       if (selectedBackend === "e2b" && shouldRunDirectComputerUse(goal)) {
         logger.info(
@@ -642,10 +708,14 @@ export function createAgentRunner({
         return;
       }
 
-      const agent = await createAgent(
-        { backend, taskId, sandbox, trustedDomains },
-        { llm: model },
-      );
+      const agentContext = {
+        backend,
+        ...(memoryContext ? { memoryContext } : {}),
+        taskId,
+        sandbox,
+        trustedDomains,
+      };
+      const agent = await createAgent(agentContext, { llm: model });
       runControl.throwIfCancelled();
       const stream = await agent.streamEvents(
         {
