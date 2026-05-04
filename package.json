@@ -59,6 +59,7 @@
     "smoke:integrations-memory-toggle": "pnpm --filter @handle/api exec vitest run src/integrations/integrationMemory.test.ts && playwright test --config apps/web/playwright.config.ts apps/web/playwright/settings-integrations.spec.ts",
     "smoke:integrations-tier2": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/integrations-tier2.mjs",
     "smoke:integrations-tier3": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/integrations-tier3.mjs",
+    "smoke:skills-stage1-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/skills.spec.ts",
     "smoke:no-imperatives-as-facts": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-foundation.mjs no-imperatives-as-facts",
     "smoke:no-questions-as-facts": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-foundation.mjs no-questions-as-facts",
     "smoke:none-scope-skip-zep": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-foundation.mjs none-scope-skip-zep",
