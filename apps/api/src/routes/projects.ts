@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { cancelAgentRunById } from "../agent/cancelAgentRun";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
-import { runAgent as defaultRunAgent } from "../agent/runAgent";
+import { dispatchAgentRun as defaultRunAgent } from "../temporal/dispatcher";
 import { asyncHandler } from "../lib/http";
 import { getCredential as defaultGetCredential } from "../lib/keychain";
 import { logger } from "../lib/logger";
@@ -102,7 +102,7 @@ interface CreateProjectsRouterOptions {
     agentRunId: string,
     goal: string,
     options?: { backend?: "e2b" | "local"; providerOverride?: ProviderId },
-  ) => Promise<void>;
+  ) => Promise<unknown>;
   store?: ProjectRouteStore;
 }
 

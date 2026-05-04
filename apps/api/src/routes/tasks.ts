@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import type { CreateTaskResponse } from "@handle/shared";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
-import { runAgent as defaultRunAgent } from "../agent/runAgent";
+import { dispatchAgentRun as defaultRunAgent } from "../temporal/dispatcher";
 import { asyncHandler } from "../lib/http";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
@@ -44,7 +44,7 @@ interface CreateTasksRouterOptions {
     taskId: string,
     goal: string,
     options?: { backend?: "e2b" | "local"; providerOverride?: ProviderId },
-  ) => Promise<void>;
+  ) => Promise<unknown>;
   store?: TaskRouteStore;
 }
 
@@ -73,6 +73,7 @@ function backendToDb(value: "e2b" | "local") {
 }
 
 function taskStatusFromRun(status: string | undefined) {
+  if (status === "QUEUED") return "QUEUED";
   if (status === "COMPLETED") return "STOPPED";
   if (status === "FAILED") return "ERROR";
   if (status === "CANCELLED") return "CANCELLED";
