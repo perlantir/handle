@@ -8,6 +8,8 @@ import type {
   ExecutionCommandResult,
   ExecutionFileEntry,
 } from './types';
+import { logger } from '../lib/logger';
+import { redactSecrets } from '../lib/redact';
 
 export const commonPythonPackages = ['requests', 'beautifulsoup4', 'httpx', 'pandas'] as const;
 const E2B_WORKSPACE_DIR = '/home/user';
@@ -50,6 +52,37 @@ function normalizeFileEntry(entry: unknown): ExecutionFileEntry {
   const size = typeof candidate.size === 'number' && Number.isFinite(candidate.size) ? candidate.size : 0;
 
   return { isDir, name, size };
+}
+
+function diagnosticErrorFields(err: unknown) {
+  if (!(err instanceof Error)) {
+    return { errorMessage: redactSecrets(String(err)), errorType: typeof err };
+  }
+
+  const record = err as Error & Record<string, unknown>;
+  const fieldNames = Object.getOwnPropertyNames(err).filter((name) => name !== 'stack');
+  const result: Record<string, unknown> = {
+    errorMessage: redactSecrets(err.message),
+    errorName: err.name,
+    fieldNames,
+  };
+
+  for (const name of fieldNames) {
+    const value = record[name];
+    if (typeof value === 'string') {
+      result[name] = redactSecrets(value);
+    } else if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+      result[name] = value;
+    } else if (value !== undefined) {
+      try {
+        result[name] = redactSecrets(JSON.stringify(value));
+      } catch {
+        result[name] = `[unserializable ${typeof value}]`;
+      }
+    }
+  }
+
+  return result;
 }
 
 export class E2BBackend implements ExecutionBackend {
@@ -125,10 +158,33 @@ export class E2BBackend implements ExecutionBackend {
   }
 
   async shellExec(command: string, opts: ExecutionCommandOptions): Promise<ExecutionCommandResult> {
-    const result = await this.getSandbox().commands.run(command, {
-      onStderr: opts.onStderr,
-      onStdout: opts.onStdout,
-    });
+    let streamedStdout = '';
+    let streamedStderr = '';
+    let result: Awaited<ReturnType<E2BSandboxLike['commands']['run']>>;
+
+    try {
+      result = await this.getSandbox().commands.run(command, {
+        async onStderr(data) {
+          streamedStderr += data;
+          await opts.onStderr(data);
+        },
+        async onStdout(data) {
+          streamedStdout += data;
+          await opts.onStdout(data);
+        },
+      });
+    } catch (err) {
+      logger.error(
+        {
+          command: redactSecrets(command),
+          diagnostics: diagnosticErrorFields(err),
+          streamedStderr: redactSecrets(streamedStderr),
+          streamedStdout: redactSecrets(streamedStdout),
+        },
+        'E2B shell command failed before returning a result',
+      );
+      throw err;
+    }
 
     return {
       exitCode: result.exitCode,
