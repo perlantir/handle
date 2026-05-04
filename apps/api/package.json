@@ -20,6 +20,7 @@
     "@langchain/community": "0.3.59",
     "@langchain/core": "0.3.80",
     "@langchain/openai": "0.3.17",
+    "@nangohq/node": "^0.70.1",
     "@openauthjs/openauth": "^0.4.3",
     "@prisma/client": "5.22.0",
     "cors": "^2.8.6",

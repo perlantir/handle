@@ -279,6 +279,100 @@ export type BrowserMode = 'SEPARATE_PROFILE' | 'ACTUAL_CHROME';
 
 export type MemoryScope = 'GLOBAL_AND_PROJECT' | 'PROJECT_ONLY' | 'NONE';
 
+export type IntegrationConnectorId =
+  | 'gmail'
+  | 'slack'
+  | 'notion'
+  | 'google-drive'
+  | 'github'
+  | 'google-calendar'
+  | 'cloudflare'
+  | 'vercel'
+  | 'linear'
+  | 'google-sheets'
+  | 'google-docs'
+  | 'zapier'
+  | 'obsidian';
+
+export type IntegrationConnectionStatus =
+  | 'DISCONNECTED'
+  | 'CONNECTING'
+  | 'CONNECTED'
+  | 'EXPIRED'
+  | 'REVOKED'
+  | 'RATE_LIMITED'
+  | 'ERROR';
+
+export type IntegrationSetupStatus =
+  | 'missing_credentials'
+  | 'ready'
+  | 'connected'
+  | 'reconnect'
+  | 'rate_limited'
+  | 'error'
+  | 'local_vault';
+
+export interface IntegrationConnectorSummary {
+  authType: 'local-vault' | 'nango';
+  connectorId: IntegrationConnectorId;
+  description: string;
+  displayName: string;
+  docsUrl?: string;
+  nangoProviderId: string | null;
+  oauthAppUrl?: string;
+  requiredScopes: string[];
+  setupGuide: string[];
+  tier: 1 | 2 | 3;
+}
+
+export interface IntegrationConnectorSettingsSummary {
+  clientIdConfigured: boolean;
+  connectorId: IntegrationConnectorId;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  lastValidatedAt?: string | null;
+  nangoIntegrationId: string | null;
+  nangoProviderId: string | null;
+  redirectUri: string | null;
+  requiredScopes: string[];
+  setupStatus: IntegrationSetupStatus;
+  updatedAt?: string | null;
+}
+
+export interface NangoSettingsSummary {
+  configured: boolean;
+  host: string;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  lastValidatedAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface IntegrationConnectionSummary {
+  accountAlias: string;
+  accountLabel?: string | null;
+  connectorId: IntegrationConnectorId;
+  createdAt?: string | null;
+  defaultAccount: boolean;
+  id: string;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  lastHealthCheckAt?: string | null;
+  lastUsedAt?: string | null;
+  memoryScope: MemoryScope;
+  nangoConnectionId?: string | null;
+  nangoIntegrationId?: string | null;
+  status: IntegrationConnectionStatus;
+  updatedAt?: string | null;
+}
+
+export interface IntegrationSettingsResponse {
+  connectors: IntegrationConnectorSummary[];
+  connections: IntegrationConnectionSummary[];
+  connectorSettings: IntegrationConnectorSettingsSummary[];
+  nango: NangoSettingsSummary;
+}
+
 export type AgentRunStatus =
   | 'RUNNING'
   | 'WAITING'
