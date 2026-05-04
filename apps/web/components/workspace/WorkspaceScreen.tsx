@@ -107,7 +107,10 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
       : (approvals.find((approval) => approval.status === "pending") ?? null);
 
   const effectiveStatus = state.status === "IDLE" && task ? task.status : state.status;
-  const isRunActive = effectiveStatus === "RUNNING" || effectiveStatus === "WAITING";
+  const isRunActive =
+    effectiveStatus === "QUEUED" ||
+    effectiveStatus === "RUNNING" ||
+    effectiveStatus === "WAITING";
   const isRunPaused = effectiveStatus === "PAUSED";
 
   async function handleCancelRun() {

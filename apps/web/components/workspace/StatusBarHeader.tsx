@@ -38,6 +38,7 @@ function statusSubtitle(state: AgentStreamState) {
   }
 
   if (state.error) return state.error;
+  if (state.status === 'QUEUED') return 'Queued';
   if (state.status === 'CANCELLED') return 'Cancelled';
   if (state.status === 'PAUSED') return 'Paused';
   if (state.status === 'WAITING') return state.pendingApproval?.reason ?? 'Waiting for approval';
@@ -85,7 +86,7 @@ export function StatusBarHeader({ cancelling = false, onCancel, onPause, pausing
   const status = state.status === 'IDLE' && task ? task.status : state.status;
   const hasPendingApproval = state.status === 'WAITING' || Boolean(state.pendingApproval);
   const backend = task?.backend ?? 'e2b';
-  const isActive = status === 'RUNNING' || status === 'WAITING';
+  const isActive = status === 'QUEUED' || status === 'RUNNING' || status === 'WAITING';
 
   return (
     <header className="mt-8 flex h-14 shrink-0 items-center gap-[14px] border-b border-border-subtle px-8 pr-6">

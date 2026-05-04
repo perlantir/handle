@@ -30,6 +30,7 @@
     "smoke:approval-modal-types": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/approval-modal-types.spec.ts",
     "smoke:action-log": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/action-log.mjs && playwright test --config apps/web/playwright.config.ts apps/web/playwright/actions-page.spec.ts",
     "smoke:agent-run-cancel": "node scripts/smoke/agent-run-cancel.mjs",
+    "smoke:async-tasks-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/async-tasks.spec.ts",
     "smoke:actual-chrome-connection-error": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/actual-chrome-connection-error.mjs",
     "smoke:browser-tools": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/browser-tools.mjs",
     "smoke:conversation-multi-turn": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/conversation-multi-turn.mjs",

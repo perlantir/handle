@@ -5,18 +5,24 @@ import { StatusDot } from './StatusDot';
 interface ContinueCardProps {
   className?: string;
   meta: string;
-  status: Extract<TaskStatus, 'RUNNING' | 'WAITING' | 'STOPPED'>;
+  status: Extract<TaskStatus, 'ERROR' | 'PAUSED' | 'QUEUED' | 'RUNNING' | 'WAITING' | 'STOPPED'>;
   tag?: string;
   title: string;
 }
 
 const statusLabel = {
   RUNNING: 'Running',
+  QUEUED: 'Queued',
+  PAUSED: 'Paused',
+  ERROR: 'Failed',
   STOPPED: 'Complete',
   WAITING: 'Waiting',
 };
 
 const dotStatus = {
+  ERROR: 'error',
+  PAUSED: 'paused',
+  QUEUED: 'running',
   RUNNING: 'running',
   STOPPED: 'success',
   WAITING: 'waiting',
@@ -26,7 +32,7 @@ export function ContinueCard({ className, meta, status, tag, title }: ContinueCa
   return (
     <article className={cn('rounded-[14px] border border-border-subtle bg-bg-surface px-5 py-[18px]', className)}>
       <div className="mb-3 flex items-center gap-2 text-[11.5px] text-text-tertiary">
-        <StatusDot status={dotStatus[status]} pulsing={status === 'RUNNING'} />
+        <StatusDot status={dotStatus[status]} pulsing={status === 'RUNNING' || status === 'QUEUED'} />
         <span>{statusLabel[status]}</span>
         {tag && <span className="ml-auto rounded-pill bg-bg-subtle px-2 py-0.5 text-[10.5px] text-text-secondary">{tag}</span>}
       </div>
