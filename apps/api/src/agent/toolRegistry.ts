@@ -18,6 +18,7 @@ export interface ToolExecutionContext {
   integrationRuntime?: IntegrationToolRuntime;
   memoryContext?: string;
   memoryProject?: MemoryProjectContext | null;
+  obsidianVaultPath?: string;
   projectId?: string;
   projectPermissionMode?: 'ASK' | 'FULL_ACCESS' | 'PLAN' | string | null;
   recordTrajectoryStep?: (step: TrajectoryStepRecord) => Promise<void>;

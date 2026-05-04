@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -230,5 +230,64 @@ describe("Tier 1 integration read tools", () => {
     expect(requestApproval).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();
     expect(result).toContain("forbidden pattern");
+  });
+
+  it("registers Tier 3 Nango and Obsidian tools", () => {
+    const names = createTier1IntegrationToolDefinitions().map((definition) => definition.name);
+
+    expect(names).toEqual(expect.arrayContaining([
+      "sheets_get_values",
+      "sheets_update_values",
+      "docs_get_document",
+      "docs_insert_text",
+      "zapier_list_zaps",
+      "zapier_trigger_zap",
+      "obsidian_search",
+      "obsidian_create_note",
+    ]));
+  });
+
+  it("keeps Obsidian note access inside the configured vault", async () => {
+    const vaultPath = await mkdtemp(join(tmpdir(), "handle-obsidian-vault-test-"));
+    await writeFile(join(vaultPath, "note.md"), "Handle audit note");
+    const read = await tool("obsidian_read_note").implementation(
+      { path: "note.md" },
+      context(
+        { request: vi.fn() },
+        {
+          obsidianVaultPath: vaultPath,
+          projectPermissionMode: "FULL_ACCESS",
+          userId: "user-integration-test",
+        },
+      ),
+    );
+    expect(read).toContain("Handle audit note");
+
+    await expect(
+      tool("obsidian_read_note").implementation(
+        { path: "../outside.md" },
+        context({ request: vi.fn() }, { obsidianVaultPath: vaultPath }),
+      ),
+    ).rejects.toThrow("escapes the configured vault");
+  });
+
+  it("writes Obsidian notes after approval", async () => {
+    const vaultPath = await mkdtemp(join(tmpdir(), "handle-obsidian-write-test-"));
+    const requestApproval = vi.fn().mockResolvedValue("approved");
+
+    const result = await tool("obsidian_create_note").implementation(
+      { content: "hello", path: "folder/new.md" },
+      context(
+        { request: vi.fn() },
+        {
+          obsidianVaultPath: vaultPath,
+          projectPermissionMode: "ASK",
+          requestApproval,
+        },
+      ),
+    );
+
+    expect(result).toContain("written");
+    await expect(readFile(join(vaultPath, "folder/new.md"), "utf8")).resolves.toBe("hello");
   });
 });

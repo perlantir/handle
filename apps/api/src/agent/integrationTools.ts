@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { promises as fs } from "node:fs";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import type { ApprovalPayload, IntegrationConnectorId } from "@handle/shared";
 import { z } from "zod";
 import { hasApprovalGrant } from "../approvals/approvalGrants";
@@ -8,8 +10,10 @@ import {
   createDefaultIntegrationToolRuntime,
   type IntegrationToolRuntime,
 } from "../integrations/toolRuntime";
+import { SafetyGovernor } from "../execution/safetyGovernor";
 import { appendActionLog } from "../lib/actionLog";
 import { emitTaskEvent } from "../lib/eventBus";
+import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
 import type { ToolDefinition, ToolExecutionContext } from "./toolRegistry";
 import { displayToolName } from "./toolRegistry";
@@ -377,6 +381,108 @@ const linearCommentIssueInput = z.object({
   agentReason,
   body: z.string().min(1).max(65_000),
   issueId: z.string().min(1),
+});
+
+const sheetsValuesInput = z.object({
+  accountAlias,
+  range: z.string().min(1),
+  spreadsheetId: z.string().min(1),
+});
+const sheetsMetadataInput = z.object({
+  accountAlias,
+  spreadsheetId: z.string().min(1),
+});
+const sheetsSearchInput = z.object({
+  accountAlias,
+  maxResults,
+  query: z.string().min(1),
+});
+const sheetsWriteValuesInput = z.object({
+  accountAlias,
+  agentReason,
+  range: z.string().min(1),
+  spreadsheetId: z.string().min(1),
+  values: z.array(z.array(z.unknown())).min(1).max(500),
+});
+const sheetsCreateInput = z.object({
+  accountAlias,
+  agentReason,
+  sheets: z.array(z.object({ title: z.string().min(1).max(200) })).max(20).nullable().optional(),
+  title: z.string().min(1).max(500),
+});
+
+const docsDocumentInput = z.object({
+  accountAlias,
+  documentId: z.string().min(1),
+});
+const docsSearchInput = z.object({
+  accountAlias,
+  maxResults,
+  query: z.string().min(1),
+});
+const docsCreateInput = z.object({
+  accountAlias,
+  agentReason,
+  initialText: z.string().max(100_000).nullable().optional(),
+  title: z.string().min(1).max(500),
+});
+const docsInsertTextInput = z.object({
+  accountAlias,
+  agentReason,
+  documentId: z.string().min(1),
+  index: z.number().int().min(1),
+  text: z.string().min(1).max(100_000),
+});
+const docsBatchUpdateInput = z.object({
+  accountAlias,
+  agentReason,
+  documentId: z.string().min(1),
+  requests: z.array(z.record(z.unknown())).min(1).max(100),
+});
+
+const zapierListInput = z.object({ accountAlias });
+const zapierGetInput = z.object({
+  accountAlias,
+  zapId: z.string().min(1),
+});
+const zapierHistoryInput = z.object({
+  accountAlias,
+  maxResults,
+  zapId: z.string().min(1).nullable().optional(),
+});
+const zapierTriggerInput = z.object({
+  accountAlias,
+  agentReason,
+  payload: z.record(z.unknown()),
+  zapId: z.string().min(1),
+});
+const zapierToggleInput = z.object({
+  accountAlias,
+  agentReason,
+  zapId: z.string().min(1),
+});
+
+const obsidianSearchInput = z.object({
+  maxResults,
+  query: z.string().min(1),
+  vaultAlias: z.string().min(1).nullable().optional(),
+});
+const obsidianPathInput = z.object({
+  path: z.string().min(1),
+  vaultAlias: z.string().min(1).nullable().optional(),
+});
+const obsidianListInput = z.object({
+  folder: z.string().min(1).nullable().optional(),
+  vaultAlias: z.string().min(1).nullable().optional(),
+});
+const obsidianWriteInput = z.object({
+  agentReason,
+  content: z.string().max(200_000),
+  path: z.string().min(1),
+  vaultAlias: z.string().min(1).nullable().optional(),
+});
+const obsidianUpdateInput = obsidianWriteInput.extend({
+  mode: z.enum(["replace", "append"]),
 });
 
 const WRITE_VERB_PATTERN =
@@ -757,6 +863,203 @@ function cloudflareDnsForbidden(input: { patch?: unknown; record?: unknown }) {
 
 function linearGraphql(query: string, variables: Record<string, unknown> = {}) {
   return { query, variables };
+}
+
+function driveMimeQuery(mimeType: string, query: string) {
+  return `mimeType='${mimeType}' and name contains '${query.replace(/'/g, "\\'")}' and trashed=false`;
+}
+
+async function resolveObsidianVaultPath(context: ToolExecutionContext) {
+  if (context.obsidianVaultPath) return resolve(context.obsidianVaultPath);
+  if (!context.userId) {
+    throw new IntegrationError({
+      code: "validation_error",
+      connectorId: "obsidian",
+      message: "Obsidian tools need an authenticated user context.",
+    });
+  }
+  const row = await prisma.integration.findFirst({
+    orderBy: [{ defaultAccount: "desc" }, { updatedAt: "desc" }],
+    where: {
+      connectorId: "OBSIDIAN",
+      status: "CONNECTED",
+      userId: context.userId,
+    },
+  });
+  const metadata = row?.metadata;
+  const vaultPath =
+    metadata && typeof metadata === "object" && "vaultPath" in metadata
+      ? (metadata as { vaultPath?: unknown }).vaultPath
+      : process.env.HANDLE_OBSIDIAN_VAULT_PATH;
+  if (typeof vaultPath !== "string" || !vaultPath.trim()) {
+    throw new IntegrationError({
+      code: "not_connected",
+      connectorId: "obsidian",
+      message:
+        "Obsidian vault is not configured. Add a vault path in Settings -> Integrations.",
+    });
+  }
+  return resolve(vaultPath);
+}
+
+function isInside(path: string, parent: string) {
+  const rel = relative(parent, path);
+  return rel === "" || (!rel.startsWith("..") && !resolve(rel).startsWith(".."));
+}
+
+async function resolveObsidianPath(context: ToolExecutionContext, requestedPath = ".") {
+  const vaultPath = await resolveObsidianVaultPath(context);
+  const vaultRealPath = await fs.realpath(vaultPath);
+  const target = resolve(vaultPath, requestedPath);
+  const targetForPolicy = await fs.realpath(target).catch(async () => {
+    const existingParent = await fs.realpath(dirname(target)).catch(() => vaultRealPath);
+    return resolve(existingParent, basename(target));
+  });
+  if (!isInside(targetForPolicy, vaultRealPath)) {
+    throw new IntegrationError({
+      code: "forbidden_pattern",
+      connectorId: "obsidian",
+      message: "Obsidian path denied: path escapes the configured vault.",
+    });
+  }
+
+  const governor = new SafetyGovernor({
+    customScopePath: vaultRealPath,
+    permissionMode:
+      context.projectPermissionMode === "FULL_ACCESS" ||
+      context.projectPermissionMode === "PLAN"
+        ? context.projectPermissionMode
+        : "ASK",
+    ...(context.projectId ? { projectId: context.projectId } : {}),
+    taskId: context.taskId,
+    workspaceDir: vaultRealPath,
+    workspaceScope: "CUSTOM_FOLDER",
+  });
+  return { governor, target, vaultPath: vaultRealPath };
+}
+
+async function enforceObsidianRead(context: ToolExecutionContext, requestedPath: string) {
+  const resolved = await resolveObsidianPath(context, requestedPath);
+  const decision = await resolved.governor.checkFileRead(resolved.target);
+  if (decision.decision === "deny") {
+    throw new IntegrationError({
+      code: "forbidden_pattern",
+      connectorId: "obsidian",
+      message: decision.reason,
+    });
+  }
+  return resolved;
+}
+
+async function enforceObsidianWrite(context: ToolExecutionContext, requestedPath: string) {
+  const resolved = await resolveObsidianPath(context, requestedPath);
+  const decision = await resolved.governor.checkFileWrite(resolved.target);
+  if (decision.decision === "deny") {
+    throw new IntegrationError({
+      code: "forbidden_pattern",
+      connectorId: "obsidian",
+      message: decision.reason,
+    });
+  }
+  return resolved;
+}
+
+function createObsidianReadTool<T extends z.AnyZodObject>({
+  description,
+  inputSchema,
+  name,
+  run,
+}: {
+  description: string;
+  inputSchema: T;
+  name: string;
+  run(input: z.infer<T>, context: ToolExecutionContext): Promise<unknown>;
+}): ToolDefinition {
+  return {
+    backendSupport: { e2b: true, local: true },
+    description,
+    inputSchema,
+    name,
+    requiresApproval: false,
+    sideEffectClass: "read",
+    async implementation(input, context) {
+      const parsed = inputSchema.parse(input);
+      const callId = emitIntegrationToolCall(context, name, {});
+      try {
+        const output = formatProviderResponse(await run(parsed, context));
+        emitIntegrationToolResult(context, callId, output);
+        return output;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        emitIntegrationToolResult(context, callId, "", message);
+        throw err;
+      }
+    },
+  };
+}
+
+function createObsidianWriteTool<T extends z.AnyZodObject>({
+  action,
+  description,
+  inputSchema,
+  name,
+  run,
+  target,
+}: {
+  action: string;
+  description: string;
+  inputSchema: T;
+  name: string;
+  run(input: z.infer<T>, context: ToolExecutionContext): Promise<unknown>;
+  target(input: z.infer<T>): string;
+}): ToolDefinition {
+  return {
+    backendSupport: { e2b: true, local: true },
+    description,
+    inputSchema,
+    name,
+    requiresApproval: (input, context) => !isFullAccess(context) || target(input as z.infer<T>).includes(".obsidian/"),
+    sideEffectClass: "write",
+    async implementation(input, context) {
+      const parsed = inputSchema.parse(input);
+      const callId = emitIntegrationToolCall(context, name, { action, target: target(parsed) });
+      if (target(parsed).startsWith(".obsidian/") || target(parsed).includes("/.obsidian/")) {
+        const message = "Obsidian .obsidian configuration changes require explicit approval and are denied in Phase 6 tools.";
+        emitIntegrationToolResult(context, callId, message, message);
+        return message;
+      }
+      const approval = await ensureIntegrationApproval({
+        action,
+        agentReason: "agentReason" in parsed ? parsed.agentReason : null,
+        context,
+        displayName: "Obsidian",
+        target: target(parsed),
+      });
+      if (!approval.approved) {
+        const message = `Obsidian ${action} ${approval.decision}.`;
+        emitIntegrationToolResult(context, callId, message, message);
+        return message;
+      }
+      try {
+        const output = formatProviderResponse(await run(parsed, context));
+        emitIntegrationToolResult(context, callId, output);
+        await appendActionLog({
+          ...actionContext(context),
+          description: `Obsidian ${action}: ${target(parsed)}`,
+          metadata: { connectorId: "obsidian" },
+          outcomeType: "integration_action",
+          reversible: false,
+          target: target(parsed),
+          timestamp: new Date().toISOString(),
+        });
+        return output;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        emitIntegrationToolResult(context, callId, "", message);
+        throw err;
+      }
+    },
+  };
 }
 
 export function createTier1IntegrationToolDefinitions(): ToolDefinition[] {
@@ -1496,5 +1799,323 @@ export function createTier1IntegrationToolDefinitions(): ToolDefinition[] {
       target: (input) => input.issueId,
     }),
     createExecuteTool("linear", "linear_execute", "Linear"),
+
+    createReadTool({
+      connectorId: "google-sheets",
+      description: "Read values from a Google Sheet range.",
+      inputSchema: sheetsValuesInput,
+      name: "sheets_get_values",
+      request: (input) => ({
+        endpoint: `/v4/spreadsheets/${encodeURIComponent(input.spreadsheetId)}/values/${encodeURIComponent(input.range)}`,
+      }),
+    }),
+    createReadTool({
+      connectorId: "google-sheets",
+      description: "Get Google Sheets spreadsheet metadata.",
+      inputSchema: sheetsMetadataInput,
+      name: "sheets_get_metadata",
+      request: (input) => ({
+        endpoint: `/v4/spreadsheets/${encodeURIComponent(input.spreadsheetId)}`,
+      }),
+    }),
+    createReadTool({
+      connectorId: "google-sheets",
+      description: "Search Google Drive for Sheets files.",
+      inputSchema: sheetsSearchInput,
+      name: "sheets_search_drive_sheets",
+      request: (input) => ({
+        endpoint: "/drive/v3/files",
+        params: {
+          fields: "files(id,name,mimeType,modifiedTime,webViewLink)",
+          pageSize: optionalLimit(input.maxResults, 10),
+          q: driveMimeQuery("application/vnd.google-apps.spreadsheet", input.query),
+        },
+      }),
+    }),
+    createWriteTool({
+      action: "update values",
+      connectorId: "google-sheets",
+      description: "Update Google Sheets values after approval unless Full Access is enabled.",
+      displayName: "Google Sheets",
+      inputSchema: sheetsWriteValuesInput,
+      method: "PUT",
+      name: "sheets_update_values",
+      request: (input) => ({
+        data: { values: input.values },
+        endpoint: `/v4/spreadsheets/${encodeURIComponent(input.spreadsheetId)}/values/${encodeURIComponent(input.range)}`,
+        params: { valueInputOption: "USER_ENTERED" },
+      }),
+      target: (input) => `${input.spreadsheetId}:${input.range}`,
+    }),
+    createWriteTool({
+      action: "append values",
+      connectorId: "google-sheets",
+      description: "Append Google Sheets values after approval unless Full Access is enabled.",
+      displayName: "Google Sheets",
+      inputSchema: sheetsWriteValuesInput,
+      name: "sheets_append_values",
+      request: (input) => ({
+        data: { values: input.values },
+        endpoint: `/v4/spreadsheets/${encodeURIComponent(input.spreadsheetId)}/values/${encodeURIComponent(input.range)}:append`,
+        params: { insertDataOption: "INSERT_ROWS", valueInputOption: "USER_ENTERED" },
+      }),
+      target: (input) => `${input.spreadsheetId}:${input.range}`,
+    }),
+    createWriteTool({
+      action: "create spreadsheet",
+      connectorId: "google-sheets",
+      description: "Create a Google Spreadsheet after approval unless Full Access is enabled.",
+      displayName: "Google Sheets",
+      inputSchema: sheetsCreateInput,
+      name: "sheets_create_spreadsheet",
+      request: (input) => ({
+        data: {
+          properties: { title: input.title },
+          ...(input.sheets?.length
+            ? { sheets: input.sheets.map((sheet) => ({ properties: sheet })) }
+            : {}),
+        },
+        endpoint: "/v4/spreadsheets",
+      }),
+      target: (input) => input.title,
+    }),
+    createExecuteTool("google-sheets", "sheets_execute", "Google Sheets"),
+
+    createReadTool({
+      connectorId: "google-docs",
+      description: "Get a Google Docs document.",
+      inputSchema: docsDocumentInput,
+      name: "docs_get_document",
+      request: (input) => ({
+        endpoint: `/v1/documents/${encodeURIComponent(input.documentId)}`,
+      }),
+    }),
+    createReadTool({
+      connectorId: "google-docs",
+      description: "Export a Google Doc as plain text.",
+      inputSchema: docsDocumentInput,
+      name: "docs_export_text",
+      request: (input) => ({
+        endpoint: `/drive/v3/files/${encodeURIComponent(input.documentId)}/export`,
+        params: { mimeType: "text/plain" },
+      }),
+    }),
+    createReadTool({
+      connectorId: "google-docs",
+      description: "Search Google Drive for Docs files.",
+      inputSchema: docsSearchInput,
+      name: "docs_search_drive_docs",
+      request: (input) => ({
+        endpoint: "/drive/v3/files",
+        params: {
+          fields: "files(id,name,mimeType,modifiedTime,webViewLink)",
+          pageSize: optionalLimit(input.maxResults, 10),
+          q: driveMimeQuery("application/vnd.google-apps.document", input.query),
+        },
+      }),
+    }),
+    createWriteTool({
+      action: "create document",
+      connectorId: "google-docs",
+      description: "Create a Google Doc after approval unless Full Access is enabled.",
+      displayName: "Google Docs",
+      inputSchema: docsCreateInput,
+      name: "docs_create_document",
+      request: (input) => ({
+        data: { title: input.title },
+        endpoint: "/v1/documents",
+      }),
+      target: (input) => input.title,
+    }),
+    createWriteTool({
+      action: "insert text",
+      connectorId: "google-docs",
+      description: "Insert text into a Google Doc after approval unless Full Access is enabled.",
+      displayName: "Google Docs",
+      inputSchema: docsInsertTextInput,
+      name: "docs_insert_text",
+      request: (input) => ({
+        data: {
+          requests: [{ insertText: { location: { index: input.index }, text: input.text } }],
+        },
+        endpoint: `/v1/documents/${encodeURIComponent(input.documentId)}:batchUpdate`,
+      }),
+      target: (input) => input.documentId,
+    }),
+    createWriteTool({
+      action: "batch update",
+      connectorId: "google-docs",
+      description: "Batch update a Google Doc after approval unless Full Access is enabled.",
+      displayName: "Google Docs",
+      inputSchema: docsBatchUpdateInput,
+      name: "docs_batch_update",
+      request: (input) => ({
+        data: { requests: input.requests },
+        endpoint: `/v1/documents/${encodeURIComponent(input.documentId)}:batchUpdate`,
+      }),
+      target: (input) => input.documentId,
+    }),
+    createExecuteTool("google-docs", "docs_execute", "Google Docs"),
+
+    createReadTool({
+      connectorId: "zapier",
+      description: "List Zapier Zaps.",
+      inputSchema: zapierListInput,
+      name: "zapier_list_zaps",
+      request: () => ({ endpoint: "/api/v1/zaps" }),
+    }),
+    createReadTool({
+      connectorId: "zapier",
+      description: "Get one Zapier Zap.",
+      inputSchema: zapierGetInput,
+      name: "zapier_get_zap",
+      request: (input) => ({ endpoint: `/api/v1/zaps/${encodeURIComponent(input.zapId)}` }),
+    }),
+    createReadTool({
+      connectorId: "zapier",
+      description: "Read Zapier task history.",
+      inputSchema: zapierHistoryInput,
+      name: "zapier_get_task_history",
+      request: (input) => ({
+        endpoint: "/api/v1/task-history",
+        params: {
+          ...(input.zapId ? { zap_id: input.zapId } : {}),
+          limit: optionalLimit(input.maxResults, 20),
+        },
+      }),
+    }),
+    createWriteTool({
+      action: "trigger Zap",
+      connectorId: "zapier",
+      description: "Trigger one Zapier Zap after approval unless Full Access is enabled.",
+      displayName: "Zapier",
+      forbidden: (input) =>
+        JSON.stringify(input.payload).toLowerCase().includes("all zaps")
+          ? "Broad Zap fan-out is denied in Phase 6."
+          : null,
+      inputSchema: zapierTriggerInput,
+      name: "zapier_trigger_zap",
+      request: (input) => ({
+        data: input.payload,
+        endpoint: `/api/v1/zaps/${encodeURIComponent(input.zapId)}/trigger`,
+      }),
+      target: (input) => input.zapId,
+    }),
+    createWriteTool({
+      action: "enable Zap",
+      connectorId: "zapier",
+      description: "Enable one Zap after approval unless Full Access is enabled.",
+      displayName: "Zapier",
+      inputSchema: zapierToggleInput,
+      name: "zapier_enable_zap",
+      request: (input) => ({ endpoint: `/api/v1/zaps/${encodeURIComponent(input.zapId)}/enable` }),
+      target: (input) => input.zapId,
+    }),
+    createWriteTool({
+      action: "disable Zap",
+      connectorId: "zapier",
+      description: "Disable one Zap after approval unless Full Access is enabled.",
+      displayName: "Zapier",
+      inputSchema: zapierToggleInput,
+      name: "zapier_disable_zap",
+      request: (input) => ({ endpoint: `/api/v1/zaps/${encodeURIComponent(input.zapId)}/disable` }),
+      target: (input) => input.zapId,
+    }),
+    createExecuteTool("zapier", "zapier_execute", "Zapier"),
+
+    createObsidianReadTool({
+      description: "Search Markdown notes inside the configured Obsidian vault.",
+      inputSchema: obsidianSearchInput,
+      name: "obsidian_search",
+      async run(input, context) {
+        const { target: vaultPath } = await enforceObsidianRead(context, ".");
+        const matches: Array<{ path: string; preview: string }> = [];
+        async function walk(dir: string) {
+          const entries = await fs.readdir(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.name === ".obsidian") continue;
+            const full = join(dir, entry.name);
+            if (entry.isDirectory()) await walk(full);
+            if (entry.isFile() && extname(entry.name).toLowerCase() === ".md") {
+              const content = await fs.readFile(full, "utf8");
+              if (content.toLowerCase().includes(input.query.toLowerCase())) {
+                matches.push({
+                  path: relative(vaultPath, full),
+                  preview: content.slice(0, 500),
+                });
+              }
+            }
+            if (matches.length >= optionalLimit(input.maxResults, 10)) return;
+          }
+        }
+        await walk(vaultPath);
+        return { matches };
+      },
+    }),
+    createObsidianReadTool({
+      description: "Read one note inside the configured Obsidian vault.",
+      inputSchema: obsidianPathInput,
+      name: "obsidian_read_note",
+      async run(input, context) {
+        const { target } = await enforceObsidianRead(context, input.path);
+        return { content: await fs.readFile(target, "utf8"), path: input.path };
+      },
+    }),
+    createObsidianReadTool({
+      description: "List Markdown notes inside a folder in the configured Obsidian vault.",
+      inputSchema: obsidianListInput,
+      name: "obsidian_list_notes",
+      async run(input, context) {
+        const { target, vaultPath } = await enforceObsidianRead(context, input.folder ?? ".");
+        const entries = await fs.readdir(target, { withFileTypes: true });
+        return {
+          notes: entries
+            .filter((entry) => entry.isFile() && extname(entry.name).toLowerCase() === ".md")
+            .map((entry) => relative(vaultPath, join(target, entry.name))),
+        };
+      },
+    }),
+    createObsidianWriteTool({
+      action: "create note",
+      description: "Create a Markdown note inside the configured Obsidian vault.",
+      inputSchema: obsidianWriteInput,
+      name: "obsidian_create_note",
+      async run(input, context) {
+        const { target } = await enforceObsidianWrite(context, input.path);
+        await fs.mkdir(dirname(target), { recursive: true });
+        await fs.writeFile(target, input.content, { flag: "wx" });
+        return { path: input.path, written: true };
+      },
+      target: (input) => input.path,
+    }),
+    createObsidianWriteTool({
+      action: "update note",
+      description: "Replace or append to a Markdown note inside the configured Obsidian vault.",
+      inputSchema: obsidianUpdateInput,
+      name: "obsidian_update_note",
+      async run(input, context) {
+        const { target } = await enforceObsidianWrite(context, input.path);
+        if (input.mode === "append") {
+          await fs.appendFile(target, input.content);
+        } else {
+          await fs.writeFile(target, input.content);
+        }
+        return { mode: input.mode, path: input.path, written: true };
+      },
+      target: (input) => input.path,
+    }),
+    createObsidianWriteTool({
+      action: "append note",
+      description: "Append to a Markdown note inside the configured Obsidian vault.",
+      inputSchema: obsidianWriteInput,
+      name: "obsidian_append_note",
+      async run(input, context) {
+        const { target } = await enforceObsidianWrite(context, input.path);
+        await fs.appendFile(target, input.content);
+        return { path: input.path, written: true };
+      },
+      target: (input) => input.path,
+    }),
+    createExecuteTool("obsidian", "obsidian_execute", "Obsidian"),
   ];
 }

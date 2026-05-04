@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v20";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v21";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -232,6 +232,10 @@ const PHASE_3_BROWSER_AND_COMPUTER_USE_PROMPT = `
   same approval/forbidden-pattern discipline, and destructive actions such as
   deleting calendar events, cancelling deployments, or rolling back deployments
   always require approval.
+- Tier 3 integration tools are available for Google Sheets, Google Docs,
+  Zapier, and Obsidian. Obsidian is a local-vault connector, not Nango; it can
+  only read and write inside the configured vault path and must never attempt to
+  escape that vault or edit .obsidian configuration.
 </available_phase_3_tools>
 
 Phase 3 prompt version: ${SYSTEM_PROMPT_VERSION}
