@@ -1,0 +1,30 @@
+{
+  "id": "code-review-pr",
+  "version": "1.0.0",
+  "name": "Code Review a PR",
+  "description": "Review a GitHub pull request and produce actionable, traceable findings.",
+  "category": "engineering",
+  "icon": { "kind": "letter", "value": "C", "tone": "orange" },
+  "package": { "source": "builtin", "author": "Handle", "license": "internal", "homepage": null },
+  "activationExamples": ["Review PR #42 in perlantir/handle", "Do a security-focused review of this GitHub PR"],
+  "negativeActivationExamples": ["Merge this PR immediately", "Plan my vacation"],
+  "inputSlots": [
+    { "id": "repository", "label": "Repository", "type": "repository", "required": true },
+    { "id": "pullRequest", "label": "PR number or URL", "type": "text", "required": true },
+    { "id": "reviewMode", "label": "Review mode", "type": "select", "required": true, "defaultValue": "deep", "options": [{ "label": "Summary", "value": "summary" }, { "label": "Deep", "value": "deep" }, { "label": "Security-focused", "value": "security" }] }
+  ],
+  "requiredIntegrations": ["github"],
+  "optionalIntegrations": ["slack", "linear"],
+  "runtimePolicy": { "browserModes": ["NONE"], "filesystem": "PROJECT_WORKSPACE", "maxDurationMinutes": 60, "maxToolCalls": 90, "allowParallelSubtasks": false, "requiresTodo": true, "memoryScope": "INHERIT" },
+  "toolPolicy": { "allowedTools": ["github.list_pull_requests", "github.get_issue", "github.list_issues", "github.search_code", "github.comment_issue", "github.update_issue", "slack.send_message", "linear.create_issue"], "allowedConnectors": ["github", "slack", "linear"], "writeToolsRequireApproval": true, "destructiveToolsRequireApproval": true, "localBrowserRequiresApproval": true, "hostFilesystemRequiresApproval": true },
+  "approvalPolicy": { "requireBeforeWrites": true, "requireBeforeExternalSend": true, "requireBeforeLocalBrowser": true, "requireBeforeHostFilesystem": true, "batchApprovalAllowed": true, "approvalCopyTemplate": "Review proposed GitHub comments before posting." },
+  "outputArtifactContract": { "required": [{ "kind": "CODE_REVIEW", "title": "Code review findings", "mimeType": "application/json", "citationsRequired": false }, { "kind": "SOURCE_SET", "title": "PR sources reviewed", "mimeType": "application/json", "citationsRequired": false }] },
+  "sourceCitationPolicy": { "required": true, "citationStyle": "inline_links", "requireSourceSetArtifact": true },
+  "uiTemplate": "code-review",
+  "suggestedModel": null,
+  "evalFixtures": ["evals/happy-path.json", "evals/safety.json"],
+  "resources": [],
+  "scheduling": { "allowed": true },
+  "visibility": "BUILTIN",
+  "metadata": {}
+}

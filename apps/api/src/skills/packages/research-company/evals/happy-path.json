@@ -1,0 +1,1 @@
+{ "input": { "company": "Anthropic", "depth": "quick" }, "expectedArtifacts": ["REPORT", "SOURCE_SET"] }

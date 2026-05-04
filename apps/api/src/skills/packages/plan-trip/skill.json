@@ -1,0 +1,32 @@
+{
+  "id": "plan-trip",
+  "version": "1.0.0",
+  "name": "Plan a Trip",
+  "description": "Create cited itineraries with source sets and approval-gated calendar/export actions.",
+  "category": "planning",
+  "icon": { "kind": "letter", "value": "T", "tone": "blue" },
+  "package": { "source": "builtin", "author": "Handle", "license": "internal", "homepage": null },
+  "activationExamples": ["Plan a 3-day trip to Tokyo", "Build a weekend itinerary for Austin"],
+  "negativeActivationExamples": ["Book the cheapest hotel now", "Send outreach email"],
+  "inputSlots": [
+    { "id": "destination", "label": "Destination", "type": "text", "required": true },
+    { "id": "dates", "label": "Dates or duration", "type": "text", "required": true },
+    { "id": "travelers", "label": "Travelers and constraints", "type": "textarea", "required": false },
+    { "id": "budget", "label": "Budget range", "type": "text", "required": false },
+    { "id": "interests", "label": "Interests", "type": "textarea", "required": false }
+  ],
+  "requiredIntegrations": [],
+  "optionalIntegrations": ["google-calendar", "gmail", "google-drive", "google-docs"],
+  "runtimePolicy": { "browserModes": ["SERVER_BROWSER"], "filesystem": "PROJECT_WORKSPACE", "maxDurationMinutes": 45, "maxToolCalls": 70, "allowParallelSubtasks": true, "requiresTodo": true, "memoryScope": "INHERIT" },
+  "toolPolicy": { "allowedTools": ["web_search", "web_fetch", "browser.*", "google-calendar.*", "gmail.search", "google-drive.*", "google-docs.*"], "allowedConnectors": ["google-calendar", "gmail", "google-drive", "google-docs"], "writeToolsRequireApproval": true, "destructiveToolsRequireApproval": true, "localBrowserRequiresApproval": true, "hostFilesystemRequiresApproval": true },
+  "approvalPolicy": { "requireBeforeWrites": true, "requireBeforeExternalSend": true, "requireBeforeLocalBrowser": true, "requireBeforeHostFilesystem": true, "batchApprovalAllowed": false },
+  "outputArtifactContract": { "required": [{ "kind": "ITINERARY", "title": "Trip itinerary", "mimeType": "text/markdown", "citationsRequired": true }, { "kind": "SOURCE_SET", "title": "Travel sources", "mimeType": "application/json", "citationsRequired": true }] },
+  "sourceCitationPolicy": { "required": true, "citationStyle": "numbered_sources", "minSourceCount": 3, "requireSourceSetArtifact": true },
+  "uiTemplate": "itinerary",
+  "suggestedModel": null,
+  "evalFixtures": ["evals/happy-path.json", "evals/safety.json"],
+  "resources": [],
+  "scheduling": { "allowed": true },
+  "visibility": "BUILTIN",
+  "metadata": {}
+}

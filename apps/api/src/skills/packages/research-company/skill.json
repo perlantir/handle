@@ -1,0 +1,30 @@
+{
+  "id": "research-company",
+  "version": "1.0.0",
+  "name": "Research a Company",
+  "description": "Deep company research with cited report and source-set artifacts.",
+  "category": "research",
+  "icon": { "kind": "letter", "value": "R", "tone": "violet" },
+  "package": { "source": "builtin", "author": "Handle", "license": "internal", "homepage": null },
+  "activationExamples": ["Research Anthropic", "Create a cited company brief for Vercel"],
+  "negativeActivationExamples": ["What is 2+2?", "Draft a cold email"],
+  "inputSlots": [
+    { "id": "company", "label": "Company name or URL", "type": "text", "required": true },
+    { "id": "depth", "label": "Depth", "type": "select", "required": true, "defaultValue": "standard", "options": [{ "label": "Quick", "value": "quick" }, { "label": "Standard", "value": "standard" }, { "label": "Deep", "value": "deep" }] },
+    { "id": "focusAreas", "label": "Focus areas", "type": "multi_select", "required": false, "options": [{ "label": "Product", "value": "product" }, { "label": "Market", "value": "market" }, { "label": "Leadership", "value": "leadership" }, { "label": "Financials", "value": "financials" }, { "label": "Competitors", "value": "competitors" }] }
+  ],
+  "requiredIntegrations": [],
+  "optionalIntegrations": ["notion", "google-drive", "google-docs"],
+  "runtimePolicy": { "browserModes": ["SERVER_BROWSER"], "filesystem": "PROJECT_WORKSPACE", "maxDurationMinutes": 45, "maxToolCalls": 80, "allowParallelSubtasks": true, "requiresTodo": true, "memoryScope": "INHERIT" },
+  "toolPolicy": { "allowedTools": ["web_search", "web_fetch", "browser.*", "notion.create_page", "google-docs.*", "google-drive.*"], "allowedConnectors": ["notion", "google-drive", "google-docs"], "writeToolsRequireApproval": true, "destructiveToolsRequireApproval": true, "localBrowserRequiresApproval": true, "hostFilesystemRequiresApproval": true },
+  "approvalPolicy": { "requireBeforeWrites": true, "requireBeforeExternalSend": true, "requireBeforeLocalBrowser": true, "requireBeforeHostFilesystem": true, "batchApprovalAllowed": false },
+  "outputArtifactContract": { "required": [{ "kind": "REPORT", "title": "Company research report", "mimeType": "text/markdown", "citationsRequired": true }, { "kind": "SOURCE_SET", "title": "Research sources", "mimeType": "application/json", "citationsRequired": true }] },
+  "sourceCitationPolicy": { "required": true, "citationStyle": "numbered_sources", "minSourceCount": 3, "requireSourceSetArtifact": true },
+  "uiTemplate": "wide-research",
+  "suggestedModel": null,
+  "evalFixtures": ["evals/happy-path.json", "evals/safety.json"],
+  "resources": [],
+  "scheduling": { "allowed": true },
+  "visibility": "BUILTIN",
+  "metadata": {}
+}

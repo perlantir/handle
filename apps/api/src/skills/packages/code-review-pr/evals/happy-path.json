@@ -1,0 +1,1 @@
+{ "input": { "repository": "perlantir/handle", "pullRequest": "42", "reviewMode": "summary" }, "expectedArtifacts": ["CODE_REVIEW", "SOURCE_SET"] }

@@ -1,0 +1,1 @@
+{ "input": { "notionTarget": "fixture-workspace", "summaryStyle": "executive" }, "expectedArtifacts": ["NOTION_SUMMARY", "SOURCE_SET"] }

@@ -1,0 +1,32 @@
+{
+  "id": "email-outreach",
+  "version": "1.0.0",
+  "name": "Email Outreach",
+  "description": "Draft and approval-gate personalized outreach email batches.",
+  "category": "communication",
+  "icon": { "kind": "letter", "value": "E", "tone": "green" },
+  "package": { "source": "builtin", "author": "Handle", "license": "internal", "homepage": null },
+  "activationExamples": ["Draft outreach emails for these contacts", "Create a follow-up campaign"],
+  "negativeActivationExamples": ["Send this to everyone in my inbox", "Research a company"],
+  "inputSlots": [
+    { "id": "recipients", "label": "Recipients or source", "type": "textarea", "required": true },
+    { "id": "campaignGoal", "label": "Campaign goal", "type": "textarea", "required": true },
+    { "id": "tone", "label": "Tone", "type": "select", "required": true, "defaultValue": "friendly", "options": [{ "label": "Friendly", "value": "friendly" }, { "label": "Concise", "value": "concise" }, { "label": "Formal", "value": "formal" }] },
+    { "id": "callToAction", "label": "Call to action", "type": "text", "required": true },
+    { "id": "senderContext", "label": "Sender context", "type": "textarea", "required": false }
+  ],
+  "requiredIntegrations": ["gmail"],
+  "optionalIntegrations": ["notion", "google-sheets", "google-docs", "google-drive"],
+  "runtimePolicy": { "browserModes": ["NONE"], "filesystem": "PROJECT_WORKSPACE", "maxDurationMinutes": 30, "maxToolCalls": 50, "allowParallelSubtasks": false, "requiresTodo": true, "memoryScope": "INHERIT" },
+  "toolPolicy": { "allowedTools": ["gmail.search", "gmail.get_message", "gmail.list_labels", "gmail.send", "notion.search", "google-sheets.*", "google-docs.*", "google-drive.*"], "allowedConnectors": ["gmail", "notion", "google-sheets", "google-docs", "google-drive"], "writeToolsRequireApproval": true, "destructiveToolsRequireApproval": true, "localBrowserRequiresApproval": true, "hostFilesystemRequiresApproval": true },
+  "approvalPolicy": { "requireBeforeRun": false, "requireBeforeWrites": true, "requireBeforeExternalSend": true, "requireBeforeLocalBrowser": true, "requireBeforeHostFilesystem": true, "batchApprovalAllowed": true, "approvalCopyTemplate": "Review every email draft before sending." },
+  "outputArtifactContract": { "required": [{ "kind": "EMAIL_DRAFTS", "title": "Email draft batch", "mimeType": "application/json", "citationsRequired": false }] },
+  "sourceCitationPolicy": { "required": false, "citationStyle": "inline_links", "requireSourceSetArtifact": false },
+  "uiTemplate": "draft-review",
+  "suggestedModel": null,
+  "evalFixtures": ["evals/happy-path.json", "evals/safety.json"],
+  "resources": [],
+  "scheduling": { "allowed": true },
+  "visibility": "BUILTIN",
+  "metadata": { "batchLimit": 20 }
+}

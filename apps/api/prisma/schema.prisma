@@ -322,6 +322,181 @@ model SharedMemoryNamespace {
   @@index([parentRunId])
 }
 
+enum SkillSourceType {
+  BUILTIN
+  CUSTOM
+  IMPORTED
+}
+
+enum SkillVisibility {
+  BUILTIN
+  PERSONAL
+  PROJECT
+}
+
+enum SkillRunStatus {
+  QUEUED
+  RUNNING
+  WAITING
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum SkillRunTrigger {
+  MANUAL
+  SCHEDULED
+  WORKFLOW
+  API
+  SUGGESTED
+}
+
+enum SkillRunStepType {
+  PLAN
+  TOOL
+  APPROVAL
+  ARTIFACT
+  MEMORY
+  BROWSER
+  COMPUTER
+  CRITIC
+  WORKFLOW
+  SCHEDULE
+  ERROR
+}
+
+enum SkillArtifactKind {
+  REPORT
+  SOURCE_SET
+  EMAIL_DRAFTS
+  ITINERARY
+  CODE_REVIEW
+  NOTION_SUMMARY
+  EXECUTION_PLAN
+  FILE
+  BROWSER_SESSION_SUMMARY
+  TRACE_SUMMARY
+  CUSTOM_JSON
+  CUSTOM_MARKDOWN
+}
+
+model Skill {
+  id                         String          @id @default(cuid())
+  slug                       String
+  version                    String
+  sourceType                 SkillSourceType
+  visibility                 SkillVisibility
+  ownerUserId                String?
+  projectId                  String?
+  name                       String
+  description                String
+  category                   String
+  icon                       Json            @default("{}")
+  packageMetadata            Json            @default("{}")
+  packagePath                String?
+  skillMd                    String
+  activationExamples         Json            @default("[]")
+  negativeActivationExamples Json            @default("[]")
+  inputSlots                 Json            @default("[]")
+  requiredIntegrations       String[]        @default([])
+  optionalIntegrations       String[]        @default([])
+  runtimePolicy              Json            @default("{}")
+  toolPolicy                 Json            @default("{}")
+  approvalPolicy             Json            @default("{}")
+  outputArtifactContract     Json            @default("{}")
+  sourceCitationPolicy       Json            @default("{}")
+  uiTemplate                 String          @default("standard")
+  suggestedProvider          String?
+  suggestedModel             String?
+  evalFixtures               Json            @default("[]")
+  reusableResources          Json            @default("[]")
+  schedulingConfig           Json            @default("{}")
+  customMetadata             Json            @default("{}")
+  enabled                    Boolean         @default(true)
+  archivedAt                 DateTime?
+  createdAt                  DateTime        @default(now())
+  updatedAt                  DateTime        @updatedAt
+  runs                       SkillRun[]
+
+  @@unique([slug, version, sourceType, ownerUserId, projectId])
+  @@index([visibility, projectId])
+  @@index([ownerUserId, updatedAt])
+}
+
+model SkillRun {
+  id                 String          @id @default(cuid())
+  skillId            String
+  skill              Skill           @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  userId             String
+  projectId          String?
+  conversationId     String?
+  agentRunId         String?
+  temporalWorkflowId String?
+  temporalRunId      String?
+  trigger            SkillRunTrigger @default(MANUAL)
+  status             SkillRunStatus  @default(QUEUED)
+  inputs             Json            @default("{}")
+  effectivePolicies  Json            @default("{}")
+  providerId         String?
+  modelName          String?
+  resultSummary      String?
+  errorCode          String?
+  errorMessage       String?
+  costUsd            Decimal?        @db.Decimal(10, 4)
+  startedAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  steps              SkillRunStep[]
+  artifacts          SkillArtifact[]
+
+  @@index([skillId, createdAt])
+  @@index([userId, status, createdAt])
+  @@index([projectId, createdAt])
+  @@index([agentRunId])
+}
+
+model SkillRunStep {
+  id             String           @id @default(cuid())
+  skillRunId     String
+  skillRun       SkillRun         @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
+  index          Int
+  type           SkillRunStepType
+  title          String
+  status         String
+  safeSummary    String
+  toolName       String?
+  connectorId    String?
+  approvalId     String?
+  artifactId     String?
+  redactedInput  Json             @default("{}")
+  redactedOutput Json             @default("{}")
+  metadata       Json             @default("{}")
+  startedAt      DateTime         @default(now())
+  completedAt    DateTime?
+
+  @@unique([skillRunId, index])
+  @@index([skillRunId, type])
+}
+
+model SkillArtifact {
+  id             String            @id @default(cuid())
+  skillRunId     String
+  skillRun       SkillRun          @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
+  kind           SkillArtifactKind
+  title          String
+  mimeType       String
+  inlineContent  String?
+  contentRef     String?
+  metadata       Json              @default("{}")
+  citations      Json              @default("[]")
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([skillRunId, kind])
+}
+
 model ApprovalRequest {
   id          String    @id @default(cuid())
   taskId      String

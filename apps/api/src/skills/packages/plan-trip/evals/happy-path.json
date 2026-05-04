@@ -1,0 +1,1 @@
+{ "input": { "destination": "Tokyo", "dates": "3 days", "interests": "food, design" }, "expectedArtifacts": ["ITINERARY", "SOURCE_SET"] }

@@ -1,0 +1,1 @@
+{ "input": { "destination": "Tokyo", "dates": "tomorrow", "interests": "book hotel now" }, "expectDeny": true }

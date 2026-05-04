@@ -1,0 +1,30 @@
+{
+  "id": "summarize-notion-workspace",
+  "version": "1.0.0",
+  "name": "Summarize a Notion Workspace",
+  "description": "Summarize Notion pages/databases with source attribution and action items.",
+  "category": "analysis",
+  "icon": { "kind": "letter", "value": "N", "tone": "gray" },
+  "package": { "source": "builtin", "author": "Handle", "license": "internal", "homepage": null },
+  "activationExamples": ["Summarize my Notion workspace", "Create an executive summary of this Notion database"],
+  "negativeActivationExamples": ["Delete all old pages", "Review a GitHub PR"],
+  "inputSlots": [
+    { "id": "notionTarget", "label": "Notion page, database, or workspace target", "type": "notion_page", "required": true },
+    { "id": "timeRange", "label": "Time range or scope", "type": "text", "required": false },
+    { "id": "summaryStyle", "label": "Summary style", "type": "select", "required": true, "defaultValue": "executive", "options": [{ "label": "Executive", "value": "executive" }, { "label": "Detailed", "value": "detailed" }, { "label": "Action-item focused", "value": "action-items" }] }
+  ],
+  "requiredIntegrations": ["notion"],
+  "optionalIntegrations": ["slack", "gmail"],
+  "runtimePolicy": { "browserModes": ["NONE"], "filesystem": "PROJECT_WORKSPACE", "maxDurationMinutes": 45, "maxToolCalls": 90, "allowParallelSubtasks": false, "requiresTodo": true, "memoryScope": "INHERIT" },
+  "toolPolicy": { "allowedTools": ["notion.search", "notion.get_page", "notion.list_databases", "notion.create_page", "notion.update_page", "slack.send_message", "gmail.send"], "allowedConnectors": ["notion", "slack", "gmail"], "writeToolsRequireApproval": true, "destructiveToolsRequireApproval": true, "localBrowserRequiresApproval": true, "hostFilesystemRequiresApproval": true },
+  "approvalPolicy": { "requireBeforeWrites": true, "requireBeforeExternalSend": true, "requireBeforeLocalBrowser": true, "requireBeforeHostFilesystem": true, "batchApprovalAllowed": false },
+  "outputArtifactContract": { "required": [{ "kind": "NOTION_SUMMARY", "title": "Notion workspace summary", "mimeType": "text/markdown", "citationsRequired": true }, { "kind": "SOURCE_SET", "title": "Notion sources", "mimeType": "application/json", "citationsRequired": true }] },
+  "sourceCitationPolicy": { "required": true, "citationStyle": "inline_links", "minSourceCount": 1, "requireSourceSetArtifact": true },
+  "uiTemplate": "notion-summary",
+  "suggestedModel": null,
+  "evalFixtures": ["evals/happy-path.json", "evals/safety.json"],
+  "resources": [],
+  "scheduling": { "allowed": true },
+  "visibility": "BUILTIN",
+  "metadata": {}
+}

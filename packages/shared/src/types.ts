@@ -449,3 +449,192 @@ export interface HealthResponse {
   };
   timestamp: string;
 }
+
+export type SkillSourceType = 'BUILTIN' | 'CUSTOM' | 'IMPORTED';
+export type SkillVisibility = 'BUILTIN' | 'PERSONAL' | 'PROJECT';
+export type SkillRunStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'WAITING'
+  | 'PAUSED'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+export type SkillRunTrigger = 'MANUAL' | 'SCHEDULED' | 'WORKFLOW' | 'API' | 'SUGGESTED';
+export type SkillRunStepType =
+  | 'PLAN'
+  | 'TOOL'
+  | 'APPROVAL'
+  | 'ARTIFACT'
+  | 'MEMORY'
+  | 'BROWSER'
+  | 'COMPUTER'
+  | 'CRITIC'
+  | 'WORKFLOW'
+  | 'SCHEDULE'
+  | 'ERROR';
+export type SkillArtifactKind =
+  | 'REPORT'
+  | 'SOURCE_SET'
+  | 'EMAIL_DRAFTS'
+  | 'ITINERARY'
+  | 'CODE_REVIEW'
+  | 'NOTION_SUMMARY'
+  | 'EXECUTION_PLAN'
+  | 'FILE'
+  | 'BROWSER_SESSION_SUMMARY'
+  | 'TRACE_SUMMARY'
+  | 'CUSTOM_JSON'
+  | 'CUSTOM_MARKDOWN';
+
+export interface SkillIconSummary {
+  kind: 'letter' | 'icon';
+  tone?: string | undefined;
+  value: string;
+}
+
+export interface SkillInputSlotSummary {
+  id: string;
+  label: string;
+  description?: string | undefined;
+  type:
+    | 'text'
+    | 'textarea'
+    | 'url'
+    | 'email'
+    | 'number'
+    | 'select'
+    | 'multi_select'
+    | 'date'
+    | 'file'
+    | 'integration_account'
+    | 'repository'
+    | 'notion_page'
+    | 'calendar_range';
+  required: boolean;
+  defaultValue?: unknown;
+  options?: Array<{ label: string; value: string }> | undefined;
+  validation?: Record<string, unknown> | undefined;
+}
+
+export interface SkillSummary {
+  id: string;
+  slug: string;
+  version: string;
+  sourceType: SkillSourceType;
+  visibility: SkillVisibility;
+  name: string;
+  description: string;
+  category: string;
+  icon: SkillIconSummary;
+  requiredIntegrations: IntegrationConnectorId[];
+  optionalIntegrations: IntegrationConnectorId[];
+  inputSlots: SkillInputSlotSummary[];
+  uiTemplate: string;
+  enabled: boolean;
+  recentRun?: SkillRunSummary | null;
+  runCount: number;
+  status: 'ready' | 'needs_integration' | 'disabled' | 'validation_error';
+  missingIntegrations: IntegrationConnectorId[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SkillMarkdownSection {
+  title: string;
+  content: string;
+}
+
+export interface SkillDetail extends SkillSummary {
+  skillMd: string;
+  markdownSections: SkillMarkdownSection[];
+  activationExamples: string[];
+  negativeActivationExamples: string[];
+  runtimePolicy: Record<string, unknown>;
+  toolPolicy: Record<string, unknown>;
+  approvalPolicy: Record<string, unknown>;
+  outputArtifactContract: Record<string, unknown>;
+  sourceCitationPolicy: Record<string, unknown>;
+  packageMetadata: Record<string, unknown>;
+  evalFixtures: unknown[];
+  reusableResources: unknown[];
+  schedulingConfig: Record<string, unknown>;
+  recentRuns: SkillRunSummary[];
+}
+
+export interface SkillRunStepSummary {
+  id: string;
+  index: number;
+  type: SkillRunStepType;
+  title: string;
+  status: string;
+  safeSummary: string;
+  toolName?: string | null;
+  connectorId?: string | null;
+  approvalId?: string | null;
+  artifactId?: string | null;
+  metadata?: Record<string, unknown>;
+  startedAt?: string;
+  completedAt?: string | null;
+}
+
+export interface SkillArtifactSummary {
+  id: string;
+  skillRunId: string;
+  kind: SkillArtifactKind;
+  title: string;
+  mimeType: string;
+  inlineContent?: string | null;
+  contentRef?: string | null;
+  metadata?: Record<string, unknown>;
+  citations: Array<Record<string, unknown>>;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SkillRunSummary {
+  id: string;
+  skillId: string;
+  skillSlug?: string;
+  skillName?: string;
+  userId?: string;
+  projectId?: string | null;
+  conversationId?: string | null;
+  agentRunId?: string | null;
+  trigger: SkillRunTrigger;
+  status: SkillRunStatus;
+  inputs: Record<string, unknown>;
+  resultSummary?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  artifactCount?: number;
+  stepCount?: number;
+}
+
+export interface SkillRunDetail extends SkillRunSummary {
+  skill?: SkillSummary;
+  steps: SkillRunStepSummary[];
+  artifacts: SkillArtifactSummary[];
+  effectivePolicies: Record<string, unknown>;
+  providerId?: string | null;
+  modelName?: string | null;
+}
+
+export interface RunSkillRequest {
+  backend?: 'e2b' | 'local';
+  conversationId?: string;
+  inputs: Record<string, unknown>;
+  memoryEnabled?: boolean;
+  modelName?: string;
+  projectId?: string;
+  providerId?: string;
+  trigger?: SkillRunTrigger;
+}
+
+export interface RunSkillResponse {
+  run: SkillRunDetail;
+}

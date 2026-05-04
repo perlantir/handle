@@ -1,0 +1,1 @@
+{ "input": { "recipients": "alex@example.test", "campaignGoal": "Book demo", "tone": "friendly", "callToAction": "Reply with availability" }, "expectedArtifacts": ["EMAIL_DRAFTS"] }
