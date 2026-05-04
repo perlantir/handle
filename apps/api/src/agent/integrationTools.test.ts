@@ -1,9 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IntegrationToolRuntime } from "../integrations/toolRuntime";
 import type { ToolExecutionContext } from "./toolRegistry";
 import { createTier1IntegrationToolDefinitions } from "./integrationTools";
 
-function context(runtime: IntegrationToolRuntime): ToolExecutionContext {
+function context(
+  runtime: IntegrationToolRuntime,
+  overrides: Partial<ToolExecutionContext> = {},
+): ToolExecutionContext {
   return {
     backend: {
       getWorkspaceDir: () => "/home/user",
@@ -13,6 +19,7 @@ function context(runtime: IntegrationToolRuntime): ToolExecutionContext {
     sandbox: { sandboxId: "sandbox-integration-test" } as ToolExecutionContext["sandbox"],
     taskId: "run-integration-test",
     userId: "user-integration-test",
+    ...overrides,
   };
 }
 
@@ -25,6 +32,20 @@ function tool(name: string) {
 }
 
 describe("Tier 1 integration read tools", () => {
+  const originalLogDir = process.env.HANDLE_LOG_DIR;
+
+  beforeEach(async () => {
+    process.env.HANDLE_LOG_DIR = await mkdtemp(join(tmpdir(), "handle-integration-tools-test-"));
+  });
+
+  afterEach(() => {
+    if (originalLogDir === undefined) {
+      delete process.env.HANDLE_LOG_DIR;
+    } else {
+      process.env.HANDLE_LOG_DIR = originalLogDir;
+    }
+  });
+
   it("routes GitHub issue listing through the selected connected account", async () => {
     const request = vi.fn().mockResolvedValue({
       accountAlias: "work",
@@ -79,7 +100,7 @@ describe("Tier 1 integration read tools", () => {
       context({ request }),
     );
 
-    expect(result).toContain("write actions are not enabled");
+    expect(result).toContain("does not perform writes directly");
     expect(request).not.toHaveBeenCalled();
   });
 
@@ -92,5 +113,72 @@ describe("Tier 1 integration read tools", () => {
     await expect(
       tool("github_list_issues").implementation({}, base),
     ).rejects.toThrow("authenticated user context");
+  });
+
+  it("requests approval for write tools in Ask mode", async () => {
+    const request = vi.fn();
+    const requestApproval = vi.fn().mockResolvedValue("denied");
+
+    const result = await tool("github_create_issue").implementation(
+      {
+        agentReason: "Create a tracked audit issue.",
+        owner: "perlantir",
+        repo: "handle",
+        title: "Audit issue",
+      },
+      context(
+        { request },
+        { projectPermissionMode: "ASK", requestApproval, projectId: "project-test" },
+      ),
+    );
+
+    expect(requestApproval).toHaveBeenCalledWith(
+      "run-integration-test",
+      expect.objectContaining({
+        action: "create issue",
+        agentReason: "Create a tracked audit issue.",
+        integration: "GitHub",
+        type: "destructive_integration_action",
+      }),
+    );
+    expect(request).not.toHaveBeenCalled();
+    expect(result).toContain("denied");
+  });
+
+  it("runs non-destructive write tools without approval in Full Access", async () => {
+    const request = vi.fn().mockResolvedValue({
+      accountAlias: "default",
+      connectorId: "github",
+      data: { number: 42, title: "Audit issue" },
+      endpoint: "/repos/perlantir/handle/issues",
+      method: "POST",
+    });
+    const requestApproval = vi.fn();
+
+    const result = await tool("github_create_issue").implementation(
+      { owner: "perlantir", repo: "handle", title: "Audit issue" },
+      context({ request }, { projectPermissionMode: "FULL_ACCESS", requestApproval }),
+    );
+
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectorId: "github",
+        endpoint: "/repos/perlantir/handle/issues",
+        method: "POST",
+      }),
+    );
+    expect(result).toContain("Audit issue");
+  });
+
+  it("denies forbidden Slack broadcast patterns without provider call", async () => {
+    const request = vi.fn();
+    const result = await tool("slack_send_message").implementation(
+      { channelId: "C123", text: "@channel deploy is live" },
+      context({ request }, { projectPermissionMode: "FULL_ACCESS" }),
+    );
+
+    expect(request).not.toHaveBeenCalled();
+    expect(result).toContain("forbidden pattern");
   });
 });

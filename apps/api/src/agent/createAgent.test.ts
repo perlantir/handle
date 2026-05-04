@@ -226,6 +226,16 @@ describe("createHandleAgent", () => {
       "github_search_code",
       "github_list_pull_requests",
       "github_execute",
+      "gmail_send",
+      "slack_send_message",
+      "notion_create_page",
+      "notion_update_page",
+      "drive_create_file",
+      "drive_copy_file",
+      "github_create_issue",
+      "github_comment_issue",
+      "github_update_issue",
+      "github_create_pull_request",
     ]);
   });
 

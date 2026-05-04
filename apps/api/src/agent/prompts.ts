@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v18";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v19";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -220,9 +220,13 @@ const PHASE_3_BROWSER_AND_COMPUTER_USE_PROMPT = `
   github_list_issues/get_issue/search_code/list_pull_requests. These are read-only
   in Phase 6 Stage 2.
 - gmail_execute, slack_execute, notion_execute, drive_execute, and github_execute
-  are read-only fallbacks in Stage 2. If the user asks them to write, send, create,
-  update, delete, or modify third-party data, they must report that write actions
-  are not enabled until Stage 3 instead of attempting the action.
+  are natural-language fallbacks. Prefer explicit tools for deterministic work.
+- Tier 1 integration write tools are available for connected accounts:
+  gmail_send, slack_send_message, notion_create_page/update_page,
+  drive_create_file/copy_file, and github_create_issue/comment_issue/update_issue/create_pull_request.
+  These tools request approval unless the project permission mode permits the
+  action. Include agentReason when calling a write tool so the approval modal
+  explains why the action is needed.
 </available_phase_3_tools>
 
 Phase 3 prompt version: ${SYSTEM_PROMPT_VERSION}

@@ -1,17 +1,20 @@
 import { randomUUID } from "node:crypto";
-import type { IntegrationConnectorId } from "@handle/shared";
+import type { ApprovalPayload, IntegrationConnectorId } from "@handle/shared";
 import { z } from "zod";
+import { hasApprovalGrant } from "../approvals/approvalGrants";
+import { awaitApproval } from "../approvals/approvalWaiter";
 import { IntegrationError } from "../integrations/nango/errors";
 import {
   createDefaultIntegrationToolRuntime,
   type IntegrationToolRuntime,
 } from "../integrations/toolRuntime";
+import { appendActionLog } from "../lib/actionLog";
 import { emitTaskEvent } from "../lib/eventBus";
 import { redactSecrets } from "../lib/redact";
 import type { ToolDefinition, ToolExecutionContext } from "./toolRegistry";
 import { displayToolName } from "./toolRegistry";
 
-type Method = "GET" | "POST";
+type Method = "GET" | "PATCH" | "POST";
 
 interface ProviderRequestSpec<T extends z.AnyZodObject> {
   connectorId: IntegrationConnectorId;
@@ -129,6 +132,103 @@ const executeInput = z.object({
   instruction: z.string().min(1),
 });
 
+const agentReason = z
+  .string()
+  .min(1)
+  .max(500)
+  .nullable()
+  .optional()
+  .describe("Optional concise reason to show the user in the approval modal.");
+
+const gmailSendInput = z.object({
+  accountAlias,
+  agentReason,
+  bcc: z.array(z.string().email()).max(20).nullable().optional(),
+  body: z.string().min(1).max(100_000),
+  cc: z.array(z.string().email()).max(20).nullable().optional(),
+  subject: z.string().min(1).max(500),
+  to: z.array(z.string().email()).min(1).max(20),
+});
+
+const slackSendInput = z.object({
+  accountAlias,
+  agentReason,
+  channelId: z.string().min(1),
+  text: z.string().min(1).max(40_000),
+});
+
+const notionCreatePageInput = z.object({
+  accountAlias,
+  agentReason,
+  content: z.string().max(20_000).nullable().optional(),
+  databaseId: z.string().min(1).nullable().optional(),
+  parentPageId: z.string().min(1).nullable().optional(),
+  title: z.string().min(1).max(500),
+});
+
+const notionUpdatePageInput = z.object({
+  accountAlias,
+  agentReason,
+  pageId: z.string().min(1),
+  patch: z.record(z.unknown()).describe("Notion page patch body."),
+});
+
+const driveCreateFileInput = z.object({
+  accountAlias,
+  agentReason,
+  mimeType: z.string().min(1).nullable().optional(),
+  name: z.string().min(1).max(500),
+  parents: z.array(z.string().min(1)).max(10).nullable().optional(),
+});
+
+const driveCopyFileInput = z.object({
+  accountAlias,
+  agentReason,
+  fileId: z.string().min(1),
+  name: z.string().min(1).max(500).nullable().optional(),
+  parents: z.array(z.string().min(1)).max(10).nullable().optional(),
+});
+
+const githubCreateIssueInput = z.object({
+  accountAlias,
+  agentReason,
+  body: z.string().max(65_000).nullable().optional(),
+  labels: z.array(z.string().min(1)).max(20).nullable().optional(),
+  owner: z.string().min(1),
+  repo: z.string().min(1),
+  title: z.string().min(1).max(500),
+});
+
+const githubCommentIssueInput = z.object({
+  accountAlias,
+  agentReason,
+  body: z.string().min(1).max(65_000),
+  issueNumber: z.number().int().positive(),
+  owner: z.string().min(1),
+  repo: z.string().min(1),
+});
+
+const githubUpdateIssueInput = z.object({
+  accountAlias,
+  agentReason,
+  issueNumber: z.number().int().positive(),
+  owner: z.string().min(1),
+  patch: z.record(z.unknown()),
+  repo: z.string().min(1),
+});
+
+const githubCreatePullRequestInput = z.object({
+  accountAlias,
+  agentReason,
+  base: z.string().min(1),
+  body: z.string().max(65_000).nullable().optional(),
+  draft: z.boolean().nullable().optional(),
+  head: z.string().min(1),
+  owner: z.string().min(1),
+  repo: z.string().min(1),
+  title: z.string().min(1).max(500),
+});
+
 const WRITE_VERB_PATTERN =
   /\b(send|create|update|delete|remove|archive|reply|post|upload|copy|share|invite|merge|close|reopen|assign|label|comment|write)\b/i;
 
@@ -220,6 +320,147 @@ function createReadTool<T extends z.AnyZodObject>(
   };
 }
 
+function actionContext(context: ToolExecutionContext) {
+  return {
+    conversationId: context.conversationId ?? context.taskId,
+    projectId: context.projectId ?? context.memoryProject?.id ?? "unknown",
+    taskId: context.taskId,
+  };
+}
+
+function isFullAccess(context: ToolExecutionContext) {
+  return context.projectPermissionMode === "FULL_ACCESS";
+}
+
+async function ensureIntegrationApproval({
+  action,
+  agentReason,
+  context,
+  destructive = false,
+  displayName,
+  target,
+}: {
+  action: string;
+  agentReason?: string | null;
+  context: ToolExecutionContext;
+  destructive?: boolean;
+  displayName: string;
+  target: string;
+}) {
+  if (!destructive && isFullAccess(context)) return { approved: true as const };
+
+  const request: ApprovalPayload = {
+    action,
+    integration: displayName,
+    reason: `${displayName} wants to ${action} ${target}.`,
+    target,
+    type: "destructive_integration_action",
+  };
+  if (agentReason) request.agentReason = agentReason;
+  if (
+    hasApprovalGrant(
+      {
+        ...(context.projectId ? { projectId: context.projectId } : {}),
+        taskId: context.taskId,
+      },
+      request,
+    )
+  ) {
+    return { approved: true as const };
+  }
+
+  const decision = await (context.requestApproval ?? awaitApproval)(context.taskId, request);
+  return decision === "approved"
+    ? { approved: true as const }
+    : { approved: false as const, decision };
+}
+
+function createWriteTool<T extends z.AnyZodObject>({
+  action,
+  connectorId,
+  description,
+  displayName,
+  forbidden,
+  inputSchema,
+  method = "POST",
+  name,
+  request,
+  target,
+}: ProviderRequestSpec<T> & {
+  action: string;
+  displayName: string;
+  forbidden?: (input: z.infer<T>) => string | null;
+  target: (input: z.infer<T>) => string;
+}): ToolDefinition {
+  return {
+    backendSupport: { e2b: true, local: true },
+    description,
+    inputSchema,
+    name,
+    requiresApproval: (input, context) =>
+      !isFullAccess(context) || Boolean(forbidden?.(input as z.infer<T>)),
+    sideEffectClass: "write",
+    async implementation(input, context) {
+      const parsed = inputSchema.parse(input);
+      const accountAlias = "accountAlias" in parsed ? parsed.accountAlias : undefined;
+      const callId = emitIntegrationToolCall(context, name, {
+        ...(accountAlias ? { accountAlias } : {}),
+        action,
+        target: target(parsed),
+      });
+
+      const forbiddenReason = forbidden?.(parsed);
+      if (forbiddenReason) {
+        const message = `${displayName} action denied by forbidden pattern: ${forbiddenReason}`;
+        emitIntegrationToolResult(context, callId, message, message);
+        return message;
+      }
+
+      const approval = await ensureIntegrationApproval({
+        action,
+        agentReason: "agentReason" in parsed ? parsed.agentReason : null,
+        context,
+        displayName,
+        target: target(parsed),
+      });
+      if (!approval.approved) {
+        const message = `${displayName} ${action} ${approval.decision}.`;
+        emitIntegrationToolResult(context, callId, message, message);
+        return message;
+      }
+
+      try {
+        const providerRequest = request(parsed);
+        const response = await runtimeFor(context).request({
+          ...(accountAlias ? { accountAlias } : {}),
+          connectorId,
+          ...(providerRequest.data !== undefined ? { data: providerRequest.data } : {}),
+          endpoint: providerRequest.endpoint,
+          method,
+          ...(providerRequest.params ? { params: providerRequest.params } : {}),
+          userId: requireUserId(context),
+        });
+        const output = formatProviderResponse(response.data);
+        emitIntegrationToolResult(context, callId, output);
+        await appendActionLog({
+          ...actionContext(context),
+          description: `${displayName} ${action}: ${target(parsed)}`,
+          metadata: { accountAlias: response.accountAlias, connectorId },
+          outcomeType: "integration_action",
+          reversible: false,
+          target: target(parsed),
+          timestamp: new Date().toISOString(),
+        });
+        return output;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        emitIntegrationToolResult(context, callId, "", message);
+        throw err;
+      }
+    },
+  };
+}
+
 function createExecuteTool(
   connectorId: IntegrationConnectorId,
   name: string,
@@ -239,8 +480,8 @@ function createExecuteTool(
         instruction: parsed.instruction,
       });
       const message = WRITE_VERB_PATTERN.test(parsed.instruction)
-        ? `${displayName} write actions are not enabled until Phase 6 Stage 3. Use the explicit read tools for read-only requests.`
-        : `${displayName} execute is read-only in Stage 2. Use the explicit ${connectorId} read tools for deterministic access.`;
+        ? `${displayName} execute does not perform writes directly. Use the explicit ${displayName} write tools so approval gates and action logging run.`
+        : `${displayName} execute is a read-only fallback. Use the explicit ${connectorId} read tools for deterministic access.`;
       emitIntegrationToolResult(context, callId, message);
       return message;
     },
@@ -277,6 +518,56 @@ function repoEndpoint(
   suffix: string,
 ) {
   return input.owner && input.repo ? `/repos/${input.owner}/${input.repo}${suffix}` : suffix;
+}
+
+function base64Url(value: string) {
+  return Buffer.from(value, "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function rfc822Message(input: z.infer<typeof gmailSendInput>) {
+  const headers = [
+    `To: ${input.to.join(", ")}`,
+    ...(input.cc?.length ? [`Cc: ${input.cc.join(", ")}`] : []),
+    ...(input.bcc?.length ? [`Bcc: ${input.bcc.join(", ")}`] : []),
+    `Subject: ${input.subject}`,
+    "Content-Type: text/plain; charset=UTF-8",
+  ];
+  return `${headers.join("\r\n")}\r\n\r\n${input.body}`;
+}
+
+function forbiddenSlackBroadcast(input: z.infer<typeof slackSendInput>) {
+  return /(^|\s)(@channel|@everyone|<!channel>|<!everyone>)(\s|$)/i.test(input.text)
+    ? "Slack broadcast mentions are denied in Phase 6."
+    : null;
+}
+
+function notionCreatePayload(input: z.infer<typeof notionCreatePageInput>) {
+  const parent = input.databaseId
+    ? { database_id: input.databaseId }
+    : { page_id: input.parentPageId };
+  return {
+    children: input.content
+      ? [
+          {
+            object: "block",
+            paragraph: {
+              rich_text: [{ text: { content: input.content }, type: "text" }],
+            },
+            type: "paragraph",
+          },
+        ]
+      : [],
+    parent,
+    properties: {
+      title: {
+        title: [{ text: { content: input.title }, type: "text" }],
+      },
+    },
+  };
 }
 
 export function createTier1IntegrationToolDefinitions(): ToolDefinition[] {
@@ -480,5 +771,162 @@ export function createTier1IntegrationToolDefinitions(): ToolDefinition[] {
       }),
     }),
     createExecuteTool("github", "github_execute", "GitHub"),
+
+    createWriteTool({
+      action: "send email",
+      connectorId: "gmail",
+      description: "Send a Gmail email after approval unless the project is in Full Access.",
+      displayName: "Gmail",
+      inputSchema: gmailSendInput,
+      name: "gmail_send",
+      request: (input) => ({
+        data: { raw: base64Url(rfc822Message(input)) },
+        endpoint: "/gmail/v1/users/me/messages/send",
+      }),
+      target: (input) => input.to.join(", "),
+    }),
+    createWriteTool({
+      action: "send message",
+      connectorId: "slack",
+      description: "Send a Slack message after approval unless the project is in Full Access.",
+      displayName: "Slack",
+      forbidden: forbiddenSlackBroadcast,
+      inputSchema: slackSendInput,
+      name: "slack_send_message",
+      request: (input) => ({
+        data: { channel: input.channelId, text: input.text },
+        endpoint: "/api/chat.postMessage",
+      }),
+      target: (input) => input.channelId,
+    }),
+    createWriteTool({
+      action: "create page",
+      connectorId: "notion",
+      description: "Create a Notion page after approval unless the project is in Full Access.",
+      displayName: "Notion",
+      forbidden: (input) =>
+        input.databaseId || input.parentPageId
+          ? null
+          : "Provide databaseId or parentPageId.",
+      inputSchema: notionCreatePageInput,
+      name: "notion_create_page",
+      request: (input) => ({
+        data: notionCreatePayload(input),
+        endpoint: "/v1/pages",
+      }),
+      target: (input) => input.databaseId ?? input.parentPageId ?? "Notion parent",
+    }),
+    createWriteTool({
+      action: "update page",
+      connectorId: "notion",
+      description: "Update a Notion page after approval unless the project is in Full Access.",
+      displayName: "Notion",
+      inputSchema: notionUpdatePageInput,
+      method: "PATCH",
+      name: "notion_update_page",
+      request: (input) => ({
+        data: input.patch,
+        endpoint: `/v1/pages/${encodeURIComponent(input.pageId)}`,
+      }),
+      target: (input) => input.pageId,
+    }),
+    createWriteTool({
+      action: "create file",
+      connectorId: "google-drive",
+      description: "Create Google Drive file metadata after approval unless the project is in Full Access.",
+      displayName: "Google Drive",
+      inputSchema: driveCreateFileInput,
+      name: "drive_create_file",
+      request: (input) => ({
+        data: {
+          mimeType: input.mimeType ?? "text/plain",
+          name: input.name,
+          ...(input.parents?.length ? { parents: input.parents } : {}),
+        },
+        endpoint: "/drive/v3/files",
+      }),
+      target: (input) => input.name,
+    }),
+    createWriteTool({
+      action: "copy file",
+      connectorId: "google-drive",
+      description: "Copy a Google Drive file after approval unless the project is in Full Access.",
+      displayName: "Google Drive",
+      inputSchema: driveCopyFileInput,
+      name: "drive_copy_file",
+      request: (input) => ({
+        data: {
+          ...(input.name ? { name: input.name } : {}),
+          ...(input.parents?.length ? { parents: input.parents } : {}),
+        },
+        endpoint: `/drive/v3/files/${encodeURIComponent(input.fileId)}/copy`,
+      }),
+      target: (input) => input.fileId,
+    }),
+    createWriteTool({
+      action: "create issue",
+      connectorId: "github",
+      description: "Create a GitHub issue after approval unless the project is in Full Access.",
+      displayName: "GitHub",
+      inputSchema: githubCreateIssueInput,
+      name: "github_create_issue",
+      request: (input) => ({
+        data: {
+          ...(input.body ? { body: input.body } : {}),
+          ...(input.labels?.length ? { labels: input.labels } : {}),
+          title: input.title,
+        },
+        endpoint: `/repos/${input.owner}/${input.repo}/issues`,
+      }),
+      target: (input) => `${input.owner}/${input.repo}`,
+    }),
+    createWriteTool({
+      action: "comment issue",
+      connectorId: "github",
+      description: "Comment on a GitHub issue after approval unless the project is in Full Access.",
+      displayName: "GitHub",
+      inputSchema: githubCommentIssueInput,
+      name: "github_comment_issue",
+      request: (input) => ({
+        data: { body: input.body },
+        endpoint: `/repos/${input.owner}/${input.repo}/issues/${input.issueNumber}/comments`,
+      }),
+      target: (input) => `${input.owner}/${input.repo}#${input.issueNumber}`,
+    }),
+    createWriteTool({
+      action: "update issue",
+      connectorId: "github",
+      description: "Update a GitHub issue after approval unless the project is in Full Access.",
+      displayName: "GitHub",
+      inputSchema: githubUpdateIssueInput,
+      method: "PATCH",
+      name: "github_update_issue",
+      request: (input) => ({
+        data: input.patch,
+        endpoint: `/repos/${input.owner}/${input.repo}/issues/${input.issueNumber}`,
+      }),
+      target: (input) => `${input.owner}/${input.repo}#${input.issueNumber}`,
+    }),
+    createWriteTool({
+      action: "create pull request",
+      connectorId: "github",
+      description: "Create a GitHub pull request after approval unless the project is in Full Access.",
+      displayName: "GitHub",
+      inputSchema: githubCreatePullRequestInput,
+      name: "github_create_pull_request",
+      request: (input) => ({
+        data: {
+          base: input.base,
+          ...(input.body ? { body: input.body } : {}),
+          ...(input.draft !== null && input.draft !== undefined
+            ? { draft: input.draft }
+            : {}),
+          head: input.head,
+          title: input.title,
+        },
+        endpoint: `/repos/${input.owner}/${input.repo}/pulls`,
+      }),
+      target: (input) => `${input.owner}/${input.repo}:${input.head}->${input.base}`,
+    }),
   ];
 }

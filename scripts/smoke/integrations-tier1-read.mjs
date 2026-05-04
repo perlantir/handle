@@ -92,7 +92,7 @@ const executeOutput = await tool("github_execute").implementation(
   { instruction: "create a pull request" },
   context,
 );
-assert.match(executeOutput, /write actions are not enabled/i);
+assert.match(executeOutput, /does not perform writes directly/i);
 
 console.log("PASS: Tier 1 integration read tools registered and GitHub live read path works.");
 
