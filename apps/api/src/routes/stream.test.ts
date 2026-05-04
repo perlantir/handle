@@ -36,28 +36,37 @@ describe("stream route", () => {
     const findFirst = vi.fn(async (args: unknown) => {
       if (typeof args === "object" && args && "include" in args) {
         pollCount += 1;
-        return pollCount === 1
-          ? {
-              conversation: { messages: [] },
-              id: "task-test",
-              status: "RUNNING",
-            }
-          : {
-              conversation: {
-                messages: [
-                  {
-                    content: "Worker completed the task.",
-                    id: "message-assistant",
-                    role: "ASSISTANT",
-                  },
-                ],
+        if (pollCount === 1) {
+          return {
+            conversation: { messages: [] },
+            id: "task-test",
+            status: "QUEUED",
+          };
+        }
+        if (pollCount === 2) {
+          return {
+            conversation: { messages: [] },
+            id: "task-test",
+            status: "RUNNING",
+          };
+        }
+
+        return {
+          conversation: {
+            messages: [
+              {
+                content: "Worker completed the task.",
+                id: "message-assistant",
+                role: "ASSISTANT",
               },
-              id: "task-test",
-              status: "COMPLETED",
-            };
+            ],
+          },
+          id: "task-test",
+          status: "COMPLETED",
+        };
       }
 
-      return { id: "task-test", status: "RUNNING" };
+      return { id: "task-test", status: "QUEUED" };
     });
 
     const app = express();
@@ -78,6 +87,8 @@ describe("stream route", () => {
     expect(body).toContain('"type":"message"');
     expect(body).toContain('"content":"Worker completed the task."');
     expect(body).toContain('"type":"status_update"');
+    expect(body).toContain('"status":"QUEUED"');
+    expect(body).toContain('"status":"RUNNING"');
     expect(body).toContain('"status":"STOPPED"');
   });
 });

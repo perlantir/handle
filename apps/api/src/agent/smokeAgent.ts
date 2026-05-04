@@ -18,7 +18,7 @@ export async function runSmokeAgent(
   emitTaskEvent({ type: "status_update", status: "RUNNING", taskId });
 
   await prisma.agentRun.update({
-    data: { sandboxId: "smoke-sandbox" },
+    data: { sandboxId: "smoke-sandbox", status: "RUNNING" },
     where: { id: taskId },
   });
 
@@ -90,7 +90,11 @@ export async function runSmokeAgent(
     },
   });
   await prisma.agentRun.update({
-    data: { completedAt: new Date(), result: finalMessage, status: "COMPLETED" },
+    data: {
+      completedAt: new Date(),
+      result: finalMessage,
+      status: "COMPLETED",
+    },
     where: { id: taskId },
   });
 

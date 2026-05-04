@@ -28,7 +28,9 @@ const projectSchema = z.object({
   defaultBackend: z.enum(["E2B", "LOCAL"]).optional(),
   defaultModel: z.string().min(1).nullable().optional(),
   defaultProvider: z.string().refine(isProviderId).nullable().optional(),
-  memoryScope: z.enum(["GLOBAL_AND_PROJECT", "PROJECT_ONLY", "NONE"]).optional(),
+  memoryScope: z
+    .enum(["GLOBAL_AND_PROJECT", "PROJECT_ONLY", "NONE"])
+    .optional(),
   name: z.string().min(1).max(120).optional(),
   permissionMode: z.enum(["FULL_ACCESS", "ASK", "PLAN"]).optional(),
   workspaceScope: z
@@ -84,7 +86,9 @@ export interface ProjectRouteStore {
     upsert(args: unknown): Promise<unknown>;
   };
   memorySettings?: {
-    findUnique(args: unknown): Promise<{ defaultScopeForNewProjects: string } | null>;
+    findUnique(
+      args: unknown,
+    ): Promise<{ defaultScopeForNewProjects: string } | null>;
   };
   providerConfig?: {
     findMany(args: unknown): Promise<
@@ -138,10 +142,16 @@ async function validateSpecificFolderPath(path: string) {
   try {
     const stat = await fs.stat(resolved);
     if (!stat.isDirectory()) {
-      return { error: "Specific folder path must be an existing directory", resolved };
+      return {
+        error: "Specific folder path must be an existing directory",
+        resolved,
+      };
     }
   } catch (err) {
-    logger.info({ err, path: resolved }, "Project custom folder validation failed");
+    logger.info(
+      { err, path: resolved },
+      "Project custom folder validation failed",
+    );
     return { error: "Specific folder path does not exist", resolved };
   }
 
@@ -160,7 +170,8 @@ async function projectInputFromRequest(
   if (nextScope === "CUSTOM_FOLDER") {
     if (!candidatePath) {
       return {
-        error: "Specific folder path is required when workspace scope is Specific folder",
+        error:
+          "Specific folder path is required when workspace scope is Specific folder",
       };
     }
 
@@ -174,7 +185,11 @@ async function projectInputFromRequest(
     data.customScopePath = validation.resolved;
   }
 
-  if (nextScope === "DEFAULT_WORKSPACE" || nextScope === "DESKTOP" || nextScope === "FULL_ACCESS") {
+  if (
+    nextScope === "DEFAULT_WORKSPACE" ||
+    nextScope === "DESKTOP" ||
+    nextScope === "FULL_ACCESS"
+  ) {
     data.customScopePath = null;
   }
 
@@ -355,9 +370,9 @@ export function createProjectsRouter({
         },
         "Project update requested",
       );
-      const current = await store.project.findUnique({
+      const current = (await store.project.findUnique({
         where: { id: req.params.projectId },
-      }) as { customScopePath?: string | null } | null;
+      })) as { customScopePath?: string | null } | null;
       if (!current) {
         return res.status(404).json({ error: "Project not found" });
       }
@@ -420,9 +435,9 @@ export function createProjectsRouter({
       return res.json({
         conversations: conversations.map((conversation) => ({
           ...(conversation as Record<string, unknown>),
-          latestAgentRunId: (
-            conversation as { agentRuns?: Array<{ id: string }> }
-          ).agentRuns?.[0]?.id ?? null,
+          latestAgentRunId:
+            (conversation as { agentRuns?: Array<{ id: string }> })
+              .agentRuns?.[0]?.id ?? null,
           agentRuns: undefined,
         })),
       });
@@ -537,7 +552,7 @@ export function createProjectsRouter({
         select: { id: true, status: true },
         where: {
           conversationId: req.params.conversationId,
-          status: { in: ["RUNNING", "WAITING"] },
+          status: { in: ["QUEUED", "RUNNING", "WAITING"] },
         },
       });
       let cancelledRunId: string | undefined;
@@ -555,30 +570,40 @@ export function createProjectsRouter({
         cancelledRunId = activeRun.id;
       }
 
-      const project = (conversation as {
-        project?: {
-          defaultBackend?: string;
-          defaultModel?: string | null;
-          defaultProvider?: string | null;
-          id?: string;
-          permissionMode?: string | null;
-          workspaceScope?: string | null;
-        };
-      }).project;
-      const backend = apiBackendToDb(parsed.data.backend) ?? project?.defaultBackend ?? "E2B";
+      const project = (
+        conversation as {
+          project?: {
+            defaultBackend?: string;
+            defaultModel?: string | null;
+            defaultProvider?: string | null;
+            id?: string;
+            permissionMode?: string | null;
+            workspaceScope?: string | null;
+          };
+        }
+      ).project;
+      const backend =
+        apiBackendToDb(parsed.data.backend) ?? project?.defaultBackend ?? "E2B";
       const run = await store.agentRun.create({
         data: {
           backend,
           conversationId: req.params.conversationId,
           goal: parsed.data.content,
-          ...(parsed.data.modelName ? { modelName: parsed.data.modelName } : {}),
-          ...(parsed.data.providerId ? { providerId: parsed.data.providerId } : {}),
+          ...(parsed.data.modelName
+            ? { modelName: parsed.data.modelName }
+            : {}),
+          ...(parsed.data.providerId
+            ? { providerId: parsed.data.providerId }
+            : {}),
           status: "RUNNING",
           userId,
         },
       });
 
-      const runOptions: { backend?: "e2b" | "local"; providerOverride?: ProviderId } = {
+      const runOptions: {
+        backend?: "e2b" | "local";
+        providerOverride?: ProviderId;
+      } = {
         backend: dbBackendToApi(backend as "E2B" | "LOCAL"),
       };
       if (parsed.data.providerId) {
@@ -592,14 +617,18 @@ export function createProjectsRouter({
           permissionMode: project?.permissionMode ?? null,
           projectDefaultBackend: project?.defaultBackend ?? null,
           projectId: project?.id ?? null,
-          providerId: parsed.data.providerId ?? project?.defaultProvider ?? null,
+          providerId:
+            parsed.data.providerId ?? project?.defaultProvider ?? null,
           runId: run.id,
           workspaceScope: project?.workspaceScope ?? null,
         },
         "Conversation message starting agent run with selected runtime context",
       );
       runAgent(run.id, parsed.data.content, runOptions).catch((err) => {
-        logger.error({ conversationId: req.params.conversationId, err, runId: run.id }, "runAgent unhandled rejection");
+        logger.error(
+          { conversationId: req.params.conversationId, err, runId: run.id },
+          "runAgent unhandled rejection",
+        );
       });
 
       return res.json({

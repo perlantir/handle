@@ -1,7 +1,10 @@
 import { E2BBackend, type E2BBackendOptions } from "../execution/e2bBackend";
 import type { E2BSandboxLike, ExecutionBackend } from "../execution/types";
 import { createBrowserDesktopSandbox } from "../execution/browserSession";
-import { LocalBackend, type LocalBackendOptions } from "../execution/localBackend";
+import {
+  LocalBackend,
+  type LocalBackendOptions,
+} from "../execution/localBackend";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -24,7 +27,10 @@ import {
   formatProceduralMemoryContext,
   synthesizeTrajectoryTemplates,
 } from "../memory/proceduralMemory";
-import { ensureSharedMemoryNamespace, type SharedMemoryStore } from "../memory/sharedMemory";
+import {
+  ensureSharedMemoryNamespace,
+  type SharedMemoryStore,
+} from "../memory/sharedMemory";
 import {
   completeTrajectory,
   failureReasonFromError,
@@ -53,7 +59,10 @@ import {
 } from "./critic";
 import { parseAgentFinalResult } from "./finalResult";
 import { emitInitialPlan } from "./plan";
-import { createAgentRunCheckpoint, latestCheckpointContext } from "./runCheckpoint";
+import {
+  createAgentRunCheckpoint,
+  latestCheckpointContext,
+} from "./runCheckpoint";
 import {
   beginAgentRun,
   cancelReason,
@@ -138,7 +147,10 @@ interface TaskStore {
   task?: {
     findUnique(
       args: unknown,
-    ): Promise<{ backend: string | null; providerOverride: string | null } | null>;
+    ): Promise<{
+      backend: string | null;
+      providerOverride: string | null;
+    } | null>;
     update(args: unknown): Promise<unknown>;
   };
 }
@@ -163,11 +175,16 @@ interface AgentRunContext {
   backend: string | null;
   conversationId: string;
   conversation?: {
-    messages?: Array<{ content: string; memoryEnabled?: boolean | null; role: string }>;
+    messages?: Array<{
+      content: string;
+      memoryEnabled?: boolean | null;
+      role: string;
+    }>;
     project?: ProjectContext | null;
   } | null;
   providerId: string | null;
   modelName: string | null;
+  status?: string | null;
   userId?: string | null;
 }
 
@@ -218,7 +235,10 @@ interface RunAgentDependencies {
     options: { llm: BaseChatModel },
   ) => Promise<AgentLike>;
   createBackend?: (options?: E2BBackendOptions) => AgentExecutionBackend;
-  createLocalBackend?: (taskId: string, options?: LocalBackendOptions) => ExecutionBackend;
+  createLocalBackend?: (
+    taskId: string,
+    options?: LocalBackendOptions,
+  ) => ExecutionBackend;
   createDesktopSandbox?: typeof createBrowserDesktopSandbox;
   createComputerUseTools?: typeof createComputerUseToolDefinitions;
   emitEvent?: typeof emitTaskEvent;
@@ -302,7 +322,11 @@ async function loadRunContext(store: TaskStore, taskId: string) {
   };
 }
 
-async function updateRun(store: TaskStore, taskId: string, data: Record<string, unknown>) {
+async function updateRun(
+  store: TaskStore,
+  taskId: string,
+  data: Record<string, unknown>,
+) {
   if (store.agentRun) {
     const nextData = { ...data };
     if (typeof nextData.status === "string") {
@@ -374,7 +398,10 @@ async function createAssistantMessage(
   });
 }
 
-function conversationHistory(context: AgentRunContext | null, currentGoal: string) {
+function conversationHistory(
+  context: AgentRunContext | null,
+  currentGoal: string,
+) {
   const messages =
     context?.conversation?.messages?.filter(
       (message) => message.content.trim().length > 0,
@@ -406,7 +433,9 @@ function currentMessageMemoryEnabled(
   return null;
 }
 
-function normalizeMemoryProjectContext(project: ProjectContext | null | undefined) {
+function normalizeMemoryProjectContext(
+  project: ProjectContext | null | undefined,
+) {
   if (!project?.memoryScope) return null;
   const memoryScope =
     project.memoryScope === "PROJECT_ONLY" || project.memoryScope === "NONE"
@@ -432,11 +461,23 @@ function localSandboxPlaceholder(taskId: string): E2BSandboxLike {
   };
 }
 
-function defaultProjectWorkspaceDir(projectId: string | undefined, taskId: string) {
-  return join(homedir(), "Documents", "Handle", "workspaces", projectId ?? taskId);
+function defaultProjectWorkspaceDir(
+  projectId: string | undefined,
+  taskId: string,
+) {
+  return join(
+    homedir(),
+    "Documents",
+    "Handle",
+    "workspaces",
+    projectId ?? taskId,
+  );
 }
 
-function localWorkspaceDirForProject(project: ProjectContext | null | undefined, taskId: string) {
+function localWorkspaceDirForProject(
+  project: ProjectContext | null | undefined,
+  taskId: string,
+) {
   if (project?.workspaceScope === "CUSTOM_FOLDER" && project.customScopePath) {
     return project.customScopePath;
   }
@@ -492,15 +533,21 @@ async function emitTodoMdFileEvent({
       metadata: { byteCount: todo.content.length, kind: "todo_md" },
       outcomeType: "file_created",
       projectId: project?.id ?? "unknown",
-      reversible: backend.id === "local" && todo.path.startsWith(backend.getWorkspaceDir()),
+      reversible:
+        backend.id === "local" &&
+        todo.path.startsWith(backend.getWorkspaceDir()),
       target: todo.path,
       taskId,
       timestamp: new Date().toISOString(),
-      ...(backend.id === "local" && todo.path.startsWith(backend.getWorkspaceDir())
+      ...(backend.id === "local" &&
+      todo.path.startsWith(backend.getWorkspaceDir())
         ? { undoCommand: `rm ${shellQuote(todo.path)}` }
         : {}),
     }).catch((err) => {
-      logger.warn({ err, path: todo.path, taskId }, "Failed to action-log todo.md creation");
+      logger.warn(
+        { err, path: todo.path, taskId },
+        "Failed to action-log todo.md creation",
+      );
     });
   }
 }
@@ -608,11 +655,18 @@ export function createAgentRunner({
 
     try {
       runControl.throwIfCancelled();
-      emitEvent({ type: "status_update", status: "RUNNING", taskId });
-
       runContext = await loadRunContext(store, taskId);
       if (!runContext) throw new Error("Agent run not found");
+      if (runContext.status === "CANCELLED") {
+        logger.info(
+          { taskId },
+          "Skipping cancelled agent run before worker start",
+        );
+        return;
+      }
       runControl.throwIfCancelled();
+      await updateRun(store, taskId, { status: "RUNNING" });
+      emitEvent({ type: "status_update", status: "RUNNING", taskId });
 
       const project = runContext.conversation?.project ?? null;
       const taskOverride =
@@ -625,7 +679,8 @@ export function createAgentRunner({
       const localWorkspaceDir = localWorkspaceDirForProject(project, taskId);
 
       await providerRegistry.initialize();
-      const modelOverride = runContext.modelName ?? project?.defaultModel ?? undefined;
+      const modelOverride =
+        runContext.modelName ?? project?.defaultModel ?? undefined;
       const activeModelOptions = {
         taskId,
         ...(modelOverride ? { modelOverride } : {}),
@@ -647,7 +702,8 @@ export function createAgentRunner({
           projectId: project?.id ?? null,
           providerId: taskOverride ?? provider.id,
           taskId,
-          workspaceDir: selectedBackend === "local" ? localWorkspaceDir : "/home/user",
+          workspaceDir:
+            selectedBackend === "local" ? localWorkspaceDir : "/home/user",
           workspaceScope: project?.workspaceScope ?? null,
         },
         "Agent run runtime context selected",
@@ -662,7 +718,10 @@ export function createAgentRunner({
         parentRunId: taskId,
         store,
       }).catch((err) => {
-        logger.warn({ err, taskId }, "Failed to initialize shared memory namespace");
+        logger.warn(
+          { err, taskId },
+          "Failed to initialize shared memory namespace",
+        );
         return null;
       });
       runControl.throwIfCancelled();
@@ -765,11 +824,15 @@ export function createAgentRunner({
         }
         if (project?.permissionMode) {
           localBackendOptions.permissionMode =
-            project.permissionMode as NonNullable<LocalBackendOptions["permissionMode"]>;
+            project.permissionMode as NonNullable<
+              LocalBackendOptions["permissionMode"]
+            >;
         }
         if (project?.workspaceScope) {
           localBackendOptions.workspaceScope =
-            project.workspaceScope as NonNullable<LocalBackendOptions["workspaceScope"]>;
+            project.workspaceScope as NonNullable<
+              LocalBackendOptions["workspaceScope"]
+            >;
         }
         backend = createLocalBackend(taskId, localBackendOptions);
         runControl.setBackend(backend);
@@ -803,7 +866,10 @@ export function createAgentRunner({
         conversationId: runContext.conversationId,
         goal,
       }).catch((err) => {
-        logger.warn({ err, taskId }, "Failed to prepare todo.md; continuing without it");
+        logger.warn(
+          { err, taskId },
+          "Failed to prepare todo.md; continuing without it",
+        );
         return null;
       });
       if (todoMd) {
@@ -857,7 +923,10 @@ export function createAgentRunner({
           });
         }
       } catch (err) {
-        logger.warn({ err, taskId }, "Memory recall failed; continuing without memory");
+        logger.warn(
+          { err, taskId },
+          "Memory recall failed; continuing without memory",
+        );
       }
       await appendMessageToZep({
         content: goal,
@@ -913,8 +982,14 @@ export function createAgentRunner({
           );
           return "";
         });
-      const resumeContext = await latestCheckpointContext({ runId: taskId, store }).catch((err) => {
-        logger.warn({ err, taskId }, "Failed to load resume checkpoint context; continuing without it");
+      const resumeContext = await latestCheckpointContext({
+        runId: taskId,
+        store,
+      }).catch((err) => {
+        logger.warn(
+          { err, taskId },
+          "Failed to load resume checkpoint context; continuing without it",
+        );
         return "";
       });
       const memoryContext = [
@@ -961,7 +1036,13 @@ export function createAgentRunner({
         });
         runControl.throwIfCancelled();
 
-        await createAssistantMessage(store, taskId, runContext, finalMessage, provider);
+        await createAssistantMessage(
+          store,
+          taskId,
+          runContext,
+          finalMessage,
+          provider,
+        );
         await updateRun(store, taskId, {
           result: finalMessage,
           status: "STOPPED",
@@ -1010,11 +1091,15 @@ export function createAgentRunner({
         ...(project?.permissionMode
           ? { projectPermissionMode: project.permissionMode }
           : {}),
-        criticReviewToolResult: async (step: TrajectoryStepRecord, output: string) => {
+        criticReviewToolResult: async (
+          step: TrajectoryStepRecord,
+          output: string,
+        ) => {
           if (!shouldCriticReviewToolStep({ project, step })) return output;
-          const interventionPoint = step.toolName === "file_write"
-            ? "post-code-before-run"
-            : "post-tool-result-before-next-step";
+          const interventionPoint =
+            step.toolName === "file_write"
+              ? "post-code-before-run"
+              : "post-tool-result-before-next-step";
           const review = await runCriticReview({
             agentRunId: taskId,
             conversationId: runContext?.conversationId ?? taskId,
@@ -1030,7 +1115,8 @@ export function createAgentRunner({
             taskId,
             type: "thought",
           });
-          if (review.verdict === "REJECT") throw new CriticRejectedError(review);
+          if (review.verdict === "REJECT")
+            throw new CriticRejectedError(review);
           const feedback = formatCriticFeedback(review);
           return feedback ? `${output}\n\n${feedback}` : output;
         },
@@ -1049,7 +1135,9 @@ export function createAgentRunner({
         taskId,
         sandbox,
         trustedDomains,
-        ...(typeof runContext.userId === "string" ? { userId: runContext.userId } : {}),
+        ...(typeof runContext.userId === "string"
+          ? { userId: runContext.userId }
+          : {}),
       };
       const agent = await createAgent(agentContext, { llm: model });
       runControl.throwIfCancelled();
@@ -1088,7 +1176,13 @@ export function createAgentRunner({
         finalResult.message ||
         (finalResult.success ? "Task completed." : "Task failed.");
 
-      await createAssistantMessage(store, taskId, runContext, finalMessage, provider);
+      await createAssistantMessage(
+        store,
+        taskId,
+        runContext,
+        finalMessage,
+        provider,
+      );
       await updateRun(store, taskId, {
         result: finalMessage,
         status: finalStatus,
@@ -1096,7 +1190,8 @@ export function createAgentRunner({
       if (store === prisma) {
         void notifyTaskEvent({
           agentRunId: taskId,
-          eventType: finalStatus === "STOPPED" ? "TASK_COMPLETED" : "TASK_FAILED",
+          eventType:
+            finalStatus === "STOPPED" ? "TASK_COMPLETED" : "TASK_FAILED",
           ...(finalResult.reason ? { detail: finalResult.reason } : {}),
         }).catch((err) => {
           logger.warn({ err, taskId }, "Task final notification failed");
@@ -1169,8 +1264,8 @@ export function createAgentRunner({
           logger.warn(
             { err: updateErr, taskId },
             "Failed to mark task as cancelled",
-            );
-          });
+          );
+        });
         await completeTrajectory({
           agentRunId: taskId,
           outcome: "CANCELLED",
@@ -1183,7 +1278,10 @@ export function createAgentRunner({
             detail: reason,
             eventType: "TASK_FAILED",
           }).catch((err) => {
-            logger.warn({ err, taskId }, "Task cancellation notification failed");
+            logger.warn(
+              { err, taskId },
+              "Task cancellation notification failed",
+            );
           });
         }
 
@@ -1209,7 +1307,10 @@ export function createAgentRunner({
           result: message,
           status: "ERROR",
         }).catch((updateErr) => {
-          logger.warn({ err: updateErr, taskId }, "Failed to mark critic-rejected task as errored");
+          logger.warn(
+            { err: updateErr, taskId },
+            "Failed to mark critic-rejected task as errored",
+          );
         });
         await completeTrajectory({
           agentRunId: taskId,
@@ -1223,7 +1324,10 @@ export function createAgentRunner({
             detail: message,
             eventType: "CRITIC_FLAGGED",
           }).catch((notifyErr) => {
-            logger.warn({ err: notifyErr, taskId }, "Critic notification failed");
+            logger.warn(
+              { err: notifyErr, taskId },
+              "Critic notification failed",
+            );
           });
         }
         emitEvent({ type: "error", message, taskId });
@@ -1236,13 +1340,12 @@ export function createAgentRunner({
         return;
       }
 
-      await updateRun(store, taskId, { status: "ERROR" })
-        .catch((updateErr) => {
-          logger.warn(
-            { err: updateErr, taskId },
-            "Failed to mark task as errored",
-            );
-          });
+      await updateRun(store, taskId, { status: "ERROR" }).catch((updateErr) => {
+        logger.warn(
+          { err: updateErr, taskId },
+          "Failed to mark task as errored",
+        );
+      });
       const failureReason = failureReasonFromError(err);
       if (store === prisma) {
         void notifyTaskEvent({
@@ -1250,7 +1353,10 @@ export function createAgentRunner({
           detail: failureReason ?? message,
           eventType: "TASK_FAILED",
         }).catch((notifyErr) => {
-          logger.warn({ err: notifyErr, taskId }, "Task failure notification failed");
+          logger.warn(
+            { err: notifyErr, taskId },
+            "Task failure notification failed",
+          );
         });
       }
       await completeTrajectory({
@@ -1284,7 +1390,10 @@ async function synthesizeProceduralTemplatesForRun({
   store: TrajectoryStore;
   taskId: string;
 }) {
-  await synthesizeTrajectoryTemplates({ projectId: projectId ?? null, store }).catch((err) => {
+  await synthesizeTrajectoryTemplates({
+    projectId: projectId ?? null,
+    store,
+  }).catch((err) => {
     logger.warn(
       { err, projectId: projectId ?? null, taskId },
       "Procedural template synthesis failed after successful run",

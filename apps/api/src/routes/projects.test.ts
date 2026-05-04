@@ -18,7 +18,9 @@ function createStore(): ProjectRouteStore {
         project: { defaultBackend: "LOCAL" },
       }),
       findMany: vi.fn().mockResolvedValue([]),
-      update: vi.fn().mockResolvedValue({ id: "conversation-test", title: "Renamed chat" }),
+      update: vi
+        .fn()
+        .mockResolvedValue({ id: "conversation-test", title: "Renamed chat" }),
     },
     message: {
       create: vi.fn().mockResolvedValue({ id: "message-test" }),
@@ -27,10 +29,18 @@ function createStore(): ProjectRouteStore {
     project: {
       create: vi.fn().mockResolvedValue({ id: "project-new", name: "Work" }),
       delete: vi.fn().mockResolvedValue({}),
-      findMany: vi.fn().mockResolvedValue([{ id: "default-project", name: "Personal" }]),
-      findUnique: vi.fn().mockResolvedValue({ id: "default-project", name: "Personal" }),
-      update: vi.fn().mockResolvedValue({ id: "default-project", name: "Renamed" }),
-      upsert: vi.fn().mockResolvedValue({ id: "default-project", name: "Personal" }),
+      findMany: vi
+        .fn()
+        .mockResolvedValue([{ id: "default-project", name: "Personal" }]),
+      findUnique: vi
+        .fn()
+        .mockResolvedValue({ id: "default-project", name: "Personal" }),
+      update: vi
+        .fn()
+        .mockResolvedValue({ id: "default-project", name: "Renamed" }),
+      upsert: vi
+        .fn()
+        .mockResolvedValue({ id: "default-project", name: "Personal" }),
     },
   };
 }
@@ -38,7 +48,9 @@ function createStore(): ProjectRouteStore {
 function createApp(
   store: ProjectRouteStore,
   runAgent = vi.fn().mockResolvedValue(undefined),
-  keychain = { getCredential: vi.fn().mockRejectedValue(new Error("not found")) },
+  keychain = {
+    getCredential: vi.fn().mockRejectedValue(new Error("not found")),
+  },
 ) {
   const app = express();
   app.use(express.json());
@@ -61,10 +73,15 @@ describe("projects routes", () => {
 
     const response = await request(app).get("/api/projects").expect(200);
 
-    expect(response.body.projects).toEqual([{ id: "default-project", name: "Personal" }]);
+    expect(response.body.projects).toEqual([
+      { id: "default-project", name: "Personal" },
+    ]);
     expect(store.project.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({ id: "default-project", name: "Personal" }),
+        create: expect.objectContaining({
+          id: "default-project",
+          name: "Personal",
+        }),
       }),
     );
   });
@@ -95,7 +112,11 @@ describe("projects routes", () => {
 
     await request(app)
       .put("/api/projects/default-project")
-      .send({ name: "Renamed", permissionMode: "FULL_ACCESS", workspaceScope: "DESKTOP" })
+      .send({
+        name: "Renamed",
+        permissionMode: "FULL_ACCESS",
+        workspaceScope: "DESKTOP",
+      })
       .expect(200);
     expect(store.project.update).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -172,7 +193,11 @@ describe("projects routes", () => {
         throw new Error("not found");
       }),
     };
-    const { app } = createApp(store, vi.fn().mockResolvedValue(undefined), keychain);
+    const { app } = createApp(
+      store,
+      vi.fn().mockResolvedValue(undefined),
+      keychain,
+    );
 
     await request(app)
       .post("/api/projects")
@@ -278,9 +303,44 @@ describe("projects routes", () => {
       }),
       where: { id: "run-active" },
     });
-    expect(runAgent).toHaveBeenCalledWith("run-test", "Actually do this instead", {
-      backend: "local",
+    expect(runAgent).toHaveBeenCalledWith(
+      "run-test",
+      "Actually do this instead",
+      {
+        backend: "local",
+      },
+    );
+  });
+
+  it("cancels a queued Temporal run before starting an interrupting follow-up", async () => {
+    const store = createStore();
+    vi.mocked(store.agentRun.findFirst).mockResolvedValueOnce({
+      id: "run-queued",
+      status: "QUEUED",
     });
+    const runAgent = vi.fn().mockResolvedValue(undefined);
+    const { app } = createApp(store, runAgent);
+
+    const response = await request(app)
+      .post("/api/conversations/conversation-test/messages")
+      .send({ content: "Also include this new instruction" })
+      .expect(200);
+
+    expect(response.body.cancelledRunId).toBe("run-queued");
+    expect(store.agentRun.update).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        result: "Interrupted by a follow-up message",
+        status: "CANCELLED",
+      }),
+      where: { id: "run-queued" },
+    });
+    expect(runAgent).toHaveBeenCalledWith(
+      "run-test",
+      "Also include this new instruction",
+      {
+        backend: "local",
+      },
+    );
   });
 
   it("lists conversations with latest agent run ids for sidebar history", async () => {
@@ -317,13 +377,18 @@ describe("projects routes", () => {
       .send({ title: "Renamed chat" })
       .expect(200);
 
-    expect(rename.body.conversation).toEqual({ id: "conversation-test", title: "Renamed chat" });
+    expect(rename.body.conversation).toEqual({
+      id: "conversation-test",
+      title: "Renamed chat",
+    });
     expect(store.conversation.update).toHaveBeenCalledWith({
       data: { title: "Renamed chat" },
       where: { id: "conversation-test" },
     });
 
-    await request(app).delete("/api/conversations/conversation-test").expect(204);
+    await request(app)
+      .delete("/api/conversations/conversation-test")
+      .expect(204);
     expect(store.conversation.delete).toHaveBeenCalledWith({
       where: { id: "conversation-test" },
     });
