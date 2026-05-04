@@ -320,20 +320,59 @@ export async function listFailurePatterns({
 }: {
   store?: TrajectoryStore;
 } = {}): Promise<FailurePatternSummary[]> {
-  if (!store.agentRunTrajectory?.findMany) return [];
-  const rows = await store.agentRunTrajectory.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 50,
-    where: { outcome: "FAILED" },
-  }) as RawTrajectory[];
+  const rows = store.agentRunTrajectory?.findMany
+    ? (await store.agentRunTrajectory.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        where: { outcome: "FAILED" },
+      }) as RawTrajectory[])
+    : [];
 
-  return rows.map((row) => ({
+  const trajectoryFailures = rows.map((row) => ({
     ...(row.createdAt ? { createdAt: new Date(row.createdAt).toISOString() } : {}),
     agentRunId: String(row.agentRunId ?? ""),
     goal: redactSecrets(row.goal ?? "Failed task"),
     outcomeReason: row.outcomeReason ?? null,
     steps: normalizeSteps(row.steps),
   }));
+
+  const notificationFailures = store.notificationDelivery?.findMany
+    ? (await store.notificationDelivery.findMany({
+        orderBy: { updatedAt: "desc" },
+        take: 50,
+        where: { status: "FAILED" },
+      }) as Array<{
+        agentRunId?: string | null;
+        channel?: string;
+        createdAt?: Date | string;
+        errorCode?: string | null;
+        errorMessage?: string | null;
+        id?: string;
+        updatedAt?: Date | string;
+      }>)
+    : [];
+
+  return [
+    ...trajectoryFailures,
+    ...notificationFailures.map((row) => ({
+      createdAt: new Date(row.updatedAt ?? row.createdAt ?? new Date()).toISOString(),
+      agentRunId: row.agentRunId ?? `notification:${row.id ?? "unknown"}`,
+      goal: `Notification delivery failed (${row.channel ?? "unknown"})`,
+      outcomeReason: redactSecrets(row.errorMessage ?? row.errorCode ?? "Notification dispatch failed"),
+      steps: [
+        {
+          durationMs: 0,
+          errorReason: redactSecrets(row.errorMessage ?? "Notification dispatch failed"),
+          status: "tool_error" as const,
+          step: 1,
+          subgoal: `Deliver ${String(row.channel ?? "notification").toLowerCase()} notification`,
+          toolInput: { channel: row.channel },
+          toolName: "notification.send",
+          toolOutput: { errorCode: row.errorCode },
+        },
+      ],
+    })),
+  ];
 }
 
 function similarity(a: string, b: string) {

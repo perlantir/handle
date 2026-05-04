@@ -2,6 +2,7 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { CriticInterventionScope, CriticVerdict } from "@handle/shared";
 import { appendActionLog } from "../lib/actionLog";
+import { appendAuditEvent } from "../lib/auditLog";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
 import type { TrajectoryStepRecord } from "../memory/trajectoryMemory";
@@ -185,6 +186,14 @@ export async function runCriticReview({
     target: interventionPoint,
     taskId: agentRunId,
     timestamp: new Date().toISOString(),
+  }).catch(() => undefined);
+  await appendAuditEvent({
+    cycle: Number((metadata as { cycle?: unknown }).cycle ?? 1),
+    event: "critic_verdict",
+    intervention: interventionPoint,
+    reasoning: review.reasoning,
+    taskId: agentRunId,
+    verdict: review.verdict,
   }).catch(() => undefined);
 
   return review;

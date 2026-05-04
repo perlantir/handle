@@ -2,8 +2,10 @@ import { Router } from "express";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
+import { appendAuditEvent } from "../lib/auditLog";
 import { asyncHandler } from "../lib/http";
 import { prisma } from "../lib/prisma";
+import { redactSecrets } from "../lib/redact";
 import { dispatchAgentRun as defaultDispatchAgentRun } from "../temporal/dispatcher";
 
 const savedAgentSchema = z.object({
@@ -86,10 +88,12 @@ async function ensureDefaultProject(store: typeof prisma) {
 
 async function syncInlineSavedAgentRun({
   agentRunId,
+  savedAgentId,
   savedAgentRunId,
   store,
 }: {
   agentRunId: string;
+  savedAgentId: string;
   savedAgentRunId: string;
   store: typeof prisma;
 }) {
@@ -108,28 +112,38 @@ async function syncInlineSavedAgentRun({
     },
     where: { id: savedAgentRunId },
   });
+  await appendAuditEvent({
+    durationMs: 0,
+    event: "saved_agent_run",
+    savedAgentId,
+    status,
+    taskId: agentRunId,
+    trigger: "manual",
+  }).catch(() => undefined);
 }
 
 async function dispatchSavedAgentRunInBackground({
   agentRunId,
   dispatchAgentRun,
   goal,
+  savedAgentId,
   savedAgentRunId,
   store,
 }: {
   agentRunId: string;
   dispatchAgentRun: typeof defaultDispatchAgentRun;
   goal: string;
+  savedAgentId: string;
   savedAgentRunId: string;
   store: typeof prisma;
 }) {
   try {
     const result = await dispatchAgentRun(agentRunId, goal);
     if (result.mode === "inline") {
-      await syncInlineSavedAgentRun({ agentRunId, savedAgentRunId, store });
+      await syncInlineSavedAgentRun({ agentRunId, savedAgentId, savedAgentRunId, store });
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = redactSecrets(err instanceof Error ? err.message : String(err));
     await store.savedAgentRun.update({
       data: {
         completedAt: new Date(),
@@ -138,6 +152,15 @@ async function dispatchSavedAgentRunInBackground({
       },
       where: { id: savedAgentRunId },
     });
+    await appendAuditEvent({
+      durationMs: 0,
+      error: message,
+      event: "saved_agent_run",
+      savedAgentId,
+      status: "FAILED",
+      taskId: agentRunId,
+      trigger: "manual",
+    }).catch(() => undefined);
   }
 }
 
@@ -270,10 +293,19 @@ export function createSavedAgentsRouter({
         data: { lastRunAt: new Date() },
         where: { id: agent.id },
       });
+      await appendAuditEvent({
+        durationMs: 0,
+        event: "saved_agent_run",
+        savedAgentId: agent.id,
+        status: "QUEUED",
+        taskId: run.id,
+        trigger: agent.trigger === "schedule" ? "scheduled" : "manual",
+      }).catch(() => undefined);
       void dispatchSavedAgentRunInBackground({
         agentRunId: run.id,
         dispatchAgentRun,
         goal: agent.prompt,
+        savedAgentId: agent.id,
         savedAgentRunId: savedAgentRun.id,
         store,
       });

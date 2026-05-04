@@ -1,4 +1,5 @@
 import { appendActionLog } from "../lib/actionLog";
+import { appendAuditEvent } from "../lib/auditLog";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
 
@@ -54,7 +55,7 @@ export async function runWorkflow({
 
   try {
     const actions = normalizeWorkflowActions(workflow.actions);
-    for (const action of actions) {
+    for (const [index, action] of actions.entries()) {
       await appendActionLog({
         conversationId: `workflow:${workflow.id}`,
         description: `Workflow ${workflow.name} prepared ${action.toolName}`,
@@ -71,6 +72,15 @@ export async function runWorkflow({
         taskId: run.id,
         timestamp: new Date().toISOString(),
       });
+      await appendAuditEvent({
+        actionIndex: index,
+        connectorId: action.connectorId,
+        event: "workflow_action_completed",
+        error: null,
+        status: "COMPLETED",
+        toolName: action.toolName,
+        workflowId: workflow.id,
+      }).catch(() => undefined);
     }
 
     await store.workflowRun.update({
@@ -83,6 +93,15 @@ export async function runWorkflow({
     return { runId: run.id, status: "COMPLETED" as const };
   } catch (err) {
     const message = redactSecrets(err instanceof Error ? err.message : String(err));
+    await appendAuditEvent({
+      actionIndex: null,
+      connectorId: null,
+      error: message,
+      event: "workflow_action_failed",
+      status: "FAILED",
+      toolName: null,
+      workflowId: workflow.id,
+    }).catch(() => undefined);
     await store.workflowRun.update({
       data: {
         completedAt: new Date(),

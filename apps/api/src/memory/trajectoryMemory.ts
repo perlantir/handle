@@ -44,6 +44,9 @@ export interface TrajectoryStore {
     findMany?(args: unknown): Promise<unknown[]>;
     update?(args: unknown): Promise<unknown>;
   } | undefined;
+  notificationDelivery?: {
+    findMany?(args: unknown): Promise<unknown[]>;
+  } | undefined;
 }
 
 export function goalEmbedding(goal: string) {
