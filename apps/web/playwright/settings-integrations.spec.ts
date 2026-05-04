@@ -48,7 +48,10 @@ function integrationFixture(): IntegrationSettingsResponse {
         nangoProviderId: "github",
         oauthAppUrl: "https://github.com/settings/developers",
         requiredScopes: ["read:user", "user:email", "repo"],
-        setupGuide: [],
+        setupGuide: [
+          "Open GitHub Developer Settings.",
+          "Create an OAuth app named Handle Dev - GitHub.",
+        ],
         tier: 1,
       },
       {
@@ -58,7 +61,10 @@ function integrationFixture(): IntegrationSettingsResponse {
         displayName: "Obsidian",
         nangoProviderId: null,
         requiredScopes: [],
-        setupGuide: [],
+        setupGuide: [
+          "Choose one local vault path.",
+          "Handle will deny path traversal outside that vault.",
+        ],
         tier: 3,
       },
     ],
@@ -213,6 +219,51 @@ async function mockApi(page: Page) {
       return;
     }
 
+    if (method === "PUT" && path === "/api/integrations/integration-github") {
+      const connection = settings.connections[0];
+      if (connection && body && typeof body === "object") {
+        Object.assign(connection, body);
+      }
+      await jsonRoute(route, 200, { integration: connection });
+      return;
+    }
+
+    if (method === "POST" && path === "/api/integrations/obsidian/local-vault") {
+      const vaultPath =
+        body && typeof body === "object" && "vaultPath" in body
+          ? String(body.vaultPath)
+          : "/tmp/handle-vault";
+      settings.connections = [
+        ...settings.connections.filter(
+          (connection) => connection.connectorId !== "obsidian",
+        ),
+        {
+          accountAlias: "default",
+          accountLabel: "default",
+          connectorId: "obsidian",
+          createdAt: "2026-05-03T12:00:00.000Z",
+          defaultAccount: true,
+          id: "integration-obsidian",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastHealthCheckAt: null,
+          lastUsedAt: null,
+          memoryScope: "NONE",
+          metadata: { vaultPath },
+          nangoConnectionId: null,
+          nangoIntegrationId: null,
+          status: "CONNECTED",
+          updatedAt: "2026-05-03T12:00:00.000Z",
+        },
+      ];
+      await jsonRoute(route, 200, {
+        integration: settings.connections.find(
+          (connection) => connection.connectorId === "obsidian",
+        ),
+      });
+      return;
+    }
+
     await jsonRoute(route, 404, { error: "Unhandled integrations route" });
   });
 
@@ -286,6 +337,9 @@ test.describe("Settings Integrations", () => {
     await expect(page.getByText("default health check passed")).toBeVisible();
     await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 
+    await page.getByLabel("default memory scope").selectOption("PROJECT_ONLY");
+    await expect(page.getByText("default updated")).toBeVisible();
+
     expect(
       requests.find(
         (request) =>
@@ -301,5 +355,31 @@ test.describe("Settings Integrations", () => {
       )?.body,
     ).toMatchObject({ accountAlias: "default" });
     expect(signInPosts).toEqual([]);
+  });
+
+  test("configures connector memory controls and a local Obsidian vault", async ({
+    page,
+  }) => {
+    const { requests } = await mockApi(page);
+
+    await openSettings(page);
+    await openSettingsSection(page, "Integrations");
+
+    await expect(page.getByText("Setup checklist").first()).toBeVisible();
+    await page.getByLabel("Obsidian vault path").fill("/tmp/handle-vault");
+    await page.getByRole("button", { name: "Save vault" }).click();
+    await expect(page.getByText("Obsidian vault saved")).toBeVisible();
+    await expect(page.getByText("Local vault", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Handle uses SafetyGovernor to", { exact: false }),
+    ).toBeVisible();
+
+    expect(
+      requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.path === "/api/integrations/obsidian/local-vault",
+      )?.body,
+    ).toMatchObject({ vaultPath: "/tmp/handle-vault" });
   });
 });

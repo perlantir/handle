@@ -91,6 +91,20 @@ export async function completeConnection(
   );
 }
 
+export async function saveLocalVaultIntegration(input: {
+  accountAlias?: string;
+  memoryScope?: MemoryScope;
+  vaultPath: string;
+}) {
+  return requestJson<{ integration: IntegrationConnectionSummary }>(
+    "/api/integrations/obsidian/local-vault",
+    {
+      body: JSON.stringify(input),
+      method: "POST",
+    },
+  );
+}
+
 export async function testIntegration(integrationId: string) {
   return requestJson<{
     error?: string;

@@ -6,6 +6,7 @@ import type {
   IntegrationConnectorSettingsSummary,
   IntegrationConnectorSummary,
   IntegrationSettingsResponse,
+  MemoryScope,
 } from "@handle/shared";
 import {
   CheckCircle2,
@@ -28,8 +29,10 @@ import {
   deleteIntegration,
   getIntegrationSettings,
   saveConnectorOAuthApp,
+  saveLocalVaultIntegration,
   saveNangoSettings,
   testIntegration,
+  updateIntegration,
 } from "@/lib/settingsIntegrations";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +41,7 @@ interface ConnectorDraft {
   clientId: string;
   clientSecret: string;
   connectionId: string;
+  vaultPath: string;
 }
 
 type StatusTone = "error" | "success";
@@ -51,6 +55,7 @@ const emptyDraft: ConnectorDraft = {
   clientId: "",
   clientSecret: "",
   connectionId: "",
+  vaultPath: "",
 };
 
 function draftForConnector(): ConnectorDraft {
@@ -140,8 +145,22 @@ export function IntegrationsSettings() {
     setDrafts((current) => {
       const next = { ...current };
       for (const connector of nextSettings.connectors) {
+        const existingConnection = nextSettings.connections.find(
+          (connection) => connection.connectorId === connector.connectorId,
+        );
+        const existingVaultPath =
+          existingConnection?.metadata &&
+          typeof existingConnection.metadata.vaultPath === "string"
+            ? existingConnection.metadata.vaultPath
+            : "";
         next[connector.connectorId] =
-          current[connector.connectorId] ?? draftForConnector();
+          current[connector.connectorId] ?? {
+            ...draftForConnector(),
+            ...(existingConnection?.accountAlias
+              ? { accountAlias: existingConnection.accountAlias }
+              : {}),
+            ...(existingVaultPath ? { vaultPath: existingVaultPath } : {}),
+          };
       }
       return next;
     });
@@ -269,6 +288,31 @@ export function IntegrationsSettings() {
     }
   }
 
+  async function handleSaveLocalVault(connector: IntegrationConnectorSummary) {
+    const draft = drafts[connector.connectorId] ?? draftForConnector();
+    setWorking(`${connector.connectorId}:local-vault`);
+    setStatus(null);
+    try {
+      await saveLocalVaultIntegration({
+        accountAlias: draft.accountAlias.trim() || "default",
+        vaultPath: draft.vaultPath.trim(),
+      });
+      await refresh();
+      setStatus({
+        message: `${connector.displayName} vault saved`,
+        tone: "success",
+      });
+    } catch (error: unknown) {
+      setStatus({
+        message:
+          error instanceof Error ? error.message : "Failed to save local vault",
+        tone: "error",
+      });
+    } finally {
+      setWorking(null);
+    }
+  }
+
   async function handleTestConnection(connection: IntegrationConnectionSummary) {
     setWorking(`${connection.id}:test`);
     setStatus(null);
@@ -324,6 +368,27 @@ export function IntegrationsSettings() {
       setStatus({
         message:
           error instanceof Error ? error.message : "Disconnect failed",
+        tone: "error",
+      });
+    } finally {
+      setWorking(null);
+    }
+  }
+
+  async function handleUpdateConnection(
+    connection: IntegrationConnectionSummary,
+    patch: { defaultAccount?: boolean; memoryScope?: MemoryScope },
+  ) {
+    setWorking(`${connection.id}:update`);
+    setStatus(null);
+    try {
+      await updateIntegration(connection.id, patch);
+      await refresh();
+      setStatus({ message: `${connection.accountAlias} updated`, tone: "success" });
+    } catch (error: unknown) {
+      setStatus({
+        message:
+          error instanceof Error ? error.message : "Failed to update integration",
         tone: "error",
       });
     } finally {
@@ -445,7 +510,9 @@ export function IntegrationsSettings() {
               onDeleteConnection={handleDeleteConnection}
               onDraftChange={(patch) => updateDraft(connector.connectorId, patch)}
               onSaveOAuthApp={() => handleSaveOAuthApp(connector)}
+              onSaveLocalVault={() => handleSaveLocalVault(connector)}
               onTestConnection={handleTestConnection}
+              onUpdateConnection={handleUpdateConnection}
               working={working}
             />
           );
@@ -467,7 +534,9 @@ function ConnectorCard({
   onDeleteConnection,
   onDraftChange,
   onSaveOAuthApp,
+  onSaveLocalVault,
   onTestConnection,
+  onUpdateConnection,
   working,
 }: {
   connector: IntegrationConnectorSummary;
@@ -481,7 +550,12 @@ function ConnectorCard({
   onDeleteConnection: (connection: IntegrationConnectionSummary) => void;
   onDraftChange: (patch: Partial<ConnectorDraft>) => void;
   onSaveOAuthApp: () => void;
+  onSaveLocalVault: () => void;
   onTestConnection: (connection: IntegrationConnectionSummary) => void;
+  onUpdateConnection: (
+    connection: IntegrationConnectionSummary,
+    patch: { defaultAccount?: boolean; memoryScope?: MemoryScope },
+  ) => void;
   working: string | null;
 }) {
   const canSave =
@@ -588,6 +662,7 @@ function ConnectorCard({
               {connectorSettings?.redirectUri ?? "https://api.nango.dev/oauth/callback"}
             </span>
           </div>
+          <SetupGuide steps={connector.setupGuide} />
 
           <div className="flex flex-wrap items-center gap-2">
             <PillButton
@@ -650,8 +725,56 @@ function ConnectorCard({
           ) : null}
         </div>
       ) : (
-        <div className="mt-4 rounded-lg border border-border-subtle bg-bg-canvas px-3 py-2 text-[11.5px] leading-[17px] text-text-tertiary">
-          Obsidian uses a local vault path and SafetyGovernor in Phase 6.1.
+        <div className="mt-4 grid gap-3">
+          <SetupGuide steps={connector.setupGuide} />
+          <div className="grid gap-3 sm:grid-cols-[1fr_2fr_auto]">
+            <label className="grid gap-1.5">
+              <span className="text-[12.5px] font-medium text-text-secondary">
+                Account alias
+              </span>
+              <TextInput
+                aria-label={`${connector.displayName} account alias`}
+                onChange={(event) =>
+                  onDraftChange({ accountAlias: event.target.value })
+                }
+                value={draft.accountAlias}
+              />
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-[12.5px] font-medium text-text-secondary">
+                Vault path
+              </span>
+              <TextInput
+                aria-label="Obsidian vault path"
+                onChange={(event) =>
+                  onDraftChange({ vaultPath: event.target.value })
+                }
+                placeholder="/Users/perlantir/Documents/My Vault"
+                value={draft.vaultPath}
+              />
+            </label>
+            <div className="flex items-end">
+              <PillButton
+                disabled={
+                  working === `${connector.connectorId}:local-vault` ||
+                  !draft.vaultPath.trim()
+                }
+                onClick={onSaveLocalVault}
+                type="button"
+              >
+                {working === `${connector.connectorId}:local-vault` ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="h-3.5 w-3.5" />
+                )}
+                Save vault
+              </PillButton>
+            </div>
+          </div>
+          <div className="rounded-lg border border-border-subtle bg-bg-canvas px-3 py-2 text-[11.5px] leading-[17px] text-text-tertiary">
+            Obsidian is a local-vault connector. Handle uses SafetyGovernor to
+            keep reads and writes inside this vault.
+          </div>
         </div>
       )}
 
@@ -675,6 +798,30 @@ function ConnectorCard({
                 />
               </div>
               <div className="flex items-center gap-2">
+                <select
+                  aria-label={`${connection.accountAlias} memory scope`}
+                  className="h-8 rounded-md border border-border-subtle bg-bg-canvas px-2 text-[12px] text-text-secondary"
+                  disabled={working === `${connection.id}:update`}
+                  onChange={(event) =>
+                    onUpdateConnection(connection, {
+                      memoryScope: event.target.value as MemoryScope,
+                    })
+                  }
+                  value={connection.memoryScope}
+                >
+                  <option value="NONE">Memory off</option>
+                  <option value="PROJECT_ONLY">Project memory</option>
+                  <option value="GLOBAL_AND_PROJECT">Global + project</option>
+                </select>
+                {!connection.defaultAccount ? (
+                  <PillButton
+                    disabled={working === `${connection.id}:update`}
+                    onClick={() => onUpdateConnection(connection, { defaultAccount: true })}
+                    type="button"
+                  >
+                    Make default
+                  </PillButton>
+                ) : null}
                 <PillButton
                   disabled={working === `${connection.id}:test`}
                   onClick={() => onTestConnection(connection)}
@@ -705,6 +852,25 @@ function ConnectorCard({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function SetupGuide({ steps }: { steps: string[] }) {
+  if (steps.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-border-subtle bg-bg-canvas px-3 py-2">
+      <div className="text-[11.5px] font-medium text-text-secondary">
+        Setup checklist
+      </div>
+      <ol className="mt-1 grid gap-1 pl-4 text-[11.5px] leading-[17px] text-text-tertiary">
+        {steps.map((step) => (
+          <li className="list-decimal" key={step}>
+            {step}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
