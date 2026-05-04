@@ -23,6 +23,23 @@ async function mockApi(page: Page) {
 
   await page.route("**/api/settings/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/settings/integrations") {
+      await jsonRoute(route, 200, {
+        connectors: [
+          { connectorId: "gmail", displayName: "Gmail", tier: 1 },
+          { connectorId: "slack", displayName: "Slack", tier: 1 },
+          { connectorId: "notion", displayName: "Notion", tier: 1 },
+          { connectorId: "github", displayName: "GitHub", tier: 1 },
+        ],
+        connections: [
+          { connectorId: "gmail", id: "gmail-1", status: "CONNECTED" },
+          { connectorId: "slack", id: "slack-1", status: "CONNECTED" },
+        ],
+        connectorSettings: [],
+        nango: { configured: true, host: "https://api.nango.dev" },
+      });
+      return;
+    }
     if (path === "/api/settings/providers") {
       await jsonRoute(route, 200, { providers: [] });
       return;
@@ -80,7 +97,7 @@ async function mockApi(page: Page) {
 async function openSettings(page: Page) {
   await page.goto("/sign-in");
   await page.getByRole("link", { name: "Continue as smoke user" }).click();
-  await page.getByRole("link", { name: "Settings" }).click();
+  await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 }
 
@@ -90,9 +107,15 @@ test("Settings Saved Agents creates and queues a saved agent", async ({
   const { requests } = await mockApi(page);
   await openSettings(page);
   await page.getByRole("button", { name: "Saved Agents" }).click();
+  await expect(page.getByRole("button", { name: "Saved Agents" })).toHaveAttribute("aria-current", "page");
 
   await page.getByLabel("Saved agent name").fill("Urgent digest");
-  await page.getByLabel("Saved agent connector access").fill("gmail, slack");
+  await page.getByLabel("Saved agent connector Notion").uncheck();
+  await page.getByLabel("Saved agent connector GitHub").uncheck();
+  await page.getByText("Scheduled").click();
+  await page.getByLabel("Saved agent schedule").fill("0 8 * * 1-5");
+  await page.getByLabel("Saved agent output target").selectOption("slack");
+  await page.getByLabel("Saved agent Slack output channel").fill("#updates");
   await page
     .getByLabel("Saved agent memory scope")
     .selectOption("PROJECT_ONLY");
@@ -115,6 +138,8 @@ test("Settings Saved Agents creates and queues a saved agent", async ({
     connectorAccess: ["gmail", "slack"],
     memoryScope: "PROJECT_ONLY",
     name: "Urgent digest",
-    trigger: "manual",
+    outputTarget: { channel: "#updates", type: "slack" },
+    schedule: "0 8 * * 1-5",
+    trigger: "schedule",
   });
 });
