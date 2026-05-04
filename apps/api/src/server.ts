@@ -19,6 +19,7 @@ import { healthRouter } from "./routes/health";
 import { integrationsRouter } from "./routes/integrations";
 import { memoryRouter } from "./routes/memory";
 import { projectsRouter } from "./routes/projects";
+import { searchSettingsRouter } from "./routes/searchSettings";
 import { settingsRouter } from "./routes/settings";
 import { sharedMemoryRouter } from "./routes/sharedMemory";
 import { skillsRouter } from "./routes/skills";
@@ -60,6 +61,7 @@ export async function createServer() {
   app.use("/api", memoryRouter);
   app.use("/api", projectsRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/settings", searchSettingsRouter);
   app.use("/api", sharedMemoryRouter);
   app.use("/api", skillsRouter);
   app.use("/api/tasks", tasksRouter);

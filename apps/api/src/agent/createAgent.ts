@@ -18,6 +18,7 @@ import { createBrowserToolDefinitions } from "./browserTools";
 import { createComputerUseToolDefinitions } from "./computerUseTools";
 import { createTier1IntegrationToolDefinitions } from "./integrationTools";
 import { createMemoryToolDefinitions } from "./memoryTools";
+import { createSearchToolDefinitions } from "./searchTools";
 import { createSharedMemoryToolDefinitions } from "./sharedMemoryTools";
 import { createPhase1ToolDefinitions } from "./tools";
 import {
@@ -100,6 +101,7 @@ export async function createHandleAgent(
     [
       ...createPhase1ToolDefinitions(),
       ...createMemoryToolDefinitions(),
+      ...createSearchToolDefinitions(),
       ...createSharedMemoryToolDefinitions(),
       ...createBrowserToolDefinitions(),
       ...createComputerUseToolDefinitions(),

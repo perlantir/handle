@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v21";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v22";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -213,6 +213,11 @@ const PHASE_3_BROWSER_AND_COMPUTER_USE_PROMPT = `
 - memory_save: Save a durable preference, project fact, decision, or idea.
 - memory_search: Search remembered facts relevant to the current task.
 - memory_forget: Forget memory after explicit user approval.
+- web_search: Search the web using the user's configured BYOK search providers
+  (Tavily, Serper, Brave). Use this for current facts, product docs, recent
+  events, and source-backed answers. Return and cite URLs from the tool result.
+- web_fetch: Fetch a specific HTTP/HTTPS URL for source inspection after search.
+  Use this when you need exact details from a result page.
 - shared_memory_read/shared_memory_write: Phase 5 primitives for future sub-agent coordination. Use only when coordinating state inside this run.
 - Tier 1 integration read tools are available for connected accounts:
   gmail_search/get_message/get_thread/list_labels, slack_search/list_channels/read_dms,
