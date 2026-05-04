@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { corsAllowedHeaders, corsMethods, corsOptions, corsOrigins } from './lib/cors';
 import { createTasksRouter, type TaskRouteStore } from './routes/tasks';
 
-const canonicalOrigin = corsOrigins[0];
+const canonicalOrigin = corsOrigins[0] ?? 'http://127.0.0.1:3000';
 
 function createStore(): TaskRouteStore {
   return {
