@@ -241,6 +241,13 @@ test.describe("Settings Integrations", () => {
     page,
   }) => {
     const { requests } = await mockApi(page);
+    const signInPosts: string[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "POST" && url.pathname === "/sign-in") {
+        signInPosts.push(request.url());
+      }
+    });
     page.on("popup", (popup) => {
       void popup.close();
     });
@@ -264,14 +271,14 @@ test.describe("Settings Integrations", () => {
     await expect(page.getByText("GitHub OAuth app saved")).toBeVisible();
     await expect(page.getByText("Ready to connect")).toBeVisible();
 
-    await page.getByRole("button", { name: "Start GitHub OAuth" }).click();
+    await page.getByRole("button", { name: "Connect GitHub" }).click();
     await expect(page.getByText("GitHub Connect session started")).toBeVisible();
     await expect(
       page.getByRole("link", { name: "https://connect.nango.dev/session-test" }),
     ).toBeVisible();
 
     await page.getByLabel("GitHub connection ID").fill("conn-github");
-    await page.getByRole("button", { name: "Complete GitHub connection" }).click();
+    await page.getByRole("button", { name: "Finish GitHub connection" }).click();
     await expect(page.getByText("GitHub account connected")).toBeVisible();
     await expect(page.getByText("default", { exact: true })).toBeVisible();
 
@@ -292,5 +299,6 @@ test.describe("Settings Integrations", () => {
           request.path === "/api/integrations/github/connect-session",
       )?.body,
     ).toMatchObject({ accountAlias: "default" });
+    expect(signInPosts).toEqual([]);
   });
 });

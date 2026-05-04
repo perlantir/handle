@@ -3,6 +3,7 @@ import type { NextFetchEvent, NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 const isPublicRoute = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)"]);
+const isApiRoute = createRouteMatcher(["/api(.*)", "/trpc(.*)"]);
 const canonicalWebOrigin = (
   process.env.NEXT_PUBLIC_HANDLE_WEB_BASE_URL ?? "http://127.0.0.1:3000"
 ).replace(/\/$/, "");
@@ -13,7 +14,18 @@ const testAuthBypassEnabled =
   process.env.NODE_ENV !== "production";
 
 const handleClerkMiddleware = clerkMiddleware(
-  async (auth) => {
+  async (auth, req) => {
+    if (isApiRoute(req)) {
+      const { userId } = await auth();
+      if (!userId) {
+        return NextResponse.json(
+          { error: "Authentication required" },
+          { status: 401 },
+        );
+      }
+      return NextResponse.next();
+    }
+
     await auth.protect({
       unauthenticatedUrl: signInUrl,
     });

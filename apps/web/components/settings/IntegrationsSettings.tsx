@@ -585,15 +585,18 @@ function ConnectorCard({
               ) : (
                 <PlugZap className="h-3.5 w-3.5" />
               )}
-              Start {connector.displayName} OAuth
+              Connect {connector.displayName}
             </PillButton>
             <PillButton
-              disabled={working === `${connector.connectorId}:complete`}
+              disabled={
+                working === `${connector.connectorId}:complete` ||
+                (!connectLink && !draft.connectionId.trim())
+              }
               onClick={onComplete}
               type="button"
             >
               <ShieldCheck className="h-3.5 w-3.5" />
-              Complete {connector.displayName} connection
+              Finish {connector.displayName} connection
             </PillButton>
             {connector.oauthAppUrl ? (
               <a
