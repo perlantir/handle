@@ -31,6 +31,7 @@ model Project {
   updatedAt            DateTime                     @updatedAt
   conversations        Conversation[]
   notificationSettings ProjectNotificationSettings?
+  searchSettings       ProjectSearchSettings?
 
   @@index([createdAt])
 }
@@ -103,6 +104,12 @@ enum MemoryScope {
   GLOBAL_AND_PROJECT
   PROJECT_ONLY
   NONE
+}
+
+enum SearchProviderId {
+  TAVILY
+  SERPER
+  BRAVE
 }
 
 enum IntegrationConnectorId {
@@ -190,6 +197,34 @@ model NotificationDelivery {
   @@index([userId, createdAt])
   @@index([agentRunId])
   @@index([status])
+}
+
+model SearchProviderConfig {
+  id                 String           @id @default(cuid())
+  userId             String
+  providerId         SearchProviderId
+  enabled            Boolean          @default(false)
+  keychainAlias      String?
+  rateLimitPerMinute Int?
+  memoryScope        MemoryScope      @default(NONE)
+  lastTestedAt       DateTime?
+  lastErrorCode      String?
+  lastErrorMessage   String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([userId, providerId])
+  @@index([userId, enabled])
+}
+
+model ProjectSearchSettings {
+  id              String            @id @default(cuid())
+  projectId       String            @unique
+  project         Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  defaultProvider SearchProviderId?
+  fallbackOrder   Json              @default("[\"TAVILY\",\"SERPER\",\"BRAVE\",\"BUILT_IN\"]")
+  memoryScope     MemoryScope       @default(NONE)
+  updatedAt       DateTime          @default(now()) @updatedAt
 }
 
 enum NotificationEventType {
