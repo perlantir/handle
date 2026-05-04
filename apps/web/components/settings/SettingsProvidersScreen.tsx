@@ -33,6 +33,7 @@ import {
 } from "@/lib/settingsProviders";
 import { BrowserSettings } from "./BrowserSettings";
 import { ExecutionSettings } from "./ExecutionSettings";
+import { IntegrationsSettings } from "./IntegrationsSettings";
 import { MemorySettings } from "./MemorySettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 
@@ -89,7 +90,13 @@ const providerMeta: Record<
   },
 };
 
-type SettingsSection = "Browser" | "Defaults" | "Execution" | "Memory" | "Providers";
+type SettingsSection =
+  | "Browser"
+  | "Defaults"
+  | "Execution"
+  | "Integrations"
+  | "Memory"
+  | "Providers";
 
 const settingsNav: Array<{
   disabled?: boolean;
@@ -101,6 +108,7 @@ const settingsNav: Array<{
   { label: "Execution", section: "Execution" },
   { label: "Browser", section: "Browser" },
   { label: "Memory", section: "Memory" },
+  { label: "Integrations", section: "Integrations" },
   { disabled: true, label: "Profile" },
   { disabled: true, label: "Approvals & trust" },
   { disabled: true, label: "Privacy" },
@@ -533,6 +541,7 @@ export function SettingsProvidersScreen() {
           {activeSection === "Execution" ? <ExecutionSettings /> : null}
           {activeSection === "Browser" ? <BrowserSettings /> : null}
           {activeSection === "Defaults" ? <ProjectDefaultsSettings /> : null}
+          {activeSection === "Integrations" ? <IntegrationsSettings /> : null}
           {activeSection === "Memory" ? <MemorySettings /> : null}
 
           {activeSection === "Providers" && loading ? (
