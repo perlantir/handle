@@ -395,24 +395,31 @@ export function createNangoService({
       });
     }
 
-    const body = {
-      credentials: {
-        client_id: setting.oauthClientId,
-        client_secret: clientSecret,
-        scopes: connectorScopesString(connector),
-        type: "OAUTH2" as const,
-      },
+    const credentials = {
+      client_id: setting.oauthClientId,
+      client_secret: clientSecret,
+      scopes: connectorScopesString(connector),
+      type: "OAUTH2" as const,
+    };
+    const createBody = {
+      credentials,
       display_name: `Handle Dev - ${connector.displayName}`,
       provider: connector.nangoProviderId,
       unique_key: integrationId,
     };
+    const updateBody = {
+      credentials: {
+        ...credentials,
+      },
+      display_name: `Handle Dev - ${connector.displayName}`,
+    };
 
     try {
       await client.getIntegration({ uniqueKey: integrationId });
-      await client.updateIntegration({ uniqueKey: integrationId }, body);
+      await client.updateIntegration({ uniqueKey: integrationId }, updateBody);
     } catch (err) {
       if (errorStatus(err) !== 404) throw err;
-      await client.createIntegration(body);
+      await client.createIntegration(createBody);
     }
 
     await prisma.integrationConnectorSettings.update({
@@ -441,23 +448,38 @@ export function createNangoService({
         message: `${connector.displayName} uses local vault setup, not Nango Connect.`,
       });
     }
-    await syncConnectorWithNango(connector);
-    const client = await getClient();
     const alias = accountAlias?.trim() || "default";
-    const session = await client.createConnectSession({
-      allowed_integrations: [connector.nangoIntegrationId ?? connectorId],
-      end_user: {
-        id: userId,
+    let session: Awaited<ReturnType<NangoClient["createConnectSession"]>>;
+    try {
+      await syncConnectorWithNango(connector);
+      const client = await getClient();
+      session = await client.createConnectSession({
+        allowed_integrations: [connector.nangoIntegrationId ?? connectorId],
         tags: {
+          end_user_id: userId,
+          handle_account_alias: alias,
           handle_connector_id: connectorId,
+          handle_user_id: userId,
         },
-      },
-      tags: {
-        handle_account_alias: alias,
-        handle_connector_id: connectorId,
-        handle_user_id: userId,
-      },
-    });
+      });
+    } catch (err) {
+      const diagnostic = nangoErrorDiagnostic(err);
+      logger.warn(
+        {
+          connectorId,
+          nangoPhase: "create_connect_session",
+          nangoStatus: diagnostic.status,
+          nangoResponse: diagnostic.response,
+        },
+        "Nango Connect session creation failed",
+      );
+      throw new IntegrationError({
+        code: integrationErrorCode(err),
+        connectorId,
+        message: `Nango rejected ${connector.displayName} Connect session: ${diagnostic.message}`,
+        ...(diagnostic.status !== null ? { status: diagnostic.status } : {}),
+      });
+    }
 
     await prisma.integrationConnectorSettings.update({
       data: {
@@ -866,6 +888,82 @@ function statusFromErrorCode(code: string) {
   if (code === "auth_revoked") return "REVOKED";
   if (code === "rate_limited") return "RATE_LIMITED";
   return "ERROR";
+}
+
+function nangoErrorDiagnostic(err: unknown) {
+  const status = errorStatus(err);
+  const response = responseData(err);
+  const message = responseMessage(response) ?? integrationErrorMessage(err);
+  return {
+    message,
+    response: redactedJson(response),
+    status,
+  };
+}
+
+function responseData(err: unknown) {
+  if (typeof err !== "object" || err === null) return null;
+  if (
+    "response" in err &&
+    typeof err.response === "object" &&
+    err.response !== null &&
+    "data" in err.response
+  ) {
+    return err.response.data;
+  }
+  return null;
+}
+
+function responseMessage(response: unknown): string | null {
+  if (typeof response === "string") return response;
+  if (typeof response !== "object" || response === null) return null;
+
+  const record = response as Record<string, unknown>;
+  const nestedError =
+    typeof record.error === "object" && record.error !== null
+      ? (record.error as Record<string, unknown>)
+      : null;
+  const candidates = [
+    record.message,
+    record.error,
+    nestedError?.message,
+    nestedError ? nestedErrorMessages(nestedError) : null,
+    typeof record.errors === "string" ? record.errors : null,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function nestedErrorMessages(error: Record<string, unknown>) {
+  const errors = error.errors;
+  if (!Array.isArray(errors)) return null;
+  const messages = errors
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (typeof item === "object" && item !== null) {
+        const message = (item as Record<string, unknown>).message;
+        return typeof message === "string" ? message : null;
+      }
+      return null;
+    })
+    .filter((message): message is string => Boolean(message));
+  if (messages.length === 0) return null;
+  const code = typeof error.code === "string" ? `${error.code}: ` : "";
+  return `${code}${messages.join("; ")}`;
+}
+
+function redactedJson(value: unknown) {
+  if (value === null || value === undefined) return null;
+  return JSON.parse(JSON.stringify(value, (_key, current) => {
+    if (typeof current === "string") return integrationErrorMessage(current);
+    return current;
+  }));
 }
 
 function previewProfile(profile: unknown) {

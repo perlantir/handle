@@ -306,6 +306,7 @@ function integrationHttpStatus(err: unknown) {
     }
     if (err.code === "not_connected" || err.code === "provider_not_found") return 404;
     if (err.code === "rate_limited") return 429;
+    if (err.status && err.status >= 400 && err.status < 500) return err.status;
   }
   return 500;
 }
