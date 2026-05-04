@@ -23,6 +23,9 @@ smoke-artifacts/
 *.log
 logs/
 
+# Local dev scripts
+start-handle.sh
+
 # OS / editor
 .DS_Store
 .idea/
