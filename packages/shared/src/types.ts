@@ -282,6 +282,37 @@ export type BrowserMode = 'SEPARATE_PROFILE' | 'ACTUAL_CHROME';
 
 export type MemoryScope = 'GLOBAL_AND_PROJECT' | 'PROJECT_ONLY' | 'NONE';
 
+export type SearchProviderId = 'TAVILY' | 'SERPER' | 'BRAVE';
+
+export type SearchProviderStatus = 'configured' | 'missing_key' | 'rate_limited' | 'error';
+
+export interface SearchProviderSummary {
+  docsUrl: string;
+  enabled: boolean;
+  hasApiKey: boolean;
+  id: SearchProviderId;
+  label: string;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  lastTestedAt?: string | null;
+  memoryScope: MemoryScope;
+  rateLimitPerMinute?: number | null;
+  status: SearchProviderStatus;
+}
+
+export interface ProjectSearchSettingsSummary {
+  defaultProvider?: SearchProviderId | null;
+  fallbackOrder: Array<SearchProviderId | 'BUILT_IN'>;
+  memoryScope: MemoryScope;
+  projectId: string;
+  updatedAt?: string | null;
+}
+
+export interface SearchSettingsResponse {
+  project?: ProjectSearchSettingsSummary | null;
+  providers: SearchProviderSummary[];
+}
+
 export type IntegrationConnectorId =
   | 'gmail'
   | 'slack'
