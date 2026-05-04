@@ -1,0 +1,193 @@
+#!/usr/bin/env node
+import { createRequire } from "node:module";
+import { config } from "dotenv";
+
+const scenario = process.argv[2];
+if (!scenario) throw new Error("Usage: project-memory-controls.mjs <scenario>");
+const requireApi = createRequire(new URL("../../apps/api/package.json", import.meta.url));
+const express = requireApi("express");
+const request = requireApi("supertest");
+config({ path: new URL("../../.env", import.meta.url) });
+const { createProjectsRouter } = await import("../../apps/api/src/routes/projects.ts");
+const { prisma } = await import("../../apps/api/src/lib/prisma.ts");
+const { appendMessageToZep } = await import("../../apps/api/src/memory/sessionMemory.ts");
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function app(options = {}) {
+  const server = express();
+  server.use(express.json());
+  server.use(
+    "/api",
+    createProjectsRouter({
+      getUserId: () => "smoke-project-memory-controls",
+      ...options,
+      store: prisma,
+      runAgent: async () => undefined,
+    }),
+  );
+  return server;
+}
+
+async function run() {
+  const suffix = Date.now();
+
+  if (scenario === "new-project-inherits-providers") {
+    const providerSnapshot = await prisma.providerConfig.findMany();
+    await prisma.memorySettings.upsert({
+      create: {
+        defaultScopeForNewProjects: "PROJECT_ONLY",
+        id: "global",
+        provider: "self-hosted",
+      },
+      update: { defaultScopeForNewProjects: "PROJECT_ONLY" },
+      where: { id: "global" },
+    });
+    await prisma.providerConfig.updateMany({ data: { enabled: false } });
+
+    try {
+      const response = await request(
+        app({
+          keychain: {
+            getCredential: async (account) => {
+              if (account === "anthropic:apiKey") return "test-key-not-real";
+              throw new Error("not found");
+            },
+          },
+        }),
+      )
+        .post("/api/projects")
+        .send({ name: `Provider inherit ${suffix}` })
+        .expect(201);
+      const project = response.body.project;
+      assert(
+        project.memoryScope === "PROJECT_ONLY",
+        `Expected PROJECT_ONLY, got ${project.memoryScope}`,
+      );
+      assert(
+        project.defaultProvider === "anthropic",
+        `Expected anthropic, got ${project.defaultProvider}`,
+      );
+      assert(project.defaultModel, "Expected project to inherit a default model");
+    } finally {
+      for (const provider of providerSnapshot) {
+        await prisma.providerConfig.update({
+          data: {
+            authMode: provider.authMode,
+            baseURL: provider.baseURL,
+            enabled: provider.enabled,
+            fallbackOrder: provider.fallbackOrder,
+            modelName: provider.modelName,
+            primaryModel: provider.primaryModel,
+          },
+          where: { id: provider.id },
+        });
+      }
+    }
+    return;
+  }
+
+  if (scenario === "project-edit-scope") {
+    const project = await prisma.project.create({
+      data: {
+        id: `project-edit-scope-${suffix}`,
+        memoryScope: "PROJECT_ONLY",
+        name: `Project Edit Scope ${suffix}`,
+      },
+    });
+    const response = await request(app())
+      .put(`/api/projects/${project.id}`)
+      .send({
+        defaultBackend: "LOCAL",
+        memoryScope: "GLOBAL_AND_PROJECT",
+        name: `Project Edit Scope Updated ${suffix}`,
+      })
+      .expect(200);
+    assert(response.body.project.memoryScope === "GLOBAL_AND_PROJECT", "Project edit did not persist memory scope");
+    assert(response.body.project.defaultBackend === "LOCAL", "Project edit did not persist backend");
+    const persisted = await prisma.project.findUnique({ where: { id: project.id } });
+    assert(persisted?.memoryScope === "GLOBAL_AND_PROJECT", "Project memory scope was not persisted in DB");
+    return;
+  }
+
+  if (scenario === "project-backend-persists") {
+    const response = await request(app())
+      .post("/api/projects")
+      .send({
+        defaultBackend: "LOCAL",
+        name: `Backend Persist ${suffix}`,
+        workspaceScope: "DEFAULT_WORKSPACE",
+      })
+      .expect(201);
+    const project = response.body.project;
+    assert(project.defaultBackend === "LOCAL", `Create returned ${project.defaultBackend}`);
+    const persisted = await prisma.project.findUnique({ where: { id: project.id } });
+    assert(persisted?.defaultBackend === "LOCAL", `DB persisted ${persisted?.defaultBackend}`);
+    return;
+  }
+
+  if (scenario === "project-backend-edit-persists") {
+    const project = await prisma.project.create({
+      data: {
+        defaultBackend: "LOCAL",
+        id: `project-backend-edit-${suffix}`,
+        name: `Backend Edit ${suffix}`,
+      },
+    });
+    const response = await request(app())
+      .put(`/api/projects/${project.id}`)
+      .send({ defaultBackend: "E2B", name: project.name })
+      .expect(200);
+    assert(response.body.project.defaultBackend === "E2B", `Edit returned ${response.body.project.defaultBackend}`);
+    const persisted = await prisma.project.findUnique({ where: { id: project.id } });
+    assert(persisted?.defaultBackend === "E2B", `DB persisted ${persisted?.defaultBackend}`);
+    return;
+  }
+
+  if (scenario === "memory-toggle-off-respected") {
+    let zepCalls = 0;
+    const fakeClient = {
+      addMemoryMessages: async () => {
+        zepCalls += 1;
+        return { ok: true };
+      },
+      checkConnection: async () => {
+        zepCalls += 1;
+        return { provider: "self-hosted", status: "online" };
+      },
+      ensureSession: async () => {
+        zepCalls += 1;
+        return { ok: true };
+      },
+      ensureUser: async () => {
+        zepCalls += 1;
+        return { ok: true };
+      },
+      getSessionMemory: async () => {
+        zepCalls += 1;
+        return { ok: true, value: [] };
+      },
+    };
+    await appendMessageToZep({
+      content: "My favorite color is teal",
+      memoryEnabled: false,
+      project: { id: `memory-toggle-off-${suffix}`, memoryScope: "PROJECT_ONLY" },
+      role: "USER",
+    }, fakeClient);
+    assert(zepCalls === 0, `Memory-disabled append made ${zepCalls} Zep calls`);
+    return;
+  }
+
+  throw new Error(`Unknown project memory controls scenario: ${scenario}`);
+}
+
+run()
+  .then(() => {
+    console.log(`[project-memory-controls:${scenario}] PASS`);
+  })
+  .catch((error) => {
+    console.error(`[project-memory-controls:${scenario}] FAIL ${error instanceof Error ? error.stack : String(error)}`);
+    process.exitCode = 1;
+  });

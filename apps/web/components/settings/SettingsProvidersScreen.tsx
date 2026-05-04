@@ -33,6 +33,7 @@ import {
 } from "@/lib/settingsProviders";
 import { BrowserSettings } from "./BrowserSettings";
 import { ExecutionSettings } from "./ExecutionSettings";
+import { MemorySettings } from "./MemorySettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 
 type OpenAIAuthChoice = "apiKey" | "both" | "chatgpt-oauth";
@@ -88,7 +89,7 @@ const providerMeta: Record<
   },
 };
 
-type SettingsSection = "Browser" | "Defaults" | "Execution" | "Providers";
+type SettingsSection = "Browser" | "Defaults" | "Execution" | "Memory" | "Providers";
 
 const settingsNav: Array<{
   disabled?: boolean;
@@ -99,9 +100,9 @@ const settingsNav: Array<{
   { label: "Defaults", section: "Defaults" },
   { label: "Execution", section: "Execution" },
   { label: "Browser", section: "Browser" },
+  { label: "Memory", section: "Memory" },
   { disabled: true, label: "Profile" },
   { disabled: true, label: "Approvals & trust" },
-  { disabled: true, label: "Memory" },
   { disabled: true, label: "Privacy" },
   { disabled: true, label: "Billing" },
   { disabled: true, label: "Keyboard" },
@@ -532,6 +533,7 @@ export function SettingsProvidersScreen() {
           {activeSection === "Execution" ? <ExecutionSettings /> : null}
           {activeSection === "Browser" ? <BrowserSettings /> : null}
           {activeSection === "Defaults" ? <ProjectDefaultsSettings /> : null}
+          {activeSection === "Memory" ? <MemorySettings /> : null}
 
           {activeSection === "Providers" && loading ? (
             <div className="flex items-center gap-2 text-[12.5px] text-text-tertiary">

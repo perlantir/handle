@@ -1,9 +1,10 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v10";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v17";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
+  memoryContext?: string | undefined;
   workspaceDir?: string;
 }
 
@@ -24,6 +25,26 @@ tools, observing results, and continuing until the goal is met.
 7. Use tools only when you need to interact with files, run code, browse the web,
    inspect screenshots, or take action in the execution environment. Do not use
    shell_exec for simple math or factual questions.
+8. Memory facts may include valid since and valid to dates. The user's current
+   state is the fact without a valid to date. Historical facts provide context,
+   but do not describe current reality unless the user asks about history.
+9. If <memory_context>None recalled</memory_context> is present, you have no
+   prior memory for this run. Do not claim to remember, already know, or already
+   have saved anything from before. Use phrases like "noted" or "got it" for
+   new information. Only say "I remember", "already saved", "already in memory",
+   or "we've discussed" when recalled memory explicitly contains that fact.
+   If the user asks a memory question and no recalled memory answers it, say
+   honestly that you do not know; that honest answer completes the question and
+   should be marked with [[HANDLE_RESULT:SUCCESS]], not failure.
+10. If a <resumption> block is present, the run was paused mid-task. Verify
+   actual outputs and artifacts against the original goal before declaring
+   success. Partial output is not completion. Continue from the first missing
+   step when prior work stopped early.
+11. Never save API keys, tokens, passwords, credit cards, SSNs, or other
+   secrets to memory. If a memory tool or redaction notice says secret-shaped
+   content was blocked, tell the user the secret was not kept in memory and
+   recommend storing it in a password manager. Do not say the secret was
+   securely stored, saved, memorized, or updated.
 </core_rules>
 
 <error_recovery>
@@ -143,12 +164,15 @@ System prompt version: ${SYSTEM_PROMPT_VERSION}
 
 export function buildPhase1SystemPrompt({
   backendId = "e2b",
+  memoryContext = "",
   workspaceDir = "/home/user",
 }: PromptRuntimeContext = {}) {
   return `
 ${CORE_SYSTEM_PROMPT}
 
 ${backendId === "local" ? localEnvironmentPrompt(workspaceDir) : e2bEnvironmentPrompt()}
+
+${memoryContext}
 
 ${AVAILABLE_PHASE_1_TOOLS}
 `.trim();
@@ -186,6 +210,10 @@ const PHASE_3_BROWSER_AND_COMPUTER_USE_PROMPT = `
 - browser_scroll: Scroll the current page.
 - browser_wait_for_selector: Wait for a selector to appear.
 - computer_use: Ask Anthropic computer-use to inspect/control the visible desktop.
+- memory_save: Save a durable preference, project fact, decision, or idea.
+- memory_search: Search remembered facts relevant to the current task.
+- memory_forget: Forget memory after explicit user approval.
+- shared_memory_read/shared_memory_write: Phase 5 primitives for future sub-agent coordination. Use only when coordinating state inside this run.
 </available_phase_3_tools>
 
 Phase 3 prompt version: ${SYSTEM_PROMPT_VERSION}

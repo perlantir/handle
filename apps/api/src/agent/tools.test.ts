@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { subscribeToTask } from '../lib/eventBus';
+import { listActionLogEntries } from '../lib/actionLog';
 import { createPhase1ToolDefinitions } from './tools';
 import { ShellRateLimitError } from '../execution/localBackend';
 import type { E2BSandboxLike, ExecutionBackend } from '../execution/types';
@@ -34,9 +38,12 @@ function createMockSandbox(): E2BSandboxLike {
   };
 }
 
-function createMockBackend(sandbox: E2BSandboxLike = createMockSandbox()): ExecutionBackend {
+function createMockBackend(
+  sandbox: E2BSandboxLike = createMockSandbox(),
+  options: { id?: ExecutionBackend['id']; workspaceDir?: string } = {},
+): ExecutionBackend {
   return {
-    id: 'e2b',
+    id: options.id ?? 'e2b',
     async browserSession() {
       throw new Error('browser not used in this test');
     },
@@ -57,7 +64,7 @@ function createMockBackend(sandbox: E2BSandboxLike = createMockSandbox()): Execu
       await sandbox.files.write(path, content);
     },
     getWorkspaceDir() {
-      return '/home/user';
+      return options.workspaceDir ?? '/home/user';
     },
     async initialize() {},
     async shellExec(command, opts) {
@@ -76,6 +83,20 @@ function context(taskId: string, sandbox = createMockSandbox()): ToolExecutionCo
 }
 
 describe('phase 1 tools', () => {
+  const originalLogDir = process.env.HANDLE_LOG_DIR;
+
+  beforeEach(async () => {
+    process.env.HANDLE_LOG_DIR = await mkdtemp(join(tmpdir(), 'handle-tools-action-log-test-'));
+  });
+
+  afterEach(() => {
+    if (originalLogDir === undefined) {
+      delete process.env.HANDLE_LOG_DIR;
+    } else {
+      process.env.HANDLE_LOG_DIR = originalLogDir;
+    }
+  });
+
   it('exposes registry metadata for all Phase 1 tools', () => {
     const definitions = createPhase1ToolDefinitions();
 
@@ -166,5 +187,43 @@ describe('phase 1 tools', () => {
       'content from /tmp/a.txt',
     );
     await expect(fileList.implementation({ path: '/tmp' }, toolContext)).resolves.toContain('example.txt');
+  });
+
+  it('only marks newly-created local workspace files as reversible actions', async () => {
+    const definitions = createPhase1ToolDefinitions();
+    const fileWrite = definitions.find((definition) => definition.name === 'file_write');
+
+    if (!fileWrite) throw new Error('file_write definition missing');
+
+    const creatingSandbox = createMockSandbox();
+    creatingSandbox.files.read = async () => {
+      throw new Error('missing');
+    };
+
+    await fileWrite.implementation(
+      { content: 'abc', path: '/home/user/e2b.txt' },
+      {
+        backend: createMockBackend(creatingSandbox, { id: 'e2b', workspaceDir: '/home/user' }),
+        sandbox: creatingSandbox,
+        taskId: 'run-e2b-action',
+      },
+    );
+    await fileWrite.implementation(
+      { content: 'abc', path: '/Users/test/workspace/local.txt' },
+      {
+        backend: createMockBackend(creatingSandbox, { id: 'local', workspaceDir: '/Users/test/workspace' }),
+        sandbox: creatingSandbox,
+        taskId: 'run-local-action',
+      },
+    );
+
+    const entries = await listActionLogEntries();
+    expect(entries.find((entry) => entry.target === '/home/user/e2b.txt')).toMatchObject({
+      reversible: false,
+    });
+    expect(entries.find((entry) => entry.target === '/Users/test/workspace/local.txt')).toMatchObject({
+      reversible: true,
+      undoCommand: "rm '/Users/test/workspace/local.txt'",
+    });
   });
 });

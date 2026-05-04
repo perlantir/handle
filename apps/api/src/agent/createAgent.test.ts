@@ -190,6 +190,11 @@ describe("createHandleAgent", () => {
       "file_write",
       "file_read",
       "file_list",
+      "memory_save",
+      "memory_search",
+      "memory_forget",
+      "shared_memory_read",
+      "shared_memory_write",
       "browser_navigate",
       "browser_click",
       "browser_type",
@@ -200,5 +205,31 @@ describe("createHandleAgent", () => {
       "browser_wait_for_selector",
       "computer_use",
     ]);
+  });
+
+  it("treats recalled memory JSON braces as literal prompt text", async () => {
+    const llm = new FakeStreamingChatModel({
+      responses: [
+        new AIMessage("I can use that memory.\n[[HANDLE_RESULT:SUCCESS]]"),
+      ],
+    });
+    const runtimeContext = {
+      ...context("task-agent-memory-braces-test"),
+      memoryContext: `<memory_context>
+- [stated, valid since 2026-05-03] Latest HN export:
+  {
+    "rank": 1,
+    "title": "Brace-heavy recalled memory"
+  }
+</memory_context>`,
+    };
+
+    const executor = await createHandleAgent(runtimeContext, { llm });
+    const result = await executor.invoke({
+      chat_history: [],
+      input: "Use the recalled memory.",
+    });
+
+    expect(result.output).toContain("[[HANDLE_RESULT:SUCCESS]]");
   });
 });

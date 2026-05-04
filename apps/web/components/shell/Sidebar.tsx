@@ -3,7 +3,7 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import type { ConversationSummary, ProjectSummary } from '@handle/shared';
-import { Calendar, Check, Folder, Home, MoreHorizontal, Pencil, Plug, Plus, Settings, Sparkles, Trash2, X } from 'lucide-react';
+import { Brain, Calendar, Check, Folder, History, Home, MoreHorizontal, Pencil, Plug, Plus, Settings, Sparkles, Trash2, X } from 'lucide-react';
 import {
   createProject,
   deleteConversation,
@@ -16,6 +16,7 @@ import {
 } from '@/lib/api';
 import { Modal, PillButton } from '@/components/design-system';
 import { useHandleAuth } from '@/lib/handleAuth';
+import { listSettingsProviders, type SettingsProvider } from '@/lib/settingsProviders';
 import { cn } from '@/lib/utils';
 import { SidebarNavItem } from './SidebarNavItem';
 import { Wordmark } from './Wordmark';
@@ -23,6 +24,8 @@ import { Wordmark } from './Wordmark';
 const primaryNavItems = [
   { href: '/', icon: Home, label: 'Home' },
   { href: '/tasks', icon: Folder, label: 'Tasks' },
+  { href: '/memory', icon: Brain, label: 'Memory' },
+  { href: '/actions', icon: History, label: 'Actions' },
   { href: '/skills', icon: Sparkles, label: 'Skills' },
   { href: '/schedules', icon: Calendar, label: 'Schedules' },
   { href: '/integrations', icon: Plug, label: 'Integrations' },
@@ -37,7 +40,9 @@ export function Sidebar() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProjectDraft>(() => defaultProjectDraft());
+  const [editingProject, setEditingProject] = useState<ProjectSummary | null>(null);
   const [openMenu, setOpenMenu] = useState<{ id: string; type: 'conversation' | 'project' } | null>(null);
+  const [providers, setProviders] = useState<SettingsProvider[]>([]);
   const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null);
   const [conversationRenameValue, setConversationRenameValue] = useState('');
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
@@ -51,19 +56,23 @@ export function Sidebar() {
 
     getToken()
       .then(async (token) => {
-        const loadedProjects = await listProjects({ token });
+        const [loadedProjects, loadedProviders] = await Promise.all([
+          listProjects({ token }),
+          listSettingsProviders().catch(() => []),
+        ]);
         const conversations = await Promise.all(
           loadedProjects.map(async (project) => [
             project.id,
             await listConversations({ projectId: project.id, token }).catch(() => []),
           ] as const),
         );
-        return { conversations: Object.fromEntries(conversations), loadedProjects };
+        return { conversations: Object.fromEntries(conversations), loadedProjects, loadedProviders };
       })
-      .then(({ conversations, loadedProjects }) => {
+      .then(({ conversations, loadedProjects, loadedProviders }) => {
         if (!cancelled) {
           setProjects(loadedProjects);
           setConversationsByProject(conversations);
+          setProviders(loadedProviders);
         }
       })
       .catch(() => {
@@ -86,10 +95,15 @@ export function Sidebar() {
       const input: Parameters<typeof createProject>[0]['input'] = {
         browserMode: draft.browserMode,
         defaultBackend: draft.defaultBackend,
+        memoryScope: draft.memoryScope,
         name: draft.name.trim(),
         permissionMode: draft.permissionMode,
         workspaceScope: draft.workspaceScope,
       };
+      if (draft.defaultProvider && draft.defaultModel) {
+        input.defaultProvider = draft.defaultProvider;
+        input.defaultModel = draft.defaultModel;
+      }
       if (draft.workspaceScope === 'CUSTOM_FOLDER') {
         input.customScopePath = draft.customScopePath.trim();
       }
@@ -101,6 +115,36 @@ export function Sidebar() {
       window.location.href = `/?projectId=${project.id}`;
     } catch (error) {
       setCreateError(error instanceof Error ? error.message : 'Could not create project');
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleSaveProjectEdit() {
+    if (!editingProject) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const token = await getToken();
+      const input: Parameters<typeof updateProject>[0]['input'] = {
+        browserMode: draft.browserMode,
+        defaultBackend: draft.defaultBackend,
+        defaultModel: draft.defaultModel || null,
+        defaultProvider: draft.defaultProvider || null,
+        memoryScope: draft.memoryScope,
+        name: draft.name.trim(),
+        permissionMode: draft.permissionMode,
+        workspaceScope: draft.workspaceScope,
+      };
+      if (draft.workspaceScope === 'CUSTOM_FOLDER') {
+        input.customScopePath = draft.customScopePath.trim();
+      }
+      const updated = await updateProject({ input, projectId: editingProject.id, token });
+      setProjects((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setEditingProject(null);
+      setDraft(defaultProjectDraft());
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Could not save project');
     } finally {
       setCreating(false);
     }
@@ -178,14 +222,16 @@ export function Sidebar() {
 
   return (
     <aside className="flex w-[244px] shrink-0 flex-col border-r border-border-subtle bg-bg-canvas">
-      <div className="flex h-16 items-center px-6">
+      <div className="flex h-16 shrink-0 items-center px-6">
         <Wordmark />
       </div>
-      <nav className="flex flex-1 flex-col gap-1 py-3">
-        {primaryNavItems.map((item) => (
-          <SidebarNavItem key={item.href} {...item} />
-        ))}
-        <div className="mt-3 border-t border-border-subtle px-3 pt-3">
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden py-3">
+        <div className="shrink-0">
+          {primaryNavItems.map((item) => (
+            <SidebarNavItem key={item.href} {...item} />
+          ))}
+        </div>
+        <div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-border-subtle px-3 pt-3">
           <div className="mb-2 flex items-center justify-between px-3">
             <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-text-muted">
               Projects
@@ -193,12 +239,16 @@ export function Sidebar() {
             <button
               aria-label="New project"
               className="flex h-6 w-6 items-center justify-center rounded-pill text-text-tertiary hover:bg-bg-subtle hover:text-text-primary"
-              onClick={() => setCreateOpen(true)}
+              onClick={() => {
+                setDraft(defaultProjectDraft());
+                setCreateOpen(true);
+              }}
               type="button"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
           </div>
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
           <div className="flex flex-col gap-1">
             {projects.map((project) => {
               const projectConversations = conversationsByProject[project.id] ?? [];
@@ -259,6 +309,18 @@ export function Sidebar() {
                     </button>
                     {openMenu?.type === 'project' && openMenu.id === project.id && (
                       <div className="absolute right-1 top-8 z-20 grid min-w-[132px] gap-1 rounded-[8px] border border-border-subtle bg-bg-surface p-1 shadow-lg">
+                        <button
+                          className="flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-text-secondary hover:bg-bg-subtle hover:text-text-primary"
+                          onClick={() => {
+                            setOpenMenu(null);
+                            setEditingProject(project);
+                            setDraft(draftFromProject(project));
+                          }}
+                          type="button"
+                        >
+                          <Settings className="h-3 w-3" />
+                          Edit
+                        </button>
                         <button
                           className="flex items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[11.5px] text-text-secondary hover:bg-bg-subtle hover:text-text-primary"
                           onClick={() => {
@@ -374,9 +436,10 @@ export function Sidebar() {
               );
             })}
           </div>
+          </div>
         </div>
       </nav>
-      <div className="border-t border-border-subtle py-3">
+      <div className="shrink-0 border-t border-border-subtle py-3">
         <SidebarNavItem href="/settings" icon={Settings} label="Settings" />
       </div>
       {createOpen && (
@@ -388,7 +451,7 @@ export function Sidebar() {
               void handleCreateProject();
             }}
           >
-            <ProjectDraftFields draft={draft} onChange={setDraft} />
+            <ProjectDraftFields draft={draft} onChange={setDraft} providers={providers} />
             {createError && <p className="text-[12px] text-status-error">{createError}</p>}
             <div className="flex justify-end gap-2">
               <PillButton onClick={() => setCreateOpen(false)} type="button" variant="ghost">
@@ -396,6 +459,28 @@ export function Sidebar() {
               </PillButton>
               <PillButton disabled={creating || !canSubmitProjectDraft(draft)} type="submit" variant="primary">
                 Create project
+              </PillButton>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {editingProject && (
+        <Modal onClose={() => setEditingProject(null)} title="Edit project">
+          <form
+            className="grid gap-4 px-8 pb-8"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleSaveProjectEdit();
+            }}
+          >
+            <ProjectDraftFields draft={draft} onChange={setDraft} providers={providers} />
+            {createError && <p className="text-[12px] text-status-error">{createError}</p>}
+            <div className="flex justify-end gap-2">
+              <PillButton onClick={() => setEditingProject(null)} type="button" variant="ghost">
+                Cancel
+              </PillButton>
+              <PillButton disabled={creating || !canSubmitProjectDraft(draft)} type="submit" variant="primary">
+                Save project
               </PillButton>
             </div>
           </form>
@@ -409,6 +494,9 @@ interface ProjectDraft {
   browserMode: ProjectSummary['browserMode'];
   customScopePath: string;
   defaultBackend: ProjectSummary['defaultBackend'];
+  defaultModel: string;
+  defaultProvider: string;
+  memoryScope: ProjectSummary['memoryScope'];
   name: string;
   permissionMode: ProjectSummary['permissionMode'];
   workspaceScope: ProjectSummary['workspaceScope'];
@@ -419,9 +507,26 @@ function defaultProjectDraft(): ProjectDraft {
     browserMode: 'SEPARATE_PROFILE',
     customScopePath: '',
     defaultBackend: 'E2B',
+    defaultModel: '',
+    defaultProvider: '',
+    memoryScope: 'GLOBAL_AND_PROJECT',
     name: '',
     permissionMode: 'ASK',
     workspaceScope: 'DEFAULT_WORKSPACE',
+  };
+}
+
+function draftFromProject(project: ProjectSummary): ProjectDraft {
+  return {
+    browserMode: project.browserMode,
+    customScopePath: project.customScopePath ?? '',
+    defaultBackend: project.defaultBackend,
+    defaultModel: project.defaultModel ?? '',
+    defaultProvider: project.defaultProvider ?? '',
+    memoryScope: project.memoryScope,
+    name: project.name,
+    permissionMode: project.permissionMode,
+    workspaceScope: project.workspaceScope,
   };
 }
 
@@ -434,9 +539,11 @@ function canSubmitProjectDraft(draft: ProjectDraft) {
 function ProjectDraftFields({
   draft,
   onChange,
+  providers,
 }: {
   draft: ProjectDraft;
   onChange: Dispatch<SetStateAction<ProjectDraft>>;
+  providers: SettingsProvider[];
 }) {
   const { getToken } = useHandleAuth();
   const [folderError, setFolderError] = useState<string | null>(null);
@@ -534,6 +641,25 @@ function ProjectDraftFields({
       </label>
 
       <label className="grid gap-1.5">
+        <span className="text-[12.5px] font-medium text-text-secondary">Memory scope</span>
+        <select
+          aria-label="Project memory scope"
+          className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none"
+          onChange={(event) =>
+            onChange((current) => ({
+              ...current,
+              memoryScope: event.target.value as ProjectSummary['memoryScope'],
+            }))
+          }
+          value={draft.memoryScope}
+        >
+          <option value="GLOBAL_AND_PROJECT">Global + project</option>
+          <option value="PROJECT_ONLY">Project only</option>
+          <option value="NONE">Memory off</option>
+        </select>
+      </label>
+
+      <label className="grid gap-1.5">
         <span className="text-[12.5px] font-medium text-text-secondary">Default backend</span>
         <select
           aria-label="New project backend"
@@ -548,6 +674,31 @@ function ProjectDraftFields({
         >
           <option value="E2B">E2B Cloud</option>
           <option value="LOCAL">Local Mac</option>
+        </select>
+      </label>
+
+      <label className="grid gap-1.5">
+        <span className="text-[12.5px] font-medium text-text-secondary">Default model</span>
+        <select
+          aria-label="Project default model"
+          className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none"
+          onChange={(event) => {
+            const [providerId, ...modelParts] = event.target.value.split(':');
+            const modelName = modelParts.join(':');
+            onChange((current) => ({
+              ...current,
+              defaultModel: modelName,
+              defaultProvider: providerId ?? '',
+            }));
+          }}
+          value={draft.defaultProvider && draft.defaultModel ? `${draft.defaultProvider}:${draft.defaultModel}` : ''}
+        >
+          <option value="">Use Settings default</option>
+          {providers.filter((provider) => provider.enabled).map((provider) => (
+            <option key={`${provider.id}:${provider.primaryModel}`} value={`${provider.id}:${provider.primaryModel}`}>
+              {provider.id} · {provider.primaryModel}
+            </option>
+          ))}
         </select>
       </label>
 

@@ -35,13 +35,18 @@ function createStore(): ProjectRouteStore {
   };
 }
 
-function createApp(store: ProjectRouteStore, runAgent = vi.fn().mockResolvedValue(undefined)) {
+function createApp(
+  store: ProjectRouteStore,
+  runAgent = vi.fn().mockResolvedValue(undefined),
+  keychain = { getCredential: vi.fn().mockRejectedValue(new Error("not found")) },
+) {
   const app = express();
   app.use(express.json());
   app.use(
     "/api",
     createProjectsRouter({
       getUserId: () => "user-test",
+      keychain,
       runAgent,
       store,
     }),
@@ -100,6 +105,86 @@ describe("projects routes", () => {
         workspaceScope: "DESKTOP",
       }),
       where: { id: "default-project" },
+    });
+  });
+
+  it("creates projects with memory and model defaults from settings", async () => {
+    const store = createStore();
+    store.memorySettings = {
+      findUnique: vi.fn().mockResolvedValue({
+        defaultScopeForNewProjects: "PROJECT_ONLY",
+      }),
+    };
+    store.providerConfig = {
+      findMany: vi.fn().mockResolvedValue([
+        {
+          enabled: true,
+          fallbackOrder: 1,
+          id: "anthropic",
+          modelName: null,
+          primaryModel: "claude-opus-4-7",
+        },
+      ]),
+    };
+    const { app } = createApp(store);
+
+    await request(app)
+      .post("/api/projects")
+      .send({
+        name: "With defaults",
+        workspaceScope: "DEFAULT_WORKSPACE",
+      })
+      .expect(201);
+
+    expect(store.project.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        defaultModel: "claude-opus-4-7",
+        defaultProvider: "anthropic",
+        memoryScope: "PROJECT_ONLY",
+        name: "With defaults",
+      }),
+    });
+  });
+
+  it("inherits provider defaults from stored API keys after a fresh settings reset", async () => {
+    const store = createStore();
+    store.providerConfig = {
+      findMany: vi.fn().mockResolvedValue([
+        {
+          enabled: false,
+          fallbackOrder: 1,
+          id: "anthropic",
+          modelName: null,
+          primaryModel: "claude-opus-4-7",
+        },
+        {
+          enabled: false,
+          fallbackOrder: 2,
+          id: "openai",
+          modelName: null,
+          primaryModel: "gpt-5.2",
+        },
+      ]),
+    };
+    const keychain = {
+      getCredential: vi.fn(async (account: string) => {
+        if (account === "anthropic:apiKey") return "test-key-not-real";
+        throw new Error("not found");
+      }),
+    };
+    const { app } = createApp(store, vi.fn().mockResolvedValue(undefined), keychain);
+
+    await request(app)
+      .post("/api/projects")
+      .send({ name: "Fresh reset project" })
+      .expect(201);
+
+    expect(store.project.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        defaultModel: "claude-opus-4-7",
+        defaultProvider: "anthropic",
+        name: "Fresh reset project",
+      }),
     });
   });
 

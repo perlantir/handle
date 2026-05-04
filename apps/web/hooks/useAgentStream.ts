@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useReducer } from 'react';
-import type { ApprovalPayload, BrowserScreenshotEvent, PlanStep, SSEEvent, TaskStatus } from '@handle/shared';
+import type { ApprovalPayload, BrowserScreenshotEvent, MemoryRecallEvent, PlanStep, SSEEvent, TaskStatus } from '@handle/shared';
 
 export interface ToolCallState {
   args: Record<string, unknown>;
@@ -18,6 +18,7 @@ export interface AgentStreamState {
   browserScreenshots: BrowserScreenshotEvent[];
   error: string | null;
   finalMessage: string | null;
+  memoryFacts: MemoryRecallEvent['facts'];
   pendingApproval: (ApprovalPayload & { approvalId: string }) | null;
   planSteps: PlanStep[];
   status: TaskStatus | 'IDLE';
@@ -31,6 +32,7 @@ const initialState: AgentStreamState = {
   browserScreenshots: [],
   error: null,
   finalMessage: null,
+  memoryFacts: [],
   pendingApproval: null,
   planSteps: [],
   status: 'IDLE',
@@ -63,6 +65,10 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
       return { ...state, error: event.message, status: 'ERROR' };
     case 'message':
       return { ...state, finalMessage: event.content, thought: '' };
+    case 'memory_status':
+      return state;
+    case 'memory_recall':
+      return { ...state, memoryFacts: event.facts };
     case 'plan_update':
       return { ...state, planSteps: event.steps };
     case 'provider_fallback':
@@ -73,7 +79,7 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
         pendingApproval: event.status === 'WAITING' ? state.pendingApproval : null,
         status: event.status,
         thought:
-          event.status === 'STOPPED' || event.status === 'ERROR' || event.status === 'CANCELLED'
+          event.status === 'STOPPED' || event.status === 'ERROR' || event.status === 'CANCELLED' || event.status === 'PAUSED'
             ? ''
             : state.thought,
       };

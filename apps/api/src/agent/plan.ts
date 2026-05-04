@@ -39,10 +39,14 @@ function extractJson(text: string) {
   return end > start ? trimmed.slice(start, end + 1) : trimmed;
 }
 
-export function parsePlanSteps(responseText: string): PlanStep[] {
-  const parsed = planResponseSchema.parse(
-    JSON.parse(extractJson(responseText)),
-  );
+interface ParsedPlan {
+  parseError?: unknown;
+  steps: PlanStep[];
+  usedFallback: boolean;
+}
+
+function parseJsonPlanSteps(responseText: string): PlanStep[] {
+  const parsed = planResponseSchema.parse(JSON.parse(extractJson(responseText)));
   const steps = Array.isArray(parsed) ? parsed : parsed.steps;
 
   return steps.slice(0, 7).map((title, index) => ({
@@ -50,6 +54,45 @@ export function parsePlanSteps(responseText: string): PlanStep[] {
     state: "pending",
     title,
   }));
+}
+
+function fallbackPlanSteps(responseText: string): PlanStep[] {
+  const cleaned = responseText
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^[-*]\s+/, "")
+        .replace(/^\d+[.)]\s+/, "")
+        .replace(/^["']|["']$/g, ""),
+    )
+    .filter((line) => line.length >= 3 && line.length <= 120)
+    .filter((line) => !line.includes("[[HANDLE_RESULT"));
+  const titles = cleaned.length
+    ? cleaned.slice(0, 7)
+    : ["Understand the request", "Complete the task", "Verify the result"];
+
+  return titles.map((title, index) => ({
+    id: `plan-${index + 1}`,
+    state: "pending",
+    title,
+  }));
+}
+
+export function parsePlanStepsDetailed(responseText: string): ParsedPlan {
+  try {
+    return { steps: parseJsonPlanSteps(responseText), usedFallback: false };
+  } catch (err) {
+    return {
+      parseError: err,
+      steps: fallbackPlanSteps(responseText),
+      usedFallback: true,
+    };
+  }
+}
+
+export function parsePlanSteps(responseText: string): PlanStep[] {
+  return parsePlanStepsDetailed(responseText).steps;
 }
 
 export interface EmitInitialPlanOptions {
@@ -133,7 +176,22 @@ export async function emitInitialPlan(
       "Plan generation LangChain invoke completed",
     );
 
-    const steps = parsePlanSteps(contentToString(response.content));
+    const responseText = contentToString(response.content);
+    const parsedPlan = parsePlanStepsDetailed(responseText);
+    const steps = parsedPlan.steps;
+    if (parsedPlan.usedFallback) {
+      logger.warn(
+        {
+          durationMs: Date.now() - startedAt,
+          err: parsedPlan.parseError,
+          model: provider.model,
+          providerId: provider.id,
+          responsePreview: truncateForLog(redactSecrets(responseText)),
+          taskId,
+        },
+        "Plan generation response was not JSON; using fallback plan",
+      );
+    }
 
     emitTaskEvent({ type: "plan_update", steps, taskId });
     logger.info(

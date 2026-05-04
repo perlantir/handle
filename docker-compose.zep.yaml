@@ -1,0 +1,70 @@
+name: handle-zep
+
+services:
+  zep:
+    image: ghcr.io/getzep/zep:0.27.2
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./docker/zep/config.yaml:/app/config.yaml:ro
+    environment:
+      - ZEP_STORE_POSTGRES_DSN=postgres://postgres:postgres@zep-postgres:5432/postgres?sslmode=disable
+      - ZEP_NLP_SERVER_URL=http://zep-nlp:5557
+      - ZEP_EXTRACTORS_DOCUMENTS_EMBEDDINGS_SERVICE=local
+      - ZEP_EXTRACTORS_DOCUMENTS_EMBEDDINGS_DIMENSIONS=384
+      - ZEP_EXTRACTORS_MESSAGES_EMBEDDINGS_SERVICE=local
+      - ZEP_EXTRACTORS_MESSAGES_EMBEDDINGS_DIMENSIONS=384
+      - ZEP_EXTRACTORS_MESSAGES_SUMMARIZER_EMBEDDINGS_SERVICE=local
+      - ZEP_EXTRACTORS_MESSAGES_SUMMARIZER_EMBEDDINGS_DIMENSIONS=384
+      - ZEP_OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    networks:
+      - handle-zep
+    depends_on:
+      zep-postgres:
+        condition: service_healthy
+      zep-nlp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -ec ': > /dev/tcp/127.0.0.1/8000'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  zep-postgres:
+    image: ghcr.io/getzep/postgres:latest
+    restart: unless-stopped
+    shm_size: "128mb"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    volumes:
+      - handle-zep-postgres:/var/lib/postgresql/data
+    networks:
+      - handle-zep
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -q -d postgres -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  zep-nlp:
+    image: ghcr.io/getzep/zep-nlp-server:latest
+    restart: unless-stopped
+    networks:
+      - handle-zep
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 10s bash -c ':> /dev/tcp/127.0.0.1/5557' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+volumes:
+  handle-zep-postgres:
+
+networks:
+  handle-zep:
+    driver: bridge

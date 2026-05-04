@@ -1,0 +1,69 @@
+llm:
+  service: "openai"
+  model: "gpt-4o-mini"
+  azure_openai_endpoint:
+  azure_openai:
+    llm_deployment:
+    embedding_deployment:
+  openai_endpoint:
+  openai_org_id:
+
+nlp:
+  server_url: "http://zep-nlp:5557"
+
+memory:
+  message_window: 12
+
+extractors:
+  documents:
+    embeddings:
+      enabled: true
+      chunk_size: 1000
+      dimensions: 384
+      service: "local"
+  messages:
+    summarizer:
+      enabled: true
+      entities:
+        enabled: true
+      embeddings:
+        enabled: true
+        dimensions: 384
+        service: "local"
+    entities:
+      enabled: true
+    intent:
+      enabled: true
+    embeddings:
+      enabled: true
+      dimensions: 384
+      service: "local"
+
+store:
+  type: "postgres"
+  postgres:
+    dsn: "postgres://postgres:postgres@zep-postgres:5432/postgres?sslmode=disable"
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  web_enabled: true
+  max_request_size: 5242880
+
+auth:
+  required: false
+  secret: "handle-local-dev-secret"
+
+data:
+  purge_every: 60
+
+log:
+  level: "info"
+
+opentelemetry:
+  enabled: false
+
+custom_prompts:
+  summarizer_prompts:
+    anthropic: |
+    openai: |

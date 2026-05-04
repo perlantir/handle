@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUp, Mic, Paperclip, Sparkles, Square } from 'lucide-react';
+import { ArrowUp, Brain, Mic, Paperclip, Pause, Play, Sparkles, Square } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { ProjectSummary, TaskDetailResponse } from '@handle/shared';
@@ -21,15 +21,29 @@ function IconButton({ children, label }: { children: React.ReactNode; label: str
   );
 }
 
+function defaultMemoryEnabled(project: ProjectSummary | null) {
+  return project?.memoryScope !== 'NONE';
+}
+
 export function BottomComposer({
   cancelling = false,
   isRunActive = false,
+  isRunPaused = false,
   onCancelRun,
+  onPauseRun,
+  onResumeRun,
+  pausing = false,
+  resuming = false,
   task,
 }: {
   cancelling?: boolean;
   isRunActive?: boolean;
+  isRunPaused?: boolean;
   onCancelRun?: () => void;
+  onPauseRun?: () => void;
+  onResumeRun?: () => void;
+  pausing?: boolean;
+  resuming?: boolean;
   task: TaskDetailResponse | null;
 }) {
   const router = useRouter();
@@ -41,18 +55,21 @@ export function BottomComposer({
   const [error, setError] = useState<string | null>(null);
   const [pickingFolder, setPickingFolder] = useState(false);
   const [project, setProject] = useState<ProjectSummary | null>(null);
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [providers, setProviders] = useState<SettingsProvider[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState('');
+  const memoryTouchedRef = useRef(false);
   const pendingProjectPatchRef = useRef<Promise<ProjectSummary | null> | null>(null);
 
   useEffect(() => {
     if (!task?.projectId) {
       setBackend(task?.backend ?? 'e2b');
     }
+    memoryTouchedRef.current = false;
     setSelectedModelKey(
       task?.providerId && task.providerModel ? `${task.providerId}:${task.providerModel}` : '',
     );
-  }, [task?.backend, task?.providerId, task?.providerModel]);
+  }, [task?.backend, task?.projectId, task?.providerId, task?.providerModel]);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +82,9 @@ export function BottomComposer({
       if (cancelled) return;
       const activeProject = projects.find((item) => item.id === task?.projectId) ?? null;
       setProject(activeProject);
+      if (!memoryTouchedRef.current) {
+        setMemoryEnabled(defaultMemoryEnabled(activeProject));
+      }
       setCustomScopePath(activeProject?.customScopePath ?? '');
       if (activeProject?.defaultBackend) {
         setBackend(activeProject.defaultBackend === 'LOCAL' ? 'local' : 'e2b');
@@ -146,9 +166,12 @@ export function BottomComposer({
         conversationId: task.conversationId,
         ...(backend ? { backend } : {}),
         ...(providerId && modelName ? { providerId, modelName } : {}),
+        memoryEnabled,
         token,
       });
       setValue('');
+      memoryTouchedRef.current = false;
+      setMemoryEnabled(defaultMemoryEnabled(project));
       router.push(`/tasks/${agentRunId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send follow-up');
@@ -265,6 +288,25 @@ export function BottomComposer({
             </button>
           </>
         )}
+        <button
+          aria-label={memoryEnabled ? 'Memory enabled for this message' : 'Memory disabled for this message'}
+          className={cn(
+            "inline-flex h-8 items-center gap-1.5 rounded-pill border px-3 text-[11.5px] font-medium outline-none transition-colors duration-fast",
+            memoryEnabled
+              ? "border-accent/30 bg-accent/5 text-text-primary"
+              : "border-border-subtle bg-bg-canvas text-text-tertiary",
+          )}
+          disabled={submitting}
+          onClick={() => {
+            memoryTouchedRef.current = true;
+            setMemoryEnabled((current) => !current);
+          }}
+          title={memoryEnabled ? 'Save & recall memory for this message' : 'Memory disabled for this message'}
+          type="button"
+        >
+          <Brain className="h-3.5 w-3.5" />
+          Memory {memoryEnabled ? 'on' : 'off'}
+        </button>
       </div>
       <form
         className="flex items-center gap-2.5 rounded-[14px] border border-border-subtle bg-bg-canvas py-1 pl-4 pr-1.5"
@@ -286,6 +328,30 @@ export function BottomComposer({
         <IconButton label="Voice input">
           <Mic className="h-[13px] w-[13px]" />
         </IconButton>
+        {isRunActive ? (
+          <button
+            aria-label="Pause active run"
+            className="flex h-[34px] items-center gap-1.5 rounded-pill border border-border-subtle bg-bg-surface px-3 text-[11.5px] font-medium text-text-secondary transition-colors duration-fast hover:bg-bg-subtle disabled:opacity-60"
+            disabled={pausing}
+            onClick={onPauseRun}
+            type="button"
+          >
+            <Pause className="h-[13px] w-[13px]" />
+            Pause
+          </button>
+        ) : null}
+        {isRunPaused ? (
+          <button
+            aria-label="Resume paused run"
+            className="flex h-[34px] items-center gap-1.5 rounded-pill border border-accent/30 bg-accent/5 px-3 text-[11.5px] font-medium text-text-primary transition-colors duration-fast hover:bg-accent/10 disabled:opacity-60"
+            disabled={resuming}
+            onClick={onResumeRun}
+            type="button"
+          >
+            <Play className="h-[13px] w-[13px]" />
+            Resume
+          </button>
+        ) : null}
         {isRunActive ? (
           <button
             aria-label="Stop active run"

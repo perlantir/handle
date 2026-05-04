@@ -56,6 +56,7 @@ async function mockTaskApis(page: Page) {
           customScopePath: null,
           defaultBackend: "LOCAL",
           id: "project-local-ui",
+          memoryScope: "GLOBAL_AND_PROJECT",
           name: "Personal",
           permissionMode: "ASK",
           workspaceScope: "DEFAULT_WORKSPACE",
@@ -184,6 +185,7 @@ test.describe("Workspace backend pill", () => {
     await composerInput.pressSequentially("Use local backend");
     await expect(composerInput).toHaveValue("Use local backend");
     await expect(startButton).toBeEnabled();
+    await page.getByRole("button", { name: "Memory enabled for this message" }).click();
     await startButton.click();
 
     await expect(page).toHaveURL(/\/tasks\/task-local-ui$/);
@@ -200,6 +202,7 @@ test.describe("Workspace backend pill", () => {
     ).toEqual({
       backend: "local",
       content: "Use local backend",
+      memoryEnabled: false,
       modelName: "claude-opus-4-7",
       providerId: "anthropic",
     });

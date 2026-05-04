@@ -5,6 +5,7 @@ const initialState: AgentStreamState = {
   browserScreenshots: [],
   error: null,
   finalMessage: null,
+  memoryFacts: [],
   pendingApproval: null,
   planSteps: [],
   status: 'IDLE',
@@ -105,5 +106,21 @@ describe('agentStreamReducer', () => {
     expect(state.browserScreenshots).toHaveLength(10);
     expect(state.browserScreenshots[0]?.imageBase64).toBe('image-2');
     expect(state.browserScreenshots.at(-1)?.imageBase64).toBe('image-11');
+  });
+
+  it('stores recalled memory facts', () => {
+    const state = agentStreamReducer(initialState, {
+      event: {
+        facts: [{ content: 'Favorite color is teal', source: 'global' }],
+        taskId: 'task-test',
+        timestamp: '2026-05-01T00:00:00.000Z',
+        type: 'memory_recall',
+      },
+      type: 'event',
+    });
+
+    expect(state.memoryFacts).toEqual([
+      { content: 'Favorite color is teal', source: 'global' },
+    ]);
   });
 });

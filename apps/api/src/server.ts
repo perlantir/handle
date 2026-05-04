@@ -14,9 +14,12 @@ import {
 import { getLogFilePath, logger } from "./lib/logger";
 import { approvalsRouter } from "./routes/approvals";
 import { agentRunsRouter } from "./routes/agentRuns";
+import { actionsRouter } from "./routes/actions";
 import { healthRouter } from "./routes/health";
+import { memoryRouter } from "./routes/memory";
 import { projectsRouter } from "./routes/projects";
 import { settingsRouter } from "./routes/settings";
+import { sharedMemoryRouter } from "./routes/sharedMemory";
 import { streamRouter } from "./routes/stream";
 import { tasksRouter } from "./routes/tasks";
 
@@ -49,9 +52,12 @@ export async function createServer() {
     app.use("/api", clerkMiddleware(), requireClerkAuth);
   }
   app.use("/api", agentRunsRouter);
+  app.use("/api", actionsRouter);
   app.use("/api/approvals", approvalsRouter);
+  app.use("/api", memoryRouter);
   app.use("/api", projectsRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api", sharedMemoryRouter);
   app.use("/api/tasks", tasksRouter);
   app.use("/api/tasks", streamRouter);
   app.use("/api", (_req, res) => {

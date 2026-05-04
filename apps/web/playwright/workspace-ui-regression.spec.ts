@@ -174,6 +174,71 @@ async function mockHomeProjectControls(page: Page) {
   return { requests };
 }
 
+async function mockHomeProjectBackend(page: Page) {
+  const requests: Array<{ body: unknown; method: string; path: string }> = [];
+  let project = {
+    browserMode: "SEPARATE_PROFILE",
+    customScopePath: null as string | null,
+    defaultBackend: "LOCAL",
+    defaultModel: "claude-opus-4-7",
+    defaultProvider: "anthropic",
+    id: "project-local",
+    memoryScope: "PROJECT_ONLY",
+    name: "Local Project",
+    permissionMode: "ASK",
+    workspaceScope: "DEFAULT_WORKSPACE",
+  };
+
+  await page.route("**/api/settings/execution", async (route) => {
+    await jsonRoute(route, 200, {
+      execution: {
+        cleanupPolicy: "keep-all",
+        defaultBackend: "e2b",
+        updatedAt: "2026-05-02T00:00:00.000Z",
+        workspaceBaseDir: "/Users/perlantir/Documents/Handle/workspaces",
+      },
+    });
+  });
+  await page.route("**/api/settings/providers", async (route) => {
+    await jsonRoute(route, 200, {
+      providers: [
+        {
+          authMode: "apiKey",
+          baseURL: null,
+          description: "Anthropic",
+          enabled: true,
+          fallbackOrder: 1,
+          hasApiKey: true,
+          id: "anthropic",
+          modelName: null,
+          primaryModel: "claude-opus-4-7",
+          updatedAt: "2026-05-02T00:00:00.000Z",
+        },
+      ],
+    });
+  });
+  await page.route("**/api/projects**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    const body = request.postData() ? JSON.parse(request.postData() ?? "{}") : null;
+    requests.push({ body, method, path });
+
+    if (method === "GET" && path === "/api/projects") {
+      await jsonRoute(route, 200, { projects: [project] });
+      return;
+    }
+    if (method === "PUT" && path === "/api/projects/project-local") {
+      project = { ...project, ...(body as Partial<typeof project>) };
+      await jsonRoute(route, 200, { project });
+      return;
+    }
+    await jsonRoute(route, 200, { conversations: [] });
+  });
+
+  return { requests };
+}
+
 async function mockSidebarManagement(page: Page) {
   const requests: Array<{ body: unknown; method: string; path: string }> = [];
   let projects = [
@@ -181,7 +246,10 @@ async function mockSidebarManagement(page: Page) {
       browserMode: "SEPARATE_PROFILE",
       customScopePath: null as string | null,
       defaultBackend: "LOCAL",
+      defaultModel: "claude-opus-4-7",
+      defaultProvider: "anthropic",
       id: "project-alpha",
+      memoryScope: "PROJECT_ONLY",
       name: "Personal",
       permissionMode: "ASK",
       workspaceScope: "DEFAULT_WORKSPACE",
@@ -190,7 +258,10 @@ async function mockSidebarManagement(page: Page) {
       browserMode: "SEPARATE_PROFILE",
       customScopePath: null as string | null,
       defaultBackend: "E2B",
+      defaultModel: null as string | null,
+      defaultProvider: null as string | null,
       id: "project-beta",
+      memoryScope: "GLOBAL_AND_PROJECT",
       name: "Website Work",
       permissionMode: "ASK",
       workspaceScope: "DEFAULT_WORKSPACE",
@@ -217,7 +288,22 @@ async function mockSidebarManagement(page: Page) {
     });
   });
   await page.route("**/api/settings/providers", async (route) => {
-    await jsonRoute(route, 200, { providers: [] });
+    await jsonRoute(route, 200, {
+      providers: [
+        {
+          authMode: "apiKey",
+          baseURL: null,
+          description: "Anthropic",
+          enabled: true,
+          fallbackOrder: 1,
+          hasApiKey: true,
+          id: "anthropic",
+          modelName: null,
+          primaryModel: "claude-opus-4-7",
+          updatedAt: "2026-05-02T00:00:00.000Z",
+        },
+      ],
+    });
   });
   await page.route("**/api/projects**", async (route) => {
     const request = route.request();
@@ -336,9 +422,127 @@ test.describe("Workspace UI regressions", () => {
     expect(composerBox).not.toBeNull();
     expect(Math.abs((chatBox?.width ?? 0) - (composerBox?.width ?? 0))).toBeLessThan(2);
   });
+
+  test("shows pause and resume controls for active and paused runs", async ({ page }) => {
+    const taskId = "task-ui-pause";
+    const requests: Array<{ body: unknown; method: string; path: string }> = [];
+    let taskStatus = "RUNNING";
+
+    await page.route("**/api/tasks/*", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/stream")) {
+        await route.fallback();
+        return;
+      }
+      await jsonRoute(route, 200, {
+        backend: "local",
+        conversationId: "conversation-ui",
+        conversationTitle: "Pause smoke",
+        goal: "Pause smoke",
+        id: taskId,
+        messages: [{ content: "Pause smoke", id: "message-user", role: "USER" }],
+        projectId: "project-ui",
+        projectName: "Personal",
+        providerId: "anthropic",
+        providerModel: "claude-opus-4-7",
+        status: taskStatus,
+      });
+    });
+    await page.route("**/api/stream/*", async (route) => {
+      await route.fulfill({
+        body: "",
+        headers: { "Cache-Control": "no-cache", "Content-Type": "text/event-stream" },
+        status: 200,
+      });
+    });
+    await page.route("**/api/agent-runs/*/pause", async (route) => {
+      const request = route.request();
+      requests.push({
+        body: request.postData() ? JSON.parse(request.postData() ?? "{}") : null,
+        method: request.method(),
+        path: new URL(request.url()).pathname,
+      });
+      taskStatus = "PAUSED";
+      await jsonRoute(route, 200, { active: true, paused: true, status: "PAUSED" });
+    });
+    await page.route("**/api/agent-runs/*/resume", async (route) => {
+      const request = route.request();
+      requests.push({
+        body: request.postData() ? JSON.parse(request.postData() ?? "{}") : null,
+        method: request.method(),
+        path: new URL(request.url()).pathname,
+      });
+      taskStatus = "RUNNING";
+      await jsonRoute(route, 200, { resumed: true, status: "RUNNING" });
+    });
+    await page.route("**/api/approvals/pending", async (route) => {
+      await jsonRoute(route, 200, { approvals: [] });
+    });
+    await page.route("**/api/projects", async (route) => {
+      await jsonRoute(route, 200, {
+        projects: [
+          {
+            browserMode: "SEPARATE_PROFILE",
+            customScopePath: null,
+            defaultBackend: "LOCAL",
+            id: "project-ui",
+            memoryScope: "GLOBAL_AND_PROJECT",
+            name: "Personal",
+            permissionMode: "ASK",
+            workspaceScope: "DEFAULT_WORKSPACE",
+          },
+        ],
+      });
+    });
+    await page.route("**/api/projects/*/conversations", async (route) => {
+      await jsonRoute(route, 200, { conversations: [] });
+    });
+    await page.route("**/api/settings/providers", async (route) => {
+      await jsonRoute(route, 200, { providers: [] });
+    });
+
+    await page.goto(`/tasks/${taskId}`);
+    await page.getByRole("button", { name: "Pause active run" }).click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({
+        body: { reason: "Paused by user" },
+        method: "POST",
+        path: `/api/agent-runs/${taskId}/pause`,
+      });
+
+    await page.reload();
+    await page.getByRole("button", { name: "Resume paused run" }).click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({
+        body: {},
+        method: "POST",
+        path: `/api/agent-runs/${taskId}/resume`,
+      });
+  });
 });
 
 test.describe("Project control regressions", () => {
+  test("uses the project backend default over the global execution default", async ({ page }) => {
+    const { requests } = await mockHomeProjectBackend(page);
+
+    await page.goto("/?projectId=project-local");
+
+    const backendGroup = page.getByRole("group", { name: "Task backend" });
+    await expect(backendGroup.getByRole("button", { name: "Local" })).toHaveClass(/bg-bg-inverse/);
+    await expect(backendGroup.getByRole("button", { name: "E2B" })).not.toHaveClass(/bg-bg-inverse/);
+
+    await backendGroup.getByRole("button", { name: "E2B" }).click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({
+        body: { defaultBackend: "E2B" },
+        method: "PUT",
+        path: "/api/projects/project-local",
+      });
+  });
+
   test("uses folder picker flow and saves permission level separately", async ({ page }) => {
     const { requests } = await mockHomeProjectControls(page);
 
@@ -383,6 +587,18 @@ test.describe("Project control regressions", () => {
     await expect(page.getByText("Landing page")).toBeVisible();
 
     await page.getByLabel("Project actions for Personal").click();
+    await page.getByRole("button", { exact: true, name: "Edit" }).click();
+    await page.getByLabel("Project memory scope").selectOption("GLOBAL_AND_PROJECT");
+    await page.getByRole("button", { exact: true, name: "Save project" }).click();
+    await expect
+      .poll(() => requests)
+      .toContainEqual({
+        body: expect.objectContaining({ memoryScope: "GLOBAL_AND_PROJECT", name: "Personal" }),
+        method: "PUT",
+        path: "/api/projects/project-alpha",
+      });
+
+    await page.getByLabel("Project actions for Personal").click();
     await page.getByRole("button", { exact: true, name: "Rename" }).click();
     await page.getByRole("textbox", { name: "Project name" }).fill("Renamed Personal");
     await page.getByLabel("Save project name").click();
@@ -409,5 +625,34 @@ test.describe("Project control regressions", () => {
     await expect
       .poll(() => requests)
       .toContainEqual({ body: null, method: "DELETE", path: "/api/projects/project-beta" });
+  });
+
+  test("keeps long project lists scrollable with Settings reachable", async ({ page }) => {
+    const { requests } = await mockSidebarManagement(page);
+    void requests;
+
+    await page.route("**/api/projects", async (route) => {
+      await jsonRoute(route, 200, {
+        projects: Array.from({ length: 24 }, (_, index) => ({
+          browserMode: "SEPARATE_PROFILE",
+          customScopePath: null,
+          defaultBackend: "E2B",
+          defaultModel: null,
+          defaultProvider: null,
+          id: `project-scroll-${index}`,
+          memoryScope: "PROJECT_ONLY",
+          name: `Scroll Project ${index + 1}`,
+          permissionMode: "ASK",
+          workspaceScope: "DEFAULT_WORKSPACE",
+        })),
+      });
+    });
+
+    await page.goto("/?projectId=project-scroll-0");
+
+    await expect(page.getByRole("link", { exact: true, name: "Scroll Project 1" })).toBeVisible();
+    await page.getByRole("link", { exact: true, name: "Scroll Project 24" }).scrollIntoViewIfNeeded();
+    await expect(page.getByRole("link", { exact: true, name: "Scroll Project 24" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
   });
 });

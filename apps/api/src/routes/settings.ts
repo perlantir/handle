@@ -2,7 +2,7 @@ import { Router } from "express";
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
 import {
@@ -28,6 +28,11 @@ import {
   chatGptOAuthProxyManager,
   type ChatGptOAuthProxyManager,
 } from "../providers/openaiChatgptProxy";
+import {
+  accountForProvider,
+  hasProviderApiKey,
+  keyedProvidersForFreshInstall,
+} from "../providers/providerCredentials";
 import { createProviderInstance } from "../providers/registry";
 import {
   isProviderId,
@@ -35,11 +40,14 @@ import {
   type ProviderId,
   type ProviderInstance,
 } from "../providers/types";
+import { HandleZepClient, type MemoryStatusSnapshot } from "../memory/zepClient";
+import type { MemoryProvider } from "../memory/memoryLog";
 
 const TEST_PROMPT = "Hello, respond with OK.";
 const GLOBAL_SETTINGS_ID = "global";
 const WORKSPACE_BASE_DIR = join(homedir(), "Documents", "Handle", "workspaces");
 const ACTUAL_CHROME_ENDPOINT = DEFAULT_ACTUAL_CHROME_ENDPOINT;
+const ZEP_CLOUD_API_KEY_ACCOUNT = "zep:cloud:apiKey";
 
 const updateProviderSchema = z
   .object({
@@ -74,6 +82,28 @@ const updateBrowserSettingsSchema = z
     mode: z.enum(["separate-profile", "actual-chrome"]),
   })
   .strict();
+
+const updateMemorySettingsSchema = z
+  .object({
+    cloudBaseURL: z.string().url().nullable().optional(),
+    defaultScopeForNewProjects: z
+      .enum(["GLOBAL_AND_PROJECT", "PROJECT_ONLY", "NONE"])
+      .optional(),
+    provider: z.enum(["self-hosted", "cloud"]).optional(),
+    selfHostedBaseURL: z.string().url().optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one memory setting is required.",
+  });
+
+const setMemoryCloudKeySchema = z.object({
+  apiKey: z.string().min(1),
+});
+
+const resetMemorySchema = z.object({
+  confirmation: z.literal("delete"),
+});
 
 const apiKeyFormatDescriptions: Record<ProviderId, string> = {
   anthropic: "sk-ant- followed by 20+ letters, numbers, underscores, or dashes",
@@ -131,6 +161,15 @@ export interface BrowserSettingsRow {
   updatedAt?: Date | string;
 }
 
+export interface MemorySettingsRow {
+  cloudBaseURL: string | null;
+  defaultScopeForNewProjects: string;
+  id: string;
+  provider: string;
+  selfHostedBaseURL: string;
+  updatedAt?: Date | string;
+}
+
 export interface SettingsRouteStore {
   browserSettings?: {
     update(args: unknown): Promise<BrowserSettingsRow>;
@@ -140,6 +179,10 @@ export interface SettingsRouteStore {
     findUnique(args: unknown): Promise<ExecutionSettingsRow | null>;
     update(args: unknown): Promise<ExecutionSettingsRow>;
     upsert(args: unknown): Promise<ExecutionSettingsRow>;
+  };
+  memorySettings?: {
+    update(args: unknown): Promise<MemorySettingsRow>;
+    upsert(args: unknown): Promise<MemorySettingsRow>;
   };
   providerConfig: {
     findMany(args: unknown): Promise<ProviderConfigRow[]>;
@@ -159,6 +202,9 @@ export type ResetBrowserProfile = (path: string) => Promise<void>;
 export type TestActualChromeConnection = (
   endpoint: string,
 ) => Promise<{ connected: boolean; detail: string | null }>;
+export type RunMemoryComposeCommand = (
+  action: "down" | "up",
+) => Promise<{ stderr: string; stdout: string }>;
 
 export interface CreateSettingsRouterOptions {
   chatgptOAuthProxy?: Pick<ChatGptOAuthProxyManager, "stop">;
@@ -168,6 +214,7 @@ export interface CreateSettingsRouterOptions {
   keychain?: KeychainLike;
   openPathInFinder?: OpenPathInFinder;
   resetBrowserProfile?: ResetBrowserProfile;
+  runMemoryComposeCommand?: RunMemoryComposeCommand;
   store?: SettingsRouteStore;
   testActualChromeConnection?: TestActualChromeConnection;
 }
@@ -179,10 +226,6 @@ const DESCRIPTIONS: Record<ProviderId, string> = {
   openai: "OpenAI",
   openrouter: "OpenRouter (100+ models from many providers)",
 };
-
-function accountForProvider(id: ProviderId) {
-  return `${id}:apiKey`;
-}
 
 function parseProviderId(value: string | undefined) {
   return value && isProviderId(value) ? value : null;
@@ -277,6 +320,26 @@ function normalizeBrowserSettings(row: BrowserSettingsRow) {
   };
 }
 
+function normalizeMemorySettings(row: MemorySettingsRow, status: MemoryStatusSnapshot | null, hasCloudApiKey: boolean) {
+  return {
+    cloudBaseURL: row.cloudBaseURL ?? "https://api.getzep.com",
+    defaultScopeForNewProjects:
+      row.defaultScopeForNewProjects === "PROJECT_ONLY" || row.defaultScopeForNewProjects === "NONE"
+        ? row.defaultScopeForNewProjects
+        : "GLOBAL_AND_PROJECT",
+    hasCloudApiKey,
+    provider: row.provider === "cloud" ? "cloud" : "self-hosted",
+    selfHostedBaseURL: row.selfHostedBaseURL || "http://127.0.0.1:8000",
+    status: status ?? {
+      checkedAt: new Date().toISOString(),
+      detail: "Memory status has not been checked",
+      provider: row.provider === "cloud" ? "cloud" : "self-hosted",
+      status: "offline",
+    },
+    updatedAt: row.updatedAt ?? null,
+  };
+}
+
 async function defaultOpenPathInFinder(path: string) {
   await new Promise<void>((resolve, reject) => {
     const child = spawn("open", [path], {
@@ -293,6 +356,55 @@ async function defaultOpenPathInFinder(path: string) {
 
 async function defaultResetBrowserProfile(path: string) {
   await fs.rm(path, { force: true, recursive: true });
+}
+
+async function findRepoRoot(start = process.cwd()) {
+  let current = start;
+  for (let depth = 0; depth < 8; depth += 1) {
+    try {
+      await fs.access(join(current, "docker-compose.zep.yaml"));
+      return current;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+  throw new Error("Could not find docker-compose.zep.yaml from current process directory.");
+}
+
+async function defaultRunMemoryComposeCommand(action: "down" | "up") {
+  const root = await findRepoRoot();
+  const dockerConfig = process.env.DOCKER_CONFIG || "/tmp/handle-docker-config";
+  await fs.mkdir(dockerConfig, { recursive: true });
+  const args =
+    action === "up"
+      ? ["compose", "-f", "docker-compose.zep.yaml", "up", "-d"]
+      : ["compose", "-f", "docker-compose.zep.yaml", "down"];
+
+  return new Promise<{ stderr: string; stdout: string }>((resolve, reject) => {
+    const child = spawn("docker", args, {
+      cwd: root,
+      env: {
+        ...process.env,
+        DOCKER_CONFIG: dockerConfig,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) resolve({ stderr, stdout });
+      else reject(new Error(`docker compose memory ${action} exited with code ${code ?? "unknown"}: ${stderr || stdout}`));
+    });
+  });
 }
 
 async function ensureExecutionSettings(store: SettingsRouteStore) {
@@ -326,15 +438,42 @@ async function ensureBrowserSettings(store: SettingsRouteStore) {
   });
 }
 
-async function hasProviderApiKey(
-  providerId: ProviderId,
-  keychain: KeychainLike,
-) {
-  const value = await keychain
-    .getCredential(accountForProvider(providerId))
-    .catch(() => "");
+async function ensureMemorySettings(store: SettingsRouteStore) {
+  if (!store.memorySettings) {
+    throw new Error("Memory settings store is unavailable.");
+  }
 
-  return value.length > 0;
+  return store.memorySettings.upsert({
+    create: {
+      cloudBaseURL: null,
+      defaultScopeForNewProjects: "GLOBAL_AND_PROJECT",
+      id: GLOBAL_SETTINGS_ID,
+      provider: "self-hosted",
+      selfHostedBaseURL: "http://127.0.0.1:8000",
+    },
+    update: {},
+    where: { id: GLOBAL_SETTINGS_ID },
+  });
+}
+
+async function memoryStatusForSettings(row: MemorySettingsRow, keychain: KeychainLike) {
+  const provider: MemoryProvider = row.provider === "cloud" ? "cloud" : "self-hosted";
+  const apiKey =
+    provider === "cloud"
+      ? await keychain.getCredential(ZEP_CLOUD_API_KEY_ACCOUNT).catch(() => "")
+      : "";
+  const client = new HandleZepClient({
+    ...(apiKey ? { apiKey } : {}),
+    baseUrl:
+      provider === "cloud"
+        ? row.cloudBaseURL || "https://api.getzep.com"
+        : row.selfHostedBaseURL || "http://127.0.0.1:8000",
+    provider,
+  });
+  return {
+    hasCloudApiKey: apiKey.length > 0,
+    status: await client.checkConnection(),
+  };
 }
 
 function contentToString(value: unknown): string {
@@ -379,6 +518,7 @@ export function createSettingsRouter({
   },
   openPathInFinder = defaultOpenPathInFinder,
   resetBrowserProfile = defaultResetBrowserProfile,
+  runMemoryComposeCommand = defaultRunMemoryComposeCommand,
   store = prisma,
   testActualChromeConnection = defaultTestActualChromeConnection,
 }: CreateSettingsRouterOptions = {}) {
@@ -445,6 +585,141 @@ export function createSettingsRouter({
           path: WORKSPACE_BASE_DIR,
         });
       }
+    }),
+  );
+
+  router.get(
+    "/memory",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const row = await ensureMemorySettings(store);
+      const { hasCloudApiKey, status } = await memoryStatusForSettings(row, keychain);
+
+      return res.json({ memory: normalizeMemorySettings(row, status, hasCloudApiKey) });
+    }),
+  );
+
+  router.put(
+    "/memory",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const parsed = updateMemorySettingsSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      await ensureMemorySettings(store);
+      if (!store.memorySettings) {
+        throw new Error("Memory settings store is unavailable.");
+      }
+
+      const row = await store.memorySettings.update({
+        data: parsed.data,
+        where: { id: GLOBAL_SETTINGS_ID },
+      });
+      const { hasCloudApiKey, status } = await memoryStatusForSettings(row, keychain);
+
+      return res.json({ memory: normalizeMemorySettings(row, status, hasCloudApiKey) });
+    }),
+  );
+
+  router.post(
+    "/memory/cloud-key",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const parsed = setMemoryCloudKeySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      await keychain.setCredential(ZEP_CLOUD_API_KEY_ACCOUNT, parsed.data.apiKey);
+      return res.json({ saved: true });
+    }),
+  );
+
+  router.post(
+    "/memory/start",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      try {
+        const result = await runMemoryComposeCommand("up");
+        return res.json({ started: true, ...result });
+      } catch (err) {
+        logger.error({ err }, "Memory Docker Compose start failed");
+        return res.status(500).json({ error: errorMessage(err), started: false });
+      }
+    }),
+  );
+
+  router.post(
+    "/memory/stop",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      try {
+        const result = await runMemoryComposeCommand("down");
+        return res.json({ stopped: true, ...result });
+      } catch (err) {
+        logger.error({ err }, "Memory Docker Compose stop failed");
+        return res.status(500).json({ error: errorMessage(err), stopped: false });
+      }
+    }),
+  );
+
+  router.post(
+    "/memory/reset",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const parsed = resetMemorySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .json({ error: "Type delete to reset memory.", details: parsed.error.flatten() });
+      }
+
+      const row = await ensureMemorySettings(store);
+      const provider: MemoryProvider = row.provider === "cloud" ? "cloud" : "self-hosted";
+      const apiKey =
+        provider === "cloud"
+          ? await keychain.getCredential(ZEP_CLOUD_API_KEY_ACCOUNT).catch(() => "")
+          : "";
+      const client = new HandleZepClient({
+        ...(apiKey ? { apiKey } : {}),
+        baseUrl:
+          provider === "cloud"
+            ? row.cloudBaseURL || "https://api.getzep.com"
+            : row.selfHostedBaseURL || "http://127.0.0.1:8000",
+        provider,
+      });
+      const sessions = await client.listSessions();
+      if (!sessions.ok) {
+        return res.status(503).json({
+          deleted: 0,
+          error: sessions.detail ?? "Memory is offline",
+        });
+      }
+
+      let deleted = 0;
+      for (const session of sessions.value ?? []) {
+        const result = await client.deleteSessionMemory({ sessionId: session.sessionId });
+        if (result.ok) deleted += 1;
+      }
+      return res.json({ deleted, reset: true });
     }),
   );
 
@@ -531,10 +806,17 @@ export function createSettingsRouter({
       const rows = await store.providerConfig.findMany({
         orderBy: { fallbackOrder: "asc" },
       });
+      const freshInstallEnabledProviderIds = await keyedProvidersForFreshInstall(
+        rows,
+        keychain,
+      );
 
       const providers = await Promise.all(
         rows.map(async (row) => {
-          const provider = serializeProvider(row);
+          const effectiveRow = freshInstallEnabledProviderIds.has(row.id)
+            ? { ...row, enabled: true }
+            : row;
+          const provider = serializeProvider(effectiveRow);
           if (!provider) return null;
 
           return {

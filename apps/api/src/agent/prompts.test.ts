@@ -42,7 +42,40 @@ describe("agent prompts", () => {
     expect(prompt).toContain("answer directly without tools");
     expect(prompt).toContain("Do not use");
     expect(prompt).toContain("shell_exec for simple math");
-    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v10");
+    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v17");
+  });
+
+  it("tells the agent not to confabulate memory when recall is empty", () => {
+    const prompt = buildHandleSystemPrompt({
+      memoryContext: "<memory_context>None recalled</memory_context>",
+    });
+
+    expect(prompt).toContain("<memory_context>None recalled</memory_context>");
+    expect(prompt).toContain("you have no");
+    expect(prompt).toContain("prior memory");
+    expect(prompt).toContain("Only say");
+    expect(prompt).toContain("already saved");
+    expect(prompt).toContain("honest answer completes the question");
+    expect(prompt).toContain("[[HANDLE_RESULT:SUCCESS]]");
+  });
+
+  it("injects recalled memory context when available", () => {
+    const prompt = buildHandleSystemPrompt({
+      memoryContext: "<memory_context>\n1. [stated, valid since 2026-03-15] Favorite color is teal\n</memory_context>",
+    });
+
+    expect(prompt).toContain("Favorite color is teal");
+    expect(prompt).toContain("valid since");
+    expect(prompt).toContain("Historical facts provide context");
+  });
+
+  it("injects recent action context when available", () => {
+    const prompt = buildHandleSystemPrompt({
+      memoryContext: "<recent_actions>\nRecent actions you've taken in this conversation:\n- Created file /tmp/a.txt\n</recent_actions>",
+    });
+
+    expect(prompt).toContain("Recent actions you've taken in this conversation");
+    expect(prompt).toContain("Created file /tmp/a.txt");
   });
 
   it("instructs the agent to surface local shell rate limits", () => {
@@ -54,5 +87,14 @@ describe("agent prompts", () => {
     expect(prompt).toContain("Shell execution rate limit exceeded");
     expect(prompt).toContain("batching commands");
     expect(prompt).toContain("do not assume files, shell state, browser tabs, or sandbox state");
+  });
+
+  it("instructs the agent not to claim secrets were saved to memory", () => {
+    const prompt = buildHandleSystemPrompt();
+
+    expect(prompt).toContain("Never save API keys");
+    expect(prompt).toMatch(/secret-shaped\s+content was blocked/);
+    expect(prompt).toContain("password manager");
+    expect(prompt).toContain("Do not say the secret was");
   });
 });

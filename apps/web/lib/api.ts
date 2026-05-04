@@ -1,8 +1,13 @@
 import type {
   ApprovalDecision,
+  ActionLogSummary,
+  ActionOutcomeType,
   ChatMessage,
   ConversationSummary,
   CreateTaskResponse,
+  FailurePatternSummary,
+  MemoryFactSummary,
+  ProcedureTemplateSummary,
   PendingApproval,
   ProjectSummary,
   SendConversationMessageResponse,
@@ -38,6 +43,7 @@ interface ProjectInput {
   defaultBackend?: ProjectSummary['defaultBackend'];
   defaultModel?: string | null;
   defaultProvider?: string | null;
+  memoryScope?: ProjectSummary['memoryScope'];
   name?: string;
   permissionMode?: ProjectSummary['permissionMode'];
   workspaceScope?: ProjectSummary['workspaceScope'];
@@ -47,6 +53,7 @@ interface SendMessageInput {
   backend?: 'e2b' | 'local';
   content: string;
   conversationId: string;
+  memoryEnabled?: boolean;
   modelName?: string;
   providerId?: string;
   token: string | null;
@@ -64,6 +71,139 @@ function authHeaders(token: string | null) {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
   };
+}
+
+export async function listMemoryFacts({
+  projectId,
+  scope = 'all',
+  token,
+}: AuthenticatedRequestInput & {
+  projectId?: string;
+  scope?: 'all' | 'global' | 'project';
+}): Promise<{ facts: MemoryFactSummary[]; status: { provider?: string; status: 'online' | 'offline'; detail?: string } }> {
+  const params = new URLSearchParams({ scope });
+  if (projectId) params.set('projectId', projectId);
+  const response = await fetch(`${apiBaseUrl}/api/memory/facts?${params.toString()}`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load memory');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as {
+    facts?: MemoryFactSummary[];
+    status?: { provider?: string; status?: 'online' | 'offline'; detail?: string };
+  };
+  return {
+    facts: body.facts ?? [],
+    status: {
+      status: body.status?.status ?? 'offline',
+      ...(body.status?.provider ? { provider: body.status.provider } : {}),
+      ...(body.status?.detail ? { detail: body.status.detail } : {}),
+    },
+  };
+}
+
+export async function deleteMemorySession({
+  sessionId,
+  token,
+}: AuthenticatedRequestInput & { sessionId: string }): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/api/memory/facts/${encodeURIComponent(sessionId)}`, {
+    headers: authHeaders(token),
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to delete memory');
+    throw new Error(message);
+  }
+}
+
+export async function listProcedureTemplates({
+  token,
+}: AuthenticatedRequestInput): Promise<ProcedureTemplateSummary[]> {
+  const response = await fetch(`${apiBaseUrl}/api/memory/procedures`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load procedures');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { procedures?: ProcedureTemplateSummary[] };
+  return body.procedures ?? [];
+}
+
+export async function listFailurePatterns({
+  token,
+}: AuthenticatedRequestInput): Promise<FailurePatternSummary[]> {
+  const response = await fetch(`${apiBaseUrl}/api/memory/failures`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load failure patterns');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { failures?: FailurePatternSummary[] };
+  return body.failures ?? [];
+}
+
+export async function listActions({
+  conversationId,
+  from,
+  outcomeType,
+  projectId,
+  q,
+  to,
+  token,
+}: AuthenticatedRequestInput & {
+  conversationId?: string;
+  from?: string;
+  outcomeType?: ActionOutcomeType | '';
+  projectId?: string;
+  q?: string;
+  to?: string;
+}): Promise<ActionLogSummary[]> {
+  const params = new URLSearchParams();
+  if (conversationId) params.set('conversationId', conversationId);
+  if (from) params.set('from', from);
+  if (outcomeType) params.set('outcomeType', outcomeType);
+  if (projectId) params.set('projectId', projectId);
+  if (q) params.set('q', q);
+  if (to) params.set('to', to);
+  const response = await fetch(`${apiBaseUrl}/api/actions${params.size > 0 ? `?${params.toString()}` : ''}`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load actions');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { actions?: ActionLogSummary[] };
+  return body.actions ?? [];
+}
+
+export async function undoAction({
+  actionId,
+  token,
+}: AuthenticatedRequestInput & { actionId: string }): Promise<{ undone: boolean }> {
+  const response = await fetch(`${apiBaseUrl}/api/actions/${encodeURIComponent(actionId)}/undo`, {
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to undo action');
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<{ undone: boolean }>;
 }
 
 export async function createTask({
@@ -114,6 +254,42 @@ export async function cancelAgentRun(
   }
 
   return response.json() as Promise<{ active: boolean; cancelled: boolean; status: string }>;
+}
+
+export async function pauseAgentRun(
+  agentRunId: string,
+  { token }: AuthenticatedRequestInput,
+): Promise<{ active: boolean; paused: boolean; status: string }> {
+  const response = await fetch(`${apiBaseUrl}/api/agent-runs/${agentRunId}/pause`, {
+    body: JSON.stringify({ reason: 'Paused by user' }),
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to pause run');
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<{ active: boolean; paused: boolean; status: string }>;
+}
+
+export async function resumeAgentRun(
+  agentRunId: string,
+  { token }: AuthenticatedRequestInput,
+): Promise<{ resumed: boolean; status: string }> {
+  const response = await fetch(`${apiBaseUrl}/api/agent-runs/${agentRunId}/resume`, {
+    body: JSON.stringify({}),
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to resume run');
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<{ resumed: boolean; status: string }>;
 }
 
 
@@ -336,6 +512,7 @@ export async function sendConversationMessage({
   backend,
   content,
   conversationId,
+  memoryEnabled,
   modelName,
   providerId,
   token,
@@ -344,6 +521,7 @@ export async function sendConversationMessage({
     body: JSON.stringify({
       ...(backend ? { backend } : {}),
       content,
+      ...(memoryEnabled === undefined ? {} : { memoryEnabled }),
       ...(modelName ? { modelName } : {}),
       ...(providerId ? { providerId } : {}),
     }),

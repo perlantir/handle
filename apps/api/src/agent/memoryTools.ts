@@ -1,0 +1,237 @@
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { awaitApproval } from "../approvals/approvalWaiter";
+import { emitTaskEvent } from "../lib/eventBus";
+import { redactSecrets } from "../lib/redact";
+import { appendActionLog } from "../lib/actionLog";
+import {
+  appendMessageToZep,
+  effectiveMemoryScope,
+  forgetMemoryForProject,
+  getRelevantMemoryForTask,
+} from "../memory/sessionMemory";
+import type { ToolDefinition, ToolExecutionContext } from "./toolRegistry";
+import { displayToolName } from "./toolRegistry";
+
+const saveInput = z.object({
+  fact: z.string().min(1).describe("The concise fact or preference to save to memory."),
+  valid_at: z
+    .string()
+    .datetime()
+    .nullable()
+    .optional()
+    .describe("Optional ISO timestamp for when this fact became true."),
+});
+
+const searchInput = z.object({
+  query: z.string().min(1).describe("The memory search query."),
+});
+
+const forgetInput = z.object({
+  query: z.string().min(1).describe("The memory to forget."),
+  scope: z
+    .enum(["project", "global", "all"])
+    .describe(
+      "Which memory layer to search. In GLOBAL_AND_PROJECT projects, Handle expands any value to both project and global layers so the matching fact is fully forgotten.",
+    ),
+});
+
+function emitMemoryToolCall(
+  context: ToolExecutionContext,
+  toolName: string,
+  args: Record<string, unknown>,
+) {
+  const callId = randomUUID();
+  emitTaskEvent({
+    args,
+    callId,
+    taskId: context.taskId,
+    toolName: displayToolName(toolName),
+    type: "tool_call",
+  });
+  return callId;
+}
+
+function emitMemoryToolResult(
+  context: ToolExecutionContext,
+  callId: string,
+  result: string,
+  error?: string,
+) {
+  emitTaskEvent({
+    callId,
+    result: redactSecrets(result),
+    taskId: context.taskId,
+    type: "tool_result",
+    ...(error ? { error: redactSecrets(error) } : {}),
+  });
+}
+
+function memoryDisabledMessage() {
+  return "Memory is disabled for this project or message.";
+}
+
+function secretMemoryBlockedMessage() {
+  return "Secret-shaped content was blocked. Handle did not keep that value in memory. Put secrets in a password manager instead.";
+}
+
+function actionContext(context: ToolExecutionContext) {
+  return {
+    conversationId: context.conversationId ?? context.taskId,
+    projectId: context.projectId ?? context.memoryProject?.id ?? "unknown",
+    taskId: context.taskId,
+  };
+}
+
+export function createMemoryToolDefinitions(): ToolDefinition[] {
+  return [
+    {
+      backendSupport: { e2b: true, local: true },
+      description:
+        "Save a durable user preference, project fact, decision, or idea to Handle memory. Use only for facts worth remembering later.",
+      inputSchema: saveInput,
+      name: "memory_save",
+      requiresApproval: false,
+      sideEffectClass: "write",
+      async implementation(input, context) {
+        const parsed = saveInput.parse(input);
+        const callId = emitMemoryToolCall(context, "memory_save", {
+          factLength: parsed.fact.length,
+        });
+        if (!context.memoryProject) {
+          const message = memoryDisabledMessage();
+          emitMemoryToolResult(context, callId, message);
+          return message;
+        }
+
+        const writeResult = await appendMessageToZep({
+          content: parsed.fact,
+          conversationId: context.conversationId,
+          extractionMode: "explicit_fact",
+          project: context.memoryProject,
+          role: "USER",
+          ...(parsed.valid_at ? { validAt: parsed.valid_at } : {}),
+        });
+        if (
+          writeResult.skippedReason === "redaction_triggered" ||
+          writeResult.skippedReason === "redaction_marker_present" ||
+          writeResult.skippedReason === "secret_topic"
+        ) {
+          const result = secretMemoryBlockedMessage();
+          emitMemoryToolResult(context, callId, result);
+          return result;
+        }
+        if (!writeResult.ok) {
+          const result = "Memory is currently offline; I could not save that fact.";
+          emitMemoryToolResult(context, callId, result, result);
+          return result;
+        }
+        const result = "Saved memory.";
+        emitMemoryToolResult(context, callId, result);
+        await appendActionLog({
+          ...actionContext(context),
+          description: "Saved memory",
+          metadata: { factLength: parsed.fact.length },
+          outcomeType: "memory_saved",
+          reversible: true,
+          target: parsed.fact,
+          timestamp: new Date().toISOString(),
+          undoCommand: `memory_forget ${parsed.fact}`,
+        });
+        return result;
+      },
+    },
+    {
+      backendSupport: { e2b: true, local: true },
+      description:
+        "Search Handle memory for relevant remembered facts, user preferences, or project context.",
+      inputSchema: searchInput,
+      name: "memory_search",
+      requiresApproval: false,
+      sideEffectClass: "read",
+      async implementation(input, context) {
+        const parsed = searchInput.parse(input);
+        const callId = emitMemoryToolCall(context, "memory_search", {
+          query: parsed.query,
+        });
+        if (!context.memoryProject) {
+          const message = memoryDisabledMessage();
+          emitMemoryToolResult(context, callId, message);
+          return message;
+        }
+
+        const facts = await getRelevantMemoryForTask({
+          conversationId: context.conversationId,
+          goal: parsed.query,
+          project: context.memoryProject,
+          taskId: context.taskId,
+        });
+        const result =
+          facts.length === 0
+            ? "No relevant memory found."
+            : JSON.stringify(facts, null, 2);
+        emitMemoryToolResult(context, callId, result);
+        return result;
+      },
+    },
+    {
+      backendSupport: { e2b: true, local: true },
+      description:
+        "Forget remembered information. This requires approval and deletes only facts matching the query in the active project/global memory layer.",
+      inputSchema: forgetInput,
+      name: "memory_forget",
+      requiresApproval: true,
+      sideEffectClass: "write",
+      async implementation(input, context) {
+        const parsed = forgetInput.parse(input);
+        const callId = emitMemoryToolCall(context, "memory_forget", {
+          query: parsed.query,
+          scope: parsed.scope,
+        });
+        if (!context.memoryProject) {
+          const message = memoryDisabledMessage();
+          emitMemoryToolResult(context, callId, message);
+          return message;
+        }
+
+        const decision = await awaitApproval(context.taskId, {
+          action: "forget",
+          reason: `Forget memory matching "${redactSecrets(parsed.query)}" in ${
+            effectiveMemoryScope(context.memoryProject) === "GLOBAL_AND_PROJECT"
+              ? "global and project"
+              : parsed.scope
+          } scope`,
+          target: parsed.query,
+          type: "memory_forget",
+        });
+        if (decision !== "approved") {
+          const message = `Memory forget ${decision}.`;
+          emitMemoryToolResult(context, callId, message, message);
+          return message;
+        }
+
+        const result = await forgetMemoryForProject({
+          project: context.memoryProject,
+          query: parsed.query,
+          scope: parsed.scope,
+        });
+        const message = `Forgot ${result.deletedFacts} fact(s).`;
+        emitMemoryToolResult(context, callId, message);
+        await appendActionLog({
+          ...actionContext(context),
+          description: `Forgot memory matching ${parsed.query}`,
+          metadata: {
+            deletedFacts: result.deletedFacts,
+            scope: parsed.scope,
+            touchedSessions: result.touchedSessions,
+          },
+          outcomeType: "memory_forgotten",
+          reversible: false,
+          target: parsed.query,
+          timestamp: new Date().toISOString(),
+        });
+        return message;
+      },
+    },
+  ];
+}

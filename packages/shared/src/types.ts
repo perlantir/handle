@@ -100,6 +100,84 @@ export interface BrowserScreenshotEvent {
   source: 'browser_tools' | 'computer_use';
 }
 
+export interface MemoryStatusEvent {
+  type: 'memory_status';
+  taskId: string;
+  status: 'online' | 'offline';
+  provider: 'self-hosted' | 'cloud';
+  detail?: string;
+  timestamp: string;
+}
+
+export interface MemoryRecallEvent {
+  type: 'memory_recall';
+  taskId: string;
+  facts: Array<{
+    content: string;
+    invalidAt?: string | null;
+    source: 'global' | 'project';
+    score?: number;
+    validAt?: string | null;
+  }>;
+  timestamp: string;
+}
+
+export interface MemoryFactSummary {
+  id: string;
+  confidence: number;
+  content: string;
+  lastUpdated: string;
+  invalidAt?: string | null;
+  source: 'global' | 'project';
+  sourceLabel: string;
+  sessionId: string;
+  type: string;
+  validAt?: string | null;
+}
+
+export interface ProcedureTemplateSummary {
+  id: string;
+  name: string;
+  pattern: unknown;
+  successRate: number;
+  usageCount: number;
+  createdFromIds: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface FailurePatternSummary {
+  agentRunId: string;
+  goal: string;
+  outcomeReason?: string | null;
+  similarity?: number;
+  steps: unknown[];
+  createdAt?: string;
+}
+
+export type ActionOutcomeType =
+  | 'browser_navigated'
+  | 'file_created'
+  | 'file_deleted'
+  | 'file_modified'
+  | 'memory_forgotten'
+  | 'memory_saved'
+  | 'shell_command_executed';
+
+export interface ActionLogSummary {
+  id: string;
+  timestamp: string;
+  taskId: string;
+  conversationId: string;
+  projectId: string;
+  outcomeType: ActionOutcomeType;
+  description: string;
+  target: string;
+  metadata: Record<string, unknown>;
+  reversible: boolean;
+  undoCommand?: string;
+}
+
 export type SSEEvent =
   | ThoughtEvent
   | ToolCallEvent
@@ -111,6 +189,8 @@ export type SSEEvent =
   | AgentRunCancelledEvent
   | ApprovalRequestEvent
   | BrowserScreenshotEvent
+  | MemoryRecallEvent
+  | MemoryStatusEvent
   | PlanUpdateEvent
   | ProviderFallbackEvent;
 
@@ -121,6 +201,7 @@ export interface ApprovalPayload {
     | 'file_delete'
     | 'browser_use_actual_chrome'
     | 'risky_browser_action'
+    | 'memory_forget'
     | 'destructive_integration_action';
   command?: string;
   path?: string;
@@ -196,9 +277,12 @@ export type BackendType = 'E2B' | 'LOCAL';
 
 export type BrowserMode = 'SEPARATE_PROFILE' | 'ACTUAL_CHROME';
 
+export type MemoryScope = 'GLOBAL_AND_PROJECT' | 'PROJECT_ONLY' | 'NONE';
+
 export type AgentRunStatus =
   | 'RUNNING'
   | 'WAITING'
+  | 'PAUSED'
   | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED';
@@ -209,6 +293,7 @@ export interface ProjectSummary {
   workspaceScope: WorkspaceScope;
   customScopePath?: string | null;
   permissionMode: ProjectPermissionMode;
+  memoryScope: MemoryScope;
   defaultBackend: BackendType;
   defaultProvider?: string | null;
   defaultModel?: string | null;
@@ -231,6 +316,7 @@ export interface ChatMessage {
   conversationId: string;
   role: 'USER' | 'ASSISTANT';
   content: string;
+  memoryEnabled?: boolean | null;
   agentRunId?: string | null;
   providerId?: string | null;
   modelName?: string | null;

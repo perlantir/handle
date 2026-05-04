@@ -6,9 +6,33 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { emitTaskEvent } from "../lib/eventBus";
+import { recentActionLogContext } from "../lib/actionLog";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
+import {
+  appendMessageToZep,
+  formatMemoryContext,
+  getRelevantMemoryForTask,
+  type MemoryFact,
+} from "../memory/sessionMemory";
+import {
+  findSimilarFailedTrajectories,
+  findSimilarSuccessfulTrajectories,
+  formatFailureMemoryContext,
+  formatProceduralMemoryContext,
+  synthesizeTrajectoryTemplates,
+} from "../memory/proceduralMemory";
+import { ensureSharedMemoryNamespace, type SharedMemoryStore } from "../memory/sharedMemory";
+import {
+  completeTrajectory,
+  failureReasonFromError,
+  initializeTrajectory,
+  recordTrajectoryStep,
+  trajectoryOutcomeFromStatus,
+  type TrajectoryStepRecord,
+  type TrajectoryStore,
+} from "../memory/trajectoryMemory";
 import { providerRegistry as defaultProviderRegistry } from "../providers/registry";
 import {
   isProviderId,
@@ -19,10 +43,13 @@ import { createHandleAgent } from "./createAgent";
 import { createComputerUseToolDefinitions } from "./computerUseTools";
 import { parseAgentFinalResult } from "./finalResult";
 import { emitInitialPlan } from "./plan";
+import { createAgentRunCheckpoint, latestCheckpointContext } from "./runCheckpoint";
 import {
   beginAgentRun,
   cancelReason,
+  isAgentRunPausedSignal,
   isAgentRunCancelledError,
+  pauseReason,
 } from "./runControl";
 import { isSmokeAgentEnabled, runSmokeAgent } from "./smokeAgent";
 
@@ -80,10 +107,17 @@ interface AgentLike {
 }
 
 interface TaskStore {
+  agentRunCheckpoint?: {
+    create?(args: unknown): Promise<unknown>;
+    findFirst?(args: unknown): Promise<unknown | null>;
+  };
+  agentRunTrajectory?: TrajectoryStore["agentRunTrajectory"];
+  sharedMemoryNamespace?: SharedMemoryStore["sharedMemoryNamespace"];
   message: {
     create(args: unknown): Promise<unknown>;
   };
   agentRun?: {
+    findFirst?(args: unknown): Promise<unknown | null>;
     findUnique(args: unknown): Promise<AgentRunContext | null>;
     update(args: unknown): Promise<unknown>;
   };
@@ -102,6 +136,7 @@ interface ProjectContext {
   defaultModel: string | null;
   defaultProvider: string | null;
   id: string;
+  memoryScope: string | null;
   permissionMode: string | null;
   workspaceScope: string | null;
 }
@@ -110,7 +145,7 @@ interface AgentRunContext {
   backend: string | null;
   conversationId: string;
   conversation?: {
-    messages?: Array<{ content: string; role: string }>;
+    messages?: Array<{ content: string; memoryEnabled?: boolean | null; role: string }>;
     project?: ProjectContext | null;
   } | null;
   providerId: string | null;
@@ -149,7 +184,10 @@ interface RunAgentDependencies {
   createAgent?: (
     context: {
       backend: ExecutionBackend;
+      memoryContext?: string;
+      recordTrajectoryStep?: (step: TrajectoryStepRecord) => Promise<void>;
       sandbox: E2BSandboxLike;
+      sharedMemoryNamespaceId?: string;
       taskId: string;
       trustedDomains?: string[];
     },
@@ -200,10 +238,11 @@ function backendToDb(value: "e2b" | "local") {
 }
 
 function runStatusToDb(
-  status: "RUNNING" | "WAITING" | "STOPPED" | "ERROR" | "CANCELLED",
+  status: "RUNNING" | "WAITING" | "STOPPED" | "ERROR" | "PAUSED" | "CANCELLED",
 ) {
   if (status === "STOPPED") return "COMPLETED";
   if (status === "ERROR") return "FAILED";
+  if (status === "PAUSED") return "PAUSED";
   if (status === "CANCELLED") return "CANCELLED";
   return status;
 }
@@ -249,6 +288,7 @@ async function updateRun(store: TaskStore, taskId: string, data: Record<string, 
           | "WAITING"
           | "STOPPED"
           | "ERROR"
+          | "PAUSED"
           | "CANCELLED",
       );
       if (
@@ -291,6 +331,17 @@ async function createAssistantMessage(
         role: "ASSISTANT",
       },
     });
+    await appendMessageToZep({
+      content,
+      conversationId: context.conversationId,
+      project: normalizeMemoryProjectContext(context.conversation?.project),
+      role: "ASSISTANT",
+    }).catch((err) => {
+      logger.warn(
+        { conversationId: context.conversationId, err, taskId },
+        "Failed to append assistant message to memory",
+      );
+    });
     return;
   }
 
@@ -313,6 +364,31 @@ function conversationHistory(context: AgentRunContext | null, currentGoal: strin
     content: redactSecrets(message.content),
     role: message.role.toLowerCase(),
   }));
+}
+
+function currentMessageMemoryEnabled(
+  context: AgentRunContext | null,
+  currentGoal: string,
+) {
+  const messages = context?.conversation?.messages ?? [];
+  const current = messages.at(-1);
+  if (
+    current?.role === "USER" &&
+    current.content === currentGoal &&
+    typeof current.memoryEnabled === "boolean"
+  ) {
+    return current.memoryEnabled;
+  }
+  return null;
+}
+
+function normalizeMemoryProjectContext(project: ProjectContext | null | undefined) {
+  if (!project?.memoryScope) return null;
+  const memoryScope =
+    project.memoryScope === "PROJECT_ONLY" || project.memoryScope === "NONE"
+      ? project.memoryScope
+      : "GLOBAL_AND_PROJECT";
+  return { id: project.id, memoryScope } as const;
 }
 
 function localSandboxPlaceholder(taskId: string): E2BSandboxLike {
@@ -500,6 +576,14 @@ export function createAgentRunner({
         modelName: provider.config.primaryModel,
         providerId: provider.id,
       });
+      await initializeTrajectory({ agentRunId: taskId, goal, store });
+      const sharedMemoryNamespaceId = await ensureSharedMemoryNamespace({
+        parentRunId: taskId,
+        store,
+      }).catch((err) => {
+        logger.warn({ err, taskId }, "Failed to initialize shared memory namespace");
+        return null;
+      });
       runControl.throwIfCancelled();
 
       try {
@@ -608,6 +692,107 @@ export function createAgentRunner({
       runControl.throwIfCancelled();
 
       const trustedDomains = await loadTrustedDomains(store);
+      let recalledMemory: MemoryFact[] = [];
+      const memoryProjectForRun = normalizeMemoryProjectContext(project);
+      try {
+        recalledMemory = await getRelevantMemoryForTask({
+          conversationId: runContext.conversationId,
+          goal,
+          memoryEnabled: currentMessageMemoryEnabled(runContext, goal),
+          project: memoryProjectForRun,
+          taskId,
+        });
+        logger.info(
+          {
+            count: recalledMemory.length,
+            memoryScope: project?.memoryScope ?? null,
+            projectId: project?.id ?? null,
+            taskId,
+          },
+          "Memory recall completed for agent run",
+        );
+        if (recalledMemory.length > 0) {
+          emitEvent({
+            facts: recalledMemory.map((fact) => ({
+              content: fact.content,
+              ...(fact.invalidAt ? { invalidAt: fact.invalidAt } : {}),
+              source: fact.source,
+              ...(typeof fact.score === "number" ? { score: fact.score } : {}),
+              ...(fact.validAt ? { validAt: fact.validAt } : {}),
+            })),
+            taskId,
+            timestamp: new Date().toISOString(),
+            type: "memory_recall",
+          });
+        }
+      } catch (err) {
+        logger.warn({ err, taskId }, "Memory recall failed; continuing without memory");
+      }
+      await appendMessageToZep({
+        content: goal,
+        conversationId: runContext.conversationId,
+        memoryEnabled: currentMessageMemoryEnabled(runContext, goal),
+        project: memoryProjectForRun,
+        role: "USER",
+      }).catch((err) => {
+        logger.warn(
+          {
+            conversationId: runContext?.conversationId,
+            err,
+            projectId: project?.id ?? null,
+            taskId,
+          },
+          "Failed to append current user message to memory after recall",
+        );
+      });
+      const actionContext = await recentActionLogContext({
+        conversationId: runContext.conversationId,
+      }).catch((err) => {
+        logger.warn(
+          { conversationId: runContext?.conversationId, err, taskId },
+          "Failed to load recent action log context; continuing without actions",
+        );
+        return "";
+      });
+      const proceduralContext = await findSimilarSuccessfulTrajectories({
+        goal,
+        projectId: project?.id ?? null,
+        store,
+      })
+        .then(formatProceduralMemoryContext)
+        .catch((err) => {
+          logger.warn(
+            { err, projectId: project?.id ?? null, taskId },
+            "Procedural memory recall failed; continuing without procedural context",
+          );
+          return "";
+        });
+      const failureMemoryContext = await findSimilarFailedTrajectories({
+        goal,
+        projectId: project?.id ?? null,
+        store,
+      })
+        .then(formatFailureMemoryContext)
+        .catch((err) => {
+          logger.warn(
+            { err, projectId: project?.id ?? null, taskId },
+            "Failure memory recall failed; continuing without failure context",
+          );
+          return "";
+        });
+      const resumeContext = await latestCheckpointContext({ runId: taskId, store }).catch((err) => {
+        logger.warn({ err, taskId }, "Failed to load resume checkpoint context; continuing without it");
+        return "";
+      });
+      const memoryContext = [
+        formatMemoryContext(recalledMemory),
+        proceduralContext,
+        failureMemoryContext,
+        resumeContext,
+        actionContext,
+      ]
+        .filter((item) => item.trim().length > 0)
+        .join("\n\n");
 
       if (selectedBackend === "e2b" && shouldRunDirectComputerUse(goal)) {
         logger.info(
@@ -625,12 +810,36 @@ export function createAgentRunner({
             { backend, sandbox, taskId, trustedDomains },
           ),
         );
+        await recordTrajectoryStep({
+          agentRunId: taskId,
+          step: {
+            completedAt: new Date().toISOString(),
+            durationMs: 0,
+            startedAt: new Date().toISOString(),
+            status: "success",
+            subgoal: "Use computer-use directly for desktop screenshot task",
+            toolInput: { goal, maxIterations: 4 },
+            toolName: "computer_use",
+            toolOutput: finalMessage,
+          },
+          store,
+        });
         runControl.throwIfCancelled();
 
         await createAssistantMessage(store, taskId, runContext, finalMessage, provider);
         await updateRun(store, taskId, {
           result: finalMessage,
           status: "STOPPED",
+        });
+        await completeTrajectory({
+          agentRunId: taskId,
+          outcome: "SUCCEEDED",
+          store,
+        });
+        await synthesizeProceduralTemplatesForRun({
+          projectId: project?.id ?? null,
+          store,
+          taskId,
         });
         emitEvent({
           type: "message",
@@ -642,10 +851,33 @@ export function createAgentRunner({
         return;
       }
 
-      const agent = await createAgent(
-        { backend, taskId, sandbox, trustedDomains },
-        { llm: model },
-      );
+      const memoryProject = memoryProjectForRun;
+      let trajectoryStepCount = 0;
+      const agentContext = {
+        backend,
+        ...(memoryProject && runContext.conversationId
+          ? { conversationId: runContext.conversationId }
+          : {}),
+        ...(memoryContext ? { memoryContext } : {}),
+        ...(memoryProject ? { memoryProject } : {}),
+        ...(project?.id ? { projectId: project.id } : {}),
+        recordTrajectoryStep: async (step: TrajectoryStepRecord) => {
+          await recordTrajectoryStep({ agentRunId: taskId, step, store });
+          trajectoryStepCount += 1;
+          if (trajectoryStepCount % 5 === 0) {
+            await createAgentRunCheckpoint({
+              reason: `Automatic checkpoint after ${trajectoryStepCount} tool calls`,
+              runId: taskId,
+              store,
+            });
+          }
+        },
+        ...(sharedMemoryNamespaceId ? { sharedMemoryNamespaceId } : {}),
+        taskId,
+        sandbox,
+        trustedDomains,
+      };
+      const agent = await createAgent(agentContext, { llm: model });
       runControl.throwIfCancelled();
       const stream = await agent.streamEvents(
         {
@@ -687,6 +919,19 @@ export function createAgentRunner({
         result: finalMessage,
         status: finalStatus,
       });
+      await completeTrajectory({
+        agentRunId: taskId,
+        outcome: trajectoryOutcomeFromStatus(finalStatus),
+        ...(finalResult.reason ? { outcomeReason: finalResult.reason } : {}),
+        store,
+      });
+      if (finalStatus === "STOPPED") {
+        await synthesizeProceduralTemplatesForRun({
+          projectId: project?.id ?? null,
+          store,
+          taskId,
+        });
+      }
 
       emitEvent({
         type: "message",
@@ -709,6 +954,28 @@ export function createAgentRunner({
       });
     } catch (err) {
       if (runControl.signal.aborted || isAgentRunCancelledError(err)) {
+        if (isAgentRunPausedSignal(runControl.signal)) {
+          const reason = pauseReason(runControl.signal);
+          logger.info({ taskId }, "Agent run pause observed");
+          await createAgentRunCheckpoint({ reason, runId: taskId, store });
+          await updateRun(store, taskId, {
+            result: reason,
+            status: "PAUSED",
+          }).catch((updateErr) => {
+            logger.warn(
+              { err: updateErr, taskId },
+              "Failed to mark task as paused",
+            );
+          });
+          emitEvent({
+            type: "status_update",
+            detail: reason,
+            status: "PAUSED",
+            taskId,
+          });
+          return;
+        }
+
         const reason = cancelReason(runControl.signal);
         logger.info({ taskId }, "Agent run cancellation observed");
 
@@ -719,7 +986,13 @@ export function createAgentRunner({
           logger.warn(
             { err: updateErr, taskId },
             "Failed to mark task as cancelled",
-          );
+            );
+          });
+        await completeTrajectory({
+          agentRunId: taskId,
+          outcome: "CANCELLED",
+          outcomeReason: reason,
+          store,
         });
 
         emitEvent({ type: "agent_run_cancelled", reason, taskId });
@@ -743,8 +1016,15 @@ export function createAgentRunner({
           logger.warn(
             { err: updateErr, taskId },
             "Failed to mark task as errored",
-          );
-        });
+            );
+          });
+      const failureReason = failureReasonFromError(err);
+      await completeTrajectory({
+        agentRunId: taskId,
+        outcome: "FAILED",
+        ...(failureReason ? { outcomeReason: failureReason } : {}),
+        store,
+      });
 
       emitEvent({ type: "error", message, taskId });
       emitEvent({ type: "status_update", status: "ERROR", taskId });
@@ -760,3 +1040,20 @@ export function createAgentRunner({
 }
 
 export const runAgent = createAgentRunner();
+
+async function synthesizeProceduralTemplatesForRun({
+  projectId,
+  store,
+  taskId,
+}: {
+  projectId?: string | null;
+  store: TrajectoryStore;
+  taskId: string;
+}) {
+  await synthesizeTrajectoryTemplates({ projectId: projectId ?? null, store }).catch((err) => {
+    logger.warn(
+      { err, projectId: projectId ?? null, taskId },
+      "Procedural template synthesis failed after successful run",
+    );
+  });
+}

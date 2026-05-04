@@ -2,6 +2,8 @@ import type { ExecutionBackend } from "../execution/types";
 import { logger } from "../lib/logger";
 
 const DEFAULT_CANCEL_REASON = "Cancelled by user";
+const DEFAULT_PAUSE_REASON = "Paused by user";
+const PAUSE_REASON_PREFIX = "__HANDLE_PAUSE__:";
 
 interface ActiveAgentRun {
   backend: ExecutionBackend | null;
@@ -59,8 +61,18 @@ export function isAgentRunCancelledError(
 
 export function cancelReason(signal: AbortSignal) {
   return typeof signal.reason === "string" && signal.reason.trim()
-    ? signal.reason
+    ? signal.reason.replace(PAUSE_REASON_PREFIX, "")
     : DEFAULT_CANCEL_REASON;
+}
+
+export function isAgentRunPausedSignal(signal: AbortSignal) {
+  return typeof signal.reason === "string" && signal.reason.startsWith(PAUSE_REASON_PREFIX);
+}
+
+export function pauseReason(signal: AbortSignal) {
+  return typeof signal.reason === "string" && signal.reason.startsWith(PAUSE_REASON_PREFIX)
+    ? signal.reason.slice(PAUSE_REASON_PREFIX.length)
+    : DEFAULT_PAUSE_REASON;
 }
 
 export async function cancelActiveAgentRun(
@@ -72,6 +84,21 @@ export async function cancelActiveAgentRun(
 
   if (!activeRun.controller.signal.aborted) {
     activeRun.controller.abort(reason);
+  }
+
+  await shutdownBackend(taskId, activeRun);
+  return { active: true };
+}
+
+export async function pauseActiveAgentRun(
+  taskId: string,
+  reason = DEFAULT_PAUSE_REASON,
+) {
+  const activeRun = activeRuns.get(taskId);
+  if (!activeRun) return { active: false };
+
+  if (!activeRun.controller.signal.aborted) {
+    activeRun.controller.abort(`${PAUSE_REASON_PREFIX}${reason}`);
   }
 
   await shutdownBackend(taskId, activeRun);

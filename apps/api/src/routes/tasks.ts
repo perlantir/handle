@@ -76,6 +76,7 @@ function taskStatusFromRun(status: string | undefined) {
   if (status === "COMPLETED") return "STOPPED";
   if (status === "FAILED") return "ERROR";
   if (status === "CANCELLED") return "CANCELLED";
+  if (status === "PAUSED") return "PAUSED";
   if (status === "WAITING") return "WAITING";
   return "RUNNING";
 }

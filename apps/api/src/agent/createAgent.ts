@@ -16,6 +16,8 @@ import {
 } from "./toolRegistry";
 import { createBrowserToolDefinitions } from "./browserTools";
 import { createComputerUseToolDefinitions } from "./computerUseTools";
+import { createMemoryToolDefinitions } from "./memoryTools";
+import { createSharedMemoryToolDefinitions } from "./sharedMemoryTools";
 import { createPhase1ToolDefinitions } from "./tools";
 import {
   buildHandleSystemPrompt,
@@ -50,6 +52,10 @@ interface CreatePhase1AgentOptions {
   llm?: CreateToolCallingAgentParams["llm"];
 }
 
+function escapePromptTemplateLiterals(text: string) {
+  return text.replaceAll("{", "{{").replaceAll("}", "}}");
+}
+
 export async function createPhase1Agent(
   context: ToolExecutionContext,
   options: CreatePhase1AgentOptions = {},
@@ -58,10 +64,11 @@ export async function createPhase1Agent(
   const llm = options.llm ?? createOpenAIChatModel();
   const systemPrompt = buildPhase1SystemPrompt({
     backendId: context.backend.id,
+    memoryContext: context.memoryContext,
     workspaceDir: context.backend.getWorkspaceDir(),
   });
   const prompt = ChatPromptTemplate.fromMessages([
-    ["system", systemPrompt],
+    ["system", escapePromptTemplateLiterals(systemPrompt)],
     new MessagesPlaceholder("chat_history"),
     ["human", "{input}"],
     new MessagesPlaceholder("agent_scratchpad"),
@@ -91,6 +98,8 @@ export async function createHandleAgent(
   const tools = createLangChainTools(
     [
       ...createPhase1ToolDefinitions(),
+      ...createMemoryToolDefinitions(),
+      ...createSharedMemoryToolDefinitions(),
       ...createBrowserToolDefinitions(),
       ...createComputerUseToolDefinitions(),
     ],
@@ -99,10 +108,11 @@ export async function createHandleAgent(
   const llm = options.llm ?? createOpenAIChatModel();
   const systemPrompt = buildHandleSystemPrompt({
     backendId: context.backend.id,
+    memoryContext: context.memoryContext,
     workspaceDir: context.backend.getWorkspaceDir(),
   });
   const prompt = ChatPromptTemplate.fromMessages([
-    ["system", systemPrompt],
+    ["system", escapePromptTemplateLiterals(systemPrompt)],
     new MessagesPlaceholder("chat_history"),
     ["human", "{input}"],
     new MessagesPlaceholder("agent_scratchpad"),

@@ -5,6 +5,7 @@ import type { BrowserSession } from "../execution/browserSession";
 import { emitBrowserScreenshotEvent } from "../lib/browserScreenshotEvents";
 import { emitTaskEvent } from "../lib/eventBus";
 import { redactSecrets } from "../lib/redact";
+import { appendActionLog } from "../lib/actionLog";
 import type { ToolDefinition, ToolExecutionContext } from "./toolRegistry";
 import { displayToolName } from "./toolRegistry";
 
@@ -96,6 +97,14 @@ function redactArgs(args: Record<string, unknown>) {
   return redacted;
 }
 
+function actionContext(context: ToolExecutionContext) {
+  return {
+    conversationId: context.conversationId ?? context.taskId,
+    projectId: context.projectId ?? context.memoryProject?.id ?? "unknown",
+    taskId: context.taskId,
+  };
+}
+
 async function getBrowserSession(context: ToolExecutionContext): Promise<BrowserSession> {
   if (context.browserSession) return context.browserSession;
 
@@ -165,6 +174,15 @@ export function createBrowserToolDefinitions(): ToolDefinition[] {
           emitBrowserScreenshot(context, callId, result.screenshot);
           const output = `Navigated to ${result.url}. Title: "${result.title}".`;
           emitBrowserToolResult(context, callId, output);
+          await appendActionLog({
+            ...actionContext(context),
+            description: `Navigated browser to ${result.url}`,
+            metadata: { title: result.title },
+            outcomeType: "browser_navigated",
+            reversible: false,
+            target: result.url,
+            timestamp: new Date().toISOString(),
+          });
           return output;
         } catch (err) {
           const message = errorMessage(err);

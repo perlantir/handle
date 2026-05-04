@@ -38,8 +38,14 @@ function streamBody(
     taskId,
     type: "approval_request",
   };
+  const memoryRecall = {
+    facts: [{ content: "Favorite color is teal", source: "global" }],
+    taskId,
+    timestamp: new Date().toISOString(),
+    type: "memory_recall",
+  };
 
-  return `data: ${JSON.stringify(screenshot)}\n\ndata: ${JSON.stringify(approval)}\n\n`;
+  return `data: ${JSON.stringify(memoryRecall)}\n\ndata: ${JSON.stringify(screenshot)}\n\ndata: ${JSON.stringify(approval)}\n\n`;
 }
 
 async function mockWorkspaceApis(
@@ -96,6 +102,8 @@ test.describe("Workspace Browser Pane", () => {
     await expect(page.getByText("Screenshot history")).toBeVisible();
     await expect(page.getByAltText("Browser screenshot")).toBeVisible();
     await expect(page.getByAltText("browser_tools thumbnail")).toBeVisible();
+    await expect(page.getByText("Favorite color is teal")).toBeVisible();
+    await expect(page.getByText("global").first()).toBeVisible();
     await expect(page.getByRole("heading", { name: "Approve action?" })).toBeVisible();
     await expect(
       page.getByText("Click appears to trigger destructive action").first(),

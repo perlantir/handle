@@ -9,8 +9,13 @@ import { cancelAgentRunById } from "../agent/cancelAgentRun";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
 import { runAgent as defaultRunAgent } from "../agent/runAgent";
 import { asyncHandler } from "../lib/http";
+import { getCredential as defaultGetCredential } from "../lib/keychain";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
+import {
+  keyedProvidersForFreshInstall,
+  type ProviderKeychainLike,
+} from "../providers/providerCredentials";
 import { isProviderId, type ProviderId } from "../providers/types";
 
 const projectSchema = z.object({
@@ -19,6 +24,7 @@ const projectSchema = z.object({
   defaultBackend: z.enum(["E2B", "LOCAL"]).optional(),
   defaultModel: z.string().min(1).nullable().optional(),
   defaultProvider: z.string().refine(isProviderId).nullable().optional(),
+  memoryScope: z.enum(["GLOBAL_AND_PROJECT", "PROJECT_ONLY", "NONE"]).optional(),
   name: z.string().min(1).max(120).optional(),
   permissionMode: z.enum(["FULL_ACCESS", "ASK", "PLAN"]).optional(),
   workspaceScope: z
@@ -41,6 +47,7 @@ const updateConversationSchema = z.object({
 const sendMessageSchema = z.object({
   backend: z.enum(["e2b", "local"]).optional(),
   content: z.string().min(1).max(10_000),
+  memoryEnabled: z.boolean().optional(),
   modelName: z.string().min(1).max(200).optional(),
   providerId: z.string().refine(isProviderId).optional(),
 });
@@ -72,10 +79,25 @@ export interface ProjectRouteStore {
     update(args: unknown): Promise<unknown>;
     upsert(args: unknown): Promise<unknown>;
   };
+  memorySettings?: {
+    findUnique(args: unknown): Promise<{ defaultScopeForNewProjects: string } | null>;
+  };
+  providerConfig?: {
+    findMany(args: unknown): Promise<
+      Array<{
+        enabled: boolean;
+        fallbackOrder: number;
+        id: string;
+        modelName: string | null;
+        primaryModel: string;
+      }>
+    >;
+  };
 }
 
 interface CreateProjectsRouterOptions {
   getUserId?: typeof getAuthenticatedUserId;
+  keychain?: ProviderKeychainLike;
   runAgent?: (
     agentRunId: string,
     goal: string,
@@ -167,8 +189,47 @@ async function ensureDefaultProject(store: ProjectRouteStore) {
   });
 }
 
+async function projectDefaultsFromSettings(
+  store: ProjectRouteStore,
+  keychain: ProviderKeychainLike,
+) {
+  const data: Partial<z.infer<typeof projectSchema>> = {};
+  const memorySettings = await store.memorySettings
+    ?.findUnique({ where: { id: "global" } })
+    .catch(() => null);
+
+  if (
+    memorySettings?.defaultScopeForNewProjects === "PROJECT_ONLY" ||
+    memorySettings?.defaultScopeForNewProjects === "NONE" ||
+    memorySettings?.defaultScopeForNewProjects === "GLOBAL_AND_PROJECT"
+  ) {
+    data.memoryScope = memorySettings.defaultScopeForNewProjects;
+  }
+
+  const providers = await store.providerConfig
+    ?.findMany({
+      orderBy: { fallbackOrder: "asc" },
+    })
+    .catch(() => []);
+  const freshInstallEnabledProviderIds = providers
+    ? await keyedProvidersForFreshInstall(providers, keychain)
+    : new Set<string>();
+  const provider = providers?.find(
+    (row) =>
+      (row.enabled || freshInstallEnabledProviderIds.has(row.id)) &&
+      isProviderId(row.id),
+  );
+  if (provider && isProviderId(provider.id)) {
+    data.defaultProvider = provider.id;
+    data.defaultModel = provider.modelName ?? provider.primaryModel;
+  }
+
+  return data;
+}
+
 export function createProjectsRouter({
   getUserId = getAuthenticatedUserId,
+  keychain = { getCredential: defaultGetCredential },
   runAgent = defaultRunAgent,
   store = prisma,
 }: CreateProjectsRouterOptions = {}) {
@@ -250,7 +311,11 @@ export function createProjectsRouter({
           .json({ error: "Invalid request", details: parsed.error.flatten() });
       }
 
-      const normalized = await projectInputFromRequest(parsed.data);
+      const defaults = await projectDefaultsFromSettings(store, keychain);
+      const normalized = await projectInputFromRequest({
+        ...defaults,
+        ...parsed.data,
+      });
       if (normalized.error) {
         return res.status(400).json({
           error: normalized.error,
@@ -456,6 +521,9 @@ export function createProjectsRouter({
         data: {
           content: parsed.data.content,
           conversationId: req.params.conversationId,
+          ...(parsed.data.memoryEnabled === undefined
+            ? {}
+            : { memoryEnabled: parsed.data.memoryEnabled }),
           role: "USER",
         },
       });
