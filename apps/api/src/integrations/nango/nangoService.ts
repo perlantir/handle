@@ -695,23 +695,80 @@ export function createNangoService({
     connector: IntegrationConnectorMetadata,
   ) {
     const client = await getClient();
-    const params = {
+    const baseParams = {
       limit: 20,
-      userId,
       ...(connector.nangoIntegrationId
         ? { integrationId: connector.nangoIntegrationId }
         : {}),
     };
-    const response = await client.listConnections(params);
-    const connections = normalizeConnections(response);
-    const latest = connections[0];
-    if (!latest) {
+    const taggedParams = {
+      ...baseParams,
+      tags: {
+        end_user_id: userId,
+        handle_connector_id: connector.connectorId,
+      },
+    };
+
+    const tagged = await listConnectionsForLookup(client, connector, taggedParams, {
+      lookupMode: "tags",
+      tagKeys: Object.keys(taggedParams.tags),
+    });
+    if (tagged[0]) {
+      return connectionResult(tagged[0]);
+    }
+
+    const legacyParams = { ...baseParams, userId };
+    const legacy = await listConnectionsForLookup(client, connector, legacyParams, {
+      lookupMode: "legacy_user_id",
+    });
+    if (legacy[0]) {
+      return connectionResult(legacy[0]);
+    }
+
+    const byIntegration = await listConnectionsForLookup(client, connector, baseParams, {
+      lookupMode: "integration_only",
+    });
+    if (byIntegration.length === 1 && byIntegration[0]) {
+      return connectionResult(byIntegration[0]);
+    }
+
+    if (byIntegration.length > 1) {
       throw new IntegrationError({
         code: "not_connected",
         connectorId: connector.connectorId,
-        message: `No ${connector.displayName} Nango connection found for this user yet.`,
+        message: `Found ${byIntegration.length} ${connector.displayName} Nango connections. Paste the desired connection ID in Settings -> Integrations, then click Finish ${connector.displayName} connection.`,
       });
     }
+
+    throw new IntegrationError({
+      code: "not_connected",
+      connectorId: connector.connectorId,
+      message: `No ${connector.displayName} Nango connection found for this user yet.`,
+    });
+  }
+
+  async function listConnectionsForLookup(
+    client: NangoClient,
+    connector: IntegrationConnectorMetadata,
+    params: Record<string, unknown>,
+    details: Record<string, unknown>,
+  ) {
+    const response = await client.listConnections(params);
+    const connections = normalizeConnections(response);
+    logger.info(
+      {
+        connectorId: connector.connectorId,
+        count: connections.length,
+        nangoIntegrationId: connector.nangoIntegrationId,
+        nangoPhase: "find_latest_connection",
+        ...details,
+      },
+      "Nango connection lookup completed",
+    );
+    return connections;
+  }
+
+  function connectionResult(latest: Record<string, unknown>) {
     return {
       connectionId: connectionIdOf(latest),
       label: connectionLabelOf(latest),

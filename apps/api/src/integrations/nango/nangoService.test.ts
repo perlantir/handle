@@ -77,4 +77,143 @@ describe("Nango service", () => {
       }),
     );
   });
+
+  it("finds completed connections using the same tags written to the Connect session", async () => {
+    const client = {
+      listConnections: vi.fn().mockResolvedValue({
+        data: [{ connection_id: "conn-github" }],
+      }),
+    };
+    const prisma = {
+      integration: {
+        count: vi.fn().mockResolvedValue(0),
+        upsert: vi.fn().mockResolvedValue({
+          accountAlias: "default",
+          accountLabel: "conn-github",
+          connectorId: "GITHUB",
+          createdAt: new Date("2026-05-04T02:00:00.000Z"),
+          defaultAccount: true,
+          id: "integration-github",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastHealthCheckAt: null,
+          lastUsedAt: null,
+          memoryScope: "NONE",
+          nangoConnectionId: "conn-github",
+          nangoIntegrationId: "handle-dev-github",
+          status: "CONNECTED",
+          updatedAt: new Date("2026-05-04T02:00:00.000Z"),
+        }),
+      },
+      nangoSettings: {
+        upsert: vi.fn().mockResolvedValue({
+          configured: true,
+          host: "https://api.nango.dev",
+          secretKeyRef: NANGO_SECRET_KEY_ACCOUNT,
+        }),
+      },
+    } as unknown as PrismaClient;
+    const service = createNangoService({
+      keychain: {
+        deleteCredential: vi.fn(),
+        getCredential: vi.fn().mockResolvedValue("nango-secret-key-not-real"),
+        setCredential: vi.fn(),
+      },
+      nangoClientFactory: () => client as never,
+      prisma,
+    });
+
+    const result = await service.completeConnection({
+      accountAlias: "default",
+      connectorId: "github",
+      userId: "user-test",
+    });
+
+    expect(result.integration.status).toBe("CONNECTED");
+    expect(client.listConnections).toHaveBeenCalledWith({
+      integrationId: "handle-dev-github",
+      limit: 20,
+      tags: {
+        end_user_id: "user-test",
+        handle_connector_id: "github",
+      },
+    });
+    expect(client.listConnections).toHaveBeenCalledTimes(1);
+  });
+
+  it("safely imports the only connector connection when Nango did not retain tags", async () => {
+    const client = {
+      listConnections: vi
+        .fn()
+        .mockResolvedValueOnce({ data: [] })
+        .mockResolvedValueOnce({ data: [] })
+        .mockResolvedValueOnce({
+          data: [{ connection_id: "conn-github-fallback" }],
+        }),
+    };
+    const prisma = {
+      integration: {
+        count: vi.fn().mockResolvedValue(0),
+        upsert: vi.fn().mockResolvedValue({
+          accountAlias: "default",
+          accountLabel: "conn-github-fallback",
+          connectorId: "GITHUB",
+          createdAt: new Date("2026-05-04T02:00:00.000Z"),
+          defaultAccount: true,
+          id: "integration-github",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastHealthCheckAt: null,
+          lastUsedAt: null,
+          memoryScope: "NONE",
+          nangoConnectionId: "conn-github-fallback",
+          nangoIntegrationId: "handle-dev-github",
+          status: "CONNECTED",
+          updatedAt: new Date("2026-05-04T02:00:00.000Z"),
+        }),
+      },
+      nangoSettings: {
+        upsert: vi.fn().mockResolvedValue({
+          configured: true,
+          host: "https://api.nango.dev",
+          secretKeyRef: NANGO_SECRET_KEY_ACCOUNT,
+        }),
+      },
+    } as unknown as PrismaClient;
+    const service = createNangoService({
+      keychain: {
+        deleteCredential: vi.fn(),
+        getCredential: vi.fn().mockResolvedValue("nango-secret-key-not-real"),
+        setCredential: vi.fn(),
+      },
+      nangoClientFactory: () => client as never,
+      prisma,
+    });
+
+    const result = await service.completeConnection({
+      accountAlias: "default",
+      connectorId: "github",
+      userId: "user-test",
+    });
+
+    expect(result.integration.status).toBe("CONNECTED");
+    expect(result.integration.nangoConnectionId).toBe("conn-github-fallback");
+    expect(client.listConnections).toHaveBeenNthCalledWith(1, {
+      integrationId: "handle-dev-github",
+      limit: 20,
+      tags: {
+        end_user_id: "user-test",
+        handle_connector_id: "github",
+      },
+    });
+    expect(client.listConnections).toHaveBeenNthCalledWith(2, {
+      integrationId: "handle-dev-github",
+      limit: 20,
+      userId: "user-test",
+    });
+    expect(client.listConnections).toHaveBeenNthCalledWith(3, {
+      integrationId: "handle-dev-github",
+      limit: 20,
+    });
+  });
 });
