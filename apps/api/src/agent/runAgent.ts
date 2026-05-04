@@ -34,6 +34,7 @@ import {
   type TrajectoryStore,
 } from "../memory/trajectoryMemory";
 import { providerRegistry as defaultProviderRegistry } from "../providers/registry";
+import { notifyTaskEvent } from "../notifications/notificationService";
 import {
   isProviderId,
   type ProviderId,
@@ -840,6 +841,14 @@ export function createAgentRunner({
           result: finalMessage,
           status: "STOPPED",
         });
+        if (store === prisma) {
+          void notifyTaskEvent({
+            agentRunId: taskId,
+            eventType: "TASK_COMPLETED",
+          }).catch((err) => {
+            logger.warn({ err, taskId }, "Task completion notification failed");
+          });
+        }
         await completeTrajectory({
           agentRunId: taskId,
           outcome: "SUCCEEDED",
@@ -935,6 +944,15 @@ export function createAgentRunner({
         result: finalMessage,
         status: finalStatus,
       });
+      if (store === prisma) {
+        void notifyTaskEvent({
+          agentRunId: taskId,
+          eventType: finalStatus === "STOPPED" ? "TASK_COMPLETED" : "TASK_FAILED",
+          ...(finalResult.reason ? { detail: finalResult.reason } : {}),
+        }).catch((err) => {
+          logger.warn({ err, taskId }, "Task final notification failed");
+        });
+      }
       await completeTrajectory({
         agentRunId: taskId,
         outcome: trajectoryOutcomeFromStatus(finalStatus),
@@ -1010,6 +1028,15 @@ export function createAgentRunner({
           outcomeReason: reason,
           store,
         });
+        if (store === prisma) {
+          void notifyTaskEvent({
+            agentRunId: taskId,
+            detail: reason,
+            eventType: "TASK_FAILED",
+          }).catch((err) => {
+            logger.warn({ err, taskId }, "Task cancellation notification failed");
+          });
+        }
 
         emitEvent({ type: "agent_run_cancelled", reason, taskId });
         emitEvent({
@@ -1035,6 +1062,15 @@ export function createAgentRunner({
             );
           });
       const failureReason = failureReasonFromError(err);
+      if (store === prisma) {
+        void notifyTaskEvent({
+          agentRunId: taskId,
+          detail: failureReason ?? message,
+          eventType: "TASK_FAILED",
+        }).catch((notifyErr) => {
+          logger.warn({ err: notifyErr, taskId }, "Task failure notification failed");
+        });
+      }
       await completeTrajectory({
         agentRunId: taskId,
         outcome: "FAILED",

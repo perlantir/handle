@@ -2,16 +2,20 @@ import type {
   ApprovalDecision,
   ActionLogSummary,
   ActionOutcomeType,
+  AsyncTaskSummary,
   ChatMessage,
   ConversationSummary,
   CreateTaskResponse,
   FailurePatternSummary,
   MemoryFactSummary,
+  NotificationEventType,
+  NotificationSettingsSummary,
   ProcedureTemplateSummary,
   PendingApproval,
   ProjectSummary,
   SendConversationMessageResponse,
   TaskDetailResponse,
+  TemporalSettingsSummary,
 } from '@handle/shared';
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_HANDLE_API_BASE_URL ?? 'http://127.0.0.1:3001';
@@ -535,4 +539,73 @@ export async function sendConversationMessage({
   }
 
   return response.json() as Promise<SendConversationMessageResponse>;
+}
+
+export async function listAsyncTasks({
+  token,
+}: AuthenticatedRequestInput): Promise<AsyncTaskSummary[]> {
+  const response = await fetch(`${apiBaseUrl}/api/async/tasks`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load async tasks');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { tasks?: AsyncTaskSummary[] };
+  return body.tasks ?? [];
+}
+
+export async function getNotificationSettings({
+  token,
+}: AuthenticatedRequestInput): Promise<{
+  notifications: NotificationSettingsSummary;
+  temporal: TemporalSettingsSummary;
+}> {
+  const response = await fetch(`${apiBaseUrl}/api/settings/notifications`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load notifications');
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<{
+    notifications: NotificationSettingsSummary;
+    temporal: TemporalSettingsSummary;
+  }>;
+}
+
+export async function updateNotificationSettings({
+  input,
+  token,
+}: AuthenticatedRequestInput & {
+  input: Partial<
+    Pick<
+      NotificationSettingsSummary,
+      | 'emailEnabled'
+      | 'emailRecipient'
+      | 'slackEnabled'
+      | 'slackChannelId'
+      | 'webhookEnabled'
+      | 'webhookUrl'
+    >
+  > & { eventTypes?: NotificationEventType[] };
+}): Promise<NotificationSettingsSummary> {
+  const response = await fetch(`${apiBaseUrl}/api/settings/notifications`, {
+    body: JSON.stringify(input),
+    headers: authHeaders(token),
+    method: 'PUT',
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to save notifications');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { notifications?: NotificationSettingsSummary };
+  if (!body.notifications) throw new Error('Notification save returned no settings');
+  return body.notifications;
 }

@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { emitTaskEvent } from '../lib/eventBus';
 import { logger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
+import { notifyTaskEvent } from '../notifications/notificationService';
 
 export type ApprovalDecision = 'approved' | 'denied' | 'timeout';
 
@@ -88,6 +89,15 @@ export async function awaitApproval(taskId: string, request: ApprovalPayload, op
   await updateTaskStatus(store, taskId, 'WAITING');
   emitEvent({ type: 'status_update', status: 'WAITING', detail: request.reason, taskId });
   emitEvent({ type: 'approval_request', approvalId: approval.id, request, taskId });
+  if (store === prisma) {
+    void notifyTaskEvent({
+      agentRunId: taskId,
+      detail: request.reason,
+      eventType: 'APPROVAL_NEEDED',
+    }).catch((err) => {
+      logger.warn({ approvalId: approval.id, err, taskId }, 'Approval notification failed');
+    });
+  }
 
   return new Promise<ApprovalDecision>((resolve) => {
     const timeout = setTimeout(() => {

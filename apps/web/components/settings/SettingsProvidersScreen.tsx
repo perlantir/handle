@@ -35,6 +35,7 @@ import { BrowserSettings } from "./BrowserSettings";
 import { ExecutionSettings } from "./ExecutionSettings";
 import { IntegrationsSettings } from "./IntegrationsSettings";
 import { MemorySettings } from "./MemorySettings";
+import { NotificationsSettings } from "./NotificationsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 
 type OpenAIAuthChoice = "apiKey" | "both" | "chatgpt-oauth";
@@ -96,6 +97,7 @@ type SettingsSection =
   | "Execution"
   | "Integrations"
   | "Memory"
+  | "Notifications"
   | "Providers";
 
 const settingsNav: Array<{
@@ -109,6 +111,7 @@ const settingsNav: Array<{
   { label: "Browser", section: "Browser" },
   { label: "Memory", section: "Memory" },
   { label: "Integrations", section: "Integrations" },
+  { label: "Notifications", section: "Notifications" },
   { disabled: true, label: "Profile" },
   { disabled: true, label: "Approvals & trust" },
   { disabled: true, label: "Privacy" },
@@ -543,6 +546,7 @@ export function SettingsProvidersScreen() {
           {activeSection === "Defaults" ? <ProjectDefaultsSettings /> : null}
           {activeSection === "Integrations" ? <IntegrationsSettings /> : null}
           {activeSection === "Memory" ? <MemorySettings /> : null}
+          {activeSection === "Notifications" ? <NotificationsSettings /> : null}
 
           {activeSection === "Providers" && loading ? (
             <div className="flex items-center gap-2 text-[12.5px] text-text-tertiary">

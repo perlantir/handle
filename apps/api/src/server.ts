@@ -15,9 +15,11 @@ import { getLogFilePath, logger } from "./lib/logger";
 import { approvalsRouter } from "./routes/approvals";
 import { agentRunsRouter } from "./routes/agentRuns";
 import { actionsRouter } from "./routes/actions";
+import { asyncTasksRouter } from "./routes/asyncTasks";
 import { healthRouter } from "./routes/health";
 import { integrationsRouter } from "./routes/integrations";
 import { memoryRouter } from "./routes/memory";
+import { notificationsRouter } from "./routes/notifications";
 import { projectsRouter } from "./routes/projects";
 import { settingsRouter } from "./routes/settings";
 import { sharedMemoryRouter } from "./routes/sharedMemory";
@@ -54,9 +56,11 @@ export async function createServer() {
   }
   app.use("/api", agentRunsRouter);
   app.use("/api", actionsRouter);
+  app.use("/api", asyncTasksRouter);
   app.use("/api/approvals", approvalsRouter);
   app.use("/api", integrationsRouter);
   app.use("/api", memoryRouter);
+  app.use("/api", notificationsRouter);
   app.use("/api", projectsRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api", sharedMemoryRouter);
