@@ -83,6 +83,18 @@ export interface UpdateIntegrationInput {
   userId: string;
 }
 
+export type IntegrationRequestMethod = "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
+
+export interface IntegrationRequestInput {
+  accountAlias?: string;
+  connectorId: IntegrationConnectorId;
+  data?: unknown;
+  endpoint: string;
+  method?: IntegrationRequestMethod;
+  params?: Record<string, unknown>;
+  userId: string;
+}
+
 export function createNangoService({
   keychain,
   logger = defaultLogger,
@@ -626,6 +638,171 @@ export function createNangoService({
     }
   }
 
+  async function resolveConnectedIntegration({
+    accountAlias,
+    connectorId,
+    userId,
+  }: {
+    accountAlias?: string;
+    connectorId: IntegrationConnectorId;
+    userId: string;
+  }) {
+    const connector = requireConnector(connectorId);
+    if (connector.authType !== "nango") {
+      throw new IntegrationError({
+        code: "provider_not_found",
+        connectorId,
+        message: `${connector.displayName} is not a Nango integration.`,
+      });
+    }
+
+    const baseWhere = {
+      connectorId: connector.prismaId,
+      userId,
+    };
+    const requestedAlias = accountAlias?.trim();
+    const row = requestedAlias
+      ? await prisma.integration.findFirst({
+          where: { ...baseWhere, accountAlias: requestedAlias },
+        })
+      : await prisma.integration.findFirst({
+          orderBy: [{ defaultAccount: "desc" }, { accountAlias: "asc" }],
+          where: { ...baseWhere, status: "CONNECTED" },
+        });
+
+    if (!row) {
+      const available = await prisma.integration.findMany({
+        orderBy: [{ defaultAccount: "desc" }, { accountAlias: "asc" }],
+        select: { accountAlias: true, status: true },
+        where: baseWhere,
+      });
+      const accountList = available
+        .map((account) => `${account.accountAlias} (${account.status})`)
+        .join(", ");
+      throw new IntegrationError({
+        code: available.length > 1 ? "account_selection_required" : "not_connected",
+        connectorId,
+        message: available.length
+          ? `${connector.displayName} account ${
+              requestedAlias ? requestedAlias : "default"
+            } is not connected. Available accounts: ${accountList}.`
+          : `${connector.displayName} is not connected. Connect it in Settings -> Integrations.`,
+      });
+    }
+
+    if (row.status !== "CONNECTED") {
+      throw new IntegrationError({
+        code: statusToIntegrationErrorCode(row.status),
+        connectorId,
+        message: `${connector.displayName} account ${row.accountAlias} is ${row.status.toLowerCase()}. Reconnect it in Settings -> Integrations.`,
+      });
+    }
+    if (!row.nangoConnectionId || !row.nangoIntegrationId) {
+      throw new IntegrationError({
+        code: "not_connected",
+        connectorId,
+        message: `${connector.displayName} account ${row.accountAlias} is missing Nango connection metadata.`,
+      });
+    }
+
+    return { connector, row };
+  }
+
+  async function requestIntegration({
+    accountAlias,
+    connectorId,
+    data,
+    endpoint,
+    method = "GET",
+    params,
+    userId,
+  }: IntegrationRequestInput) {
+    const started = Date.now();
+    const { connector, row } = await resolveConnectedIntegration({
+      ...(accountAlias ? { accountAlias } : {}),
+      connectorId,
+      userId,
+    });
+    const client = await getClient();
+    const methodName = method.toLowerCase();
+    const requester = (client as unknown as Record<string, (args: unknown) => Promise<unknown>>)[
+      methodName
+    ];
+    if (typeof requester !== "function") {
+      throw new IntegrationError({
+        code: "validation_error",
+        connectorId,
+        message: `Nango client does not support ${method} requests.`,
+      });
+    }
+
+    try {
+      const response = await requester.call(client, {
+        connectionId: row.nangoConnectionId,
+        endpoint,
+        providerConfigKey: row.nangoIntegrationId,
+        ...(params ? { params } : {}),
+        ...(data !== undefined ? { data } : {}),
+      });
+      await prisma.integration.update({
+        data: {
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastUsedAt: new Date(),
+          status: "CONNECTED",
+        },
+        where: { id: row.id },
+      });
+      logger.info(
+        {
+          accountAlias: row.accountAlias,
+          connectorId,
+          durationMs: Date.now() - started,
+          endpoint,
+          method,
+        },
+        "Integration provider request succeeded",
+      );
+      return {
+        accountAlias: row.accountAlias,
+        connectorId,
+        data: responseDataPayload(response),
+        endpoint,
+        method,
+      };
+    } catch (err) {
+      const code = integrationErrorCode(err);
+      const message = integrationErrorMessage(err);
+      await prisma.integration.update({
+        data: {
+          lastErrorCode: code,
+          lastErrorMessage: message,
+          status: statusFromErrorCode(code),
+        },
+        where: { id: row.id },
+      });
+      logger.warn(
+        {
+          accountAlias: row.accountAlias,
+          code,
+          connectorId,
+          durationMs: Date.now() - started,
+          endpoint,
+          err,
+          method,
+        },
+        "Integration provider request failed",
+      );
+      const status = errorStatus(err);
+      throw new IntegrationError({
+        code,
+        connectorId,
+        message,
+        ...(typeof status === "number" ? { status } : {}),
+      });
+    }
+  }
+
   async function deleteIntegration(integrationId: string, userId: string) {
     const row = await prisma.integration.findFirst({
       where: { id: integrationId, userId },
@@ -781,6 +958,8 @@ export function createNangoService({
     deleteIntegration,
     ensureConnectorSettings,
     listSettings,
+    requestIntegration,
+    resolveConnectedIntegration,
     saveConnectorOAuthApp,
     saveNangoSecret,
     syncConnectorWithNango,
@@ -945,6 +1124,20 @@ function statusFromErrorCode(code: string) {
   if (code === "auth_revoked") return "REVOKED";
   if (code === "rate_limited") return "RATE_LIMITED";
   return "ERROR";
+}
+
+function statusToIntegrationErrorCode(status: string): IntegrationError["code"] {
+  if (status === "EXPIRED") return "auth_expired";
+  if (status === "REVOKED") return "auth_revoked";
+  if (status === "RATE_LIMITED") return "rate_limited";
+  return "not_connected";
+}
+
+function responseDataPayload(response: unknown) {
+  if (response && typeof response === "object" && "data" in response) {
+    return (response as { data: unknown }).data;
+  }
+  return response;
 }
 
 function nangoErrorDiagnostic(err: unknown) {

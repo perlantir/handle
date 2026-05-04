@@ -3,6 +3,7 @@ import type { SideEffectClass } from '@handle/shared';
 import type { z } from 'zod';
 import type { BrowserSession } from '../execution/browserSession';
 import type { E2BSandboxLike, ExecutionBackend } from '../execution/types';
+import type { IntegrationToolRuntime } from '../integrations/toolRuntime';
 import type { MemoryProjectContext } from '../memory/sessionMemory';
 import type { TrajectoryStepRecord } from '../memory/trajectoryMemory';
 
@@ -13,6 +14,7 @@ export interface ToolExecutionContext {
   backend: ExecutionBackend;
   browserSession?: BrowserSession;
   conversationId?: string;
+  integrationRuntime?: IntegrationToolRuntime;
   memoryContext?: string;
   memoryProject?: MemoryProjectContext | null;
   projectId?: string;
@@ -20,6 +22,7 @@ export interface ToolExecutionContext {
   sandbox: E2BSandboxLike;
   sharedMemoryNamespaceId?: string;
   trustedDomains?: string[];
+  userId?: string;
 }
 
 export interface ToolDefinition {
