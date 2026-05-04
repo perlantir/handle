@@ -509,6 +509,8 @@ model Skill {
   createdAt                  DateTime        @default(now())
   updatedAt                  DateTime        @updatedAt
   runs                       SkillRun[]
+  schedules                  SkillSchedule[]
+  importRecords              SkillImportRecord[]
 
   @@unique([slug, version, sourceType, ownerUserId, projectId])
   @@index([visibility, projectId])
@@ -586,6 +588,76 @@ model SkillArtifact {
   updatedAt      DateTime          @updatedAt
 
   @@index([skillRunId, kind])
+}
+
+model SkillSchedule {
+  id                 String         @id @default(cuid())
+  skillId            String
+  skill              Skill          @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  userId             String
+  projectId          String?
+  name               String
+  enabled            Boolean        @default(false)
+  cronExpression     String?
+  runAt              DateTime?
+  timezone           String         @default("America/Chicago")
+  inputs             Json           @default("{}")
+  temporalScheduleId String?
+  lastRunAt          DateTime?
+  nextRunAt          DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([userId, enabled])
+  @@index([skillId])
+}
+
+model SkillWorkflow {
+  id          String             @id @default(cuid())
+  userId      String
+  projectId   String?
+  name        String
+  description String?
+  visibility  SkillVisibility    @default(PERSONAL)
+  graph       Json               @default("{}")
+  enabled     Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  runs        SkillWorkflowRun[]
+
+  @@index([userId, projectId])
+}
+
+model SkillWorkflowRun {
+  id                 String          @id @default(cuid())
+  workflowId         String
+  workflow           SkillWorkflow   @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  userId             String
+  projectId          String?
+  status             SkillRunStatus  @default(QUEUED)
+  temporalWorkflowId String?
+  inputs             Json            @default("{}")
+  artifactMap        Json            @default("{}")
+  errorCode          String?
+  errorMessage       String?
+  createdAt          DateTime        @default(now())
+  completedAt        DateTime?
+
+  @@index([workflowId, createdAt])
+  @@index([userId, status])
+}
+
+model SkillImportRecord {
+  id         String   @id @default(cuid())
+  userId     String
+  skillId    String?
+  skill      Skill?   @relation(fields: [skillId], references: [id], onDelete: SetNull)
+  sourceName String
+  validation Json     @default("{}")
+  status     String
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 model ApprovalRequest {

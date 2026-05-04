@@ -721,9 +721,142 @@ export interface RunSkillRequest {
   modelName?: string;
   projectId?: string;
   providerId?: string;
+  runtimeMode?: 'standard' | 'server_browser' | 'local_browser' | 'computer_use' | 'wide_research';
   trigger?: SkillRunTrigger;
 }
 
 export interface RunSkillResponse {
   run: SkillRunDetail;
+}
+
+export interface CreateSkillRequest {
+  activationExamples?: string[];
+  approvalPolicy?: Record<string, unknown>;
+  category: string;
+  customMetadata?: Record<string, unknown>;
+  description: string;
+  evalFixtures?: unknown[];
+  icon?: SkillIconSummary;
+  inputSlots?: SkillInputSlotSummary[];
+  name: string;
+  negativeActivationExamples?: string[];
+  optionalIntegrations?: IntegrationConnectorId[];
+  outputArtifactContract?: Record<string, unknown>;
+  packageMetadata?: Record<string, unknown>;
+  projectId?: string;
+  requiredIntegrations?: IntegrationConnectorId[];
+  reusableResources?: unknown[];
+  runtimePolicy?: Record<string, unknown>;
+  schedulingConfig?: Record<string, unknown>;
+  skillMd: string;
+  slug?: string;
+  sourceCitationPolicy?: Record<string, unknown>;
+  suggestedModel?: string;
+  suggestedProvider?: string;
+  toolPolicy?: Record<string, unknown>;
+  uiTemplate?: string;
+  version?: string;
+  visibility: Extract<SkillVisibility, 'PERSONAL' | 'PROJECT'>;
+}
+
+export type UpdateSkillRequest = Partial<CreateSkillRequest> & {
+  enabled?: boolean;
+};
+
+export interface SkillImportBundle {
+  manifest: CreateSkillRequest;
+  skillMd: string;
+  examples?: Record<string, unknown>;
+  evals?: Record<string, unknown>;
+  resources?: Record<string, unknown>;
+}
+
+export interface SkillScheduleSummary {
+  id: string;
+  skillId: string;
+  skillName?: string;
+  skillSlug?: string;
+  userId?: string;
+  projectId?: string | null;
+  name: string;
+  enabled: boolean;
+  cronExpression?: string | null;
+  runAt?: string | null;
+  timezone: string;
+  inputs: Record<string, unknown>;
+  temporalScheduleId?: string | null;
+  lastRunAt?: string | null;
+  nextRunAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SkillWorkflowNode {
+  id: string;
+  skillId: string;
+  inputs: Record<string, unknown>;
+  dependsOn: string[];
+  optional?: boolean;
+  parallelGroup?: string;
+}
+
+export interface SkillWorkflowArtifactBinding {
+  artifactKind: SkillArtifactKind;
+  fromNodeId: string;
+  inputSlotId: string;
+  toNodeId: string;
+}
+
+export interface SkillWorkflowGraph {
+  artifactBindings: SkillWorkflowArtifactBinding[];
+  nodes: SkillWorkflowNode[];
+}
+
+export interface SkillWorkflowSummary {
+  id: string;
+  userId?: string;
+  projectId?: string | null;
+  name: string;
+  description?: string | null;
+  visibility: SkillVisibility;
+  graph: SkillWorkflowGraph;
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  recentRun?: SkillWorkflowRunSummary | null;
+}
+
+export interface SkillWorkflowRunSummary {
+  id: string;
+  workflowId: string;
+  userId?: string;
+  projectId?: string | null;
+  status: SkillRunStatus;
+  temporalWorkflowId?: string | null;
+  inputs: Record<string, unknown>;
+  artifactMap: Record<string, unknown>;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  createdAt?: string;
+  completedAt?: string | null;
+}
+
+export interface CreateSkillWorkflowRequest {
+  description?: string;
+  enabled?: boolean;
+  graph: SkillWorkflowGraph;
+  name: string;
+  projectId?: string;
+  visibility?: Extract<SkillVisibility, 'PERSONAL' | 'PROJECT'>;
+}
+
+export interface CreateSkillScheduleRequest {
+  cronExpression?: string;
+  enabled?: boolean;
+  inputs: Record<string, unknown>;
+  name: string;
+  projectId?: string;
+  runAt?: string;
+  skillId: string;
+  timezone?: string;
 }
