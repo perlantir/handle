@@ -204,6 +204,38 @@ model NotificationDelivery {
   @@index([status])
 }
 
+model Workflow {
+  id                 String        @id @default(cuid())
+  userId             String
+  name               String
+  enabled            Boolean       @default(false)
+  triggerConnectorId String
+  triggerEventType   String
+  triggerFilter      Json          @default("{}")
+  actions            Json          @default("[]")
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  runs               WorkflowRun[]
+
+  @@index([userId, enabled])
+  @@index([triggerConnectorId, triggerEventType])
+}
+
+model WorkflowRun {
+  id           String    @id @default(cuid())
+  workflowId   String
+  workflow     Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  status       String    @default("QUEUED")
+  eventPayload Json      @default("{}")
+  error        String?
+  actionLogId  String?
+  triggeredAt  DateTime  @default(now())
+  completedAt  DateTime?
+
+  @@index([workflowId, triggeredAt])
+  @@index([status])
+}
+
 model SearchProviderConfig {
   id                 String           @id @default(cuid())
   userId             String

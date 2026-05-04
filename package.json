@@ -107,6 +107,7 @@
     "smoke:shared-memory-primitive": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/shared-memory-primitive.mjs",
     "smoke:workspace-backend-pill": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-backend-pill.spec.ts",
     "smoke:workspace-ui-regression": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-ui-regression.spec.ts",
+    "smoke:workflow-templates": "pnpm --filter @handle/api exec vitest run src/routes/workflows.test.ts --no-file-parallelism && playwright test --config apps/web/playwright.config.ts apps/web/playwright/settings-workflows.spec.ts",
     "smoke:sidebar-scroll": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-ui-regression.spec.ts --grep \"long project lists\"",
     "smoke:trajectory-recording": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/trajectory-recording.mjs",
     "smoke:temporal-dev-stack": "node scripts/smoke/temporal-dev-stack.mjs",

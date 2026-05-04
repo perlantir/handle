@@ -318,6 +318,35 @@ export interface SearchSettingsResponse {
   providers: SearchProviderSummary[];
 }
 
+export interface WorkflowActionDefinition {
+  connectorId: IntegrationConnectorId;
+  params: Record<string, unknown>;
+  toolName: string;
+}
+
+export interface WorkflowSummary {
+  actions: WorkflowActionDefinition[];
+  createdAt?: string | null;
+  enabled: boolean;
+  id: string;
+  name: string;
+  triggerConnectorId: string;
+  triggerEventType: string;
+  triggerFilter: Record<string, unknown>;
+  updatedAt?: string | null;
+}
+
+export interface WorkflowRunSummary {
+  actionLogId?: string | null;
+  completedAt?: string | null;
+  error?: string | null;
+  eventPayload: Record<string, unknown>;
+  id: string;
+  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | string;
+  triggeredAt?: string | null;
+  workflowId: string;
+}
+
 export type IntegrationConnectorId =
   | 'gmail'
   | 'slack'
