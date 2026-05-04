@@ -107,11 +107,51 @@ async function mockSkillsApi(page: Page) {
       await jsonRoute(route, 200, { skill });
       return;
     }
+    if (request.method() === "POST" && url.pathname === "/api/skills") {
+      await jsonRoute(route, 201, { skill: { ...skill, id: "custom-1", name: "Custom Research Skill", slug: "custom-research-skill", sourceType: "CUSTOM", visibility: "PERSONAL" } });
+      return;
+    }
     if (request.method() === "POST" && url.pathname === "/api/skills/skill-1/run") {
       await jsonRoute(route, 201, { run });
       return;
     }
+    if (request.method() === "POST" && url.pathname === "/api/skills/custom-1/run") {
+      await jsonRoute(route, 201, { run: { ...run, id: "run-custom", resultSummary: "Completed custom Skill test run.", skillName: "Custom Research Skill" } });
+      return;
+    }
     await jsonRoute(route, 404, { error: "Unhandled Skills route" });
+  });
+  await page.route("**/api/skill-workflows**", async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      await jsonRoute(route, 200, { workflows: [] });
+      return;
+    }
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/skill-workflows") {
+      await jsonRoute(route, 201, { workflow: { createdAt: "2026-05-04T00:00:00.000Z", enabled: true, graph: { artifactBindings: [], nodes: [] }, id: "workflow-1", name: "Skill workflow", visibility: "PERSONAL" } });
+      return;
+    }
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/skill-workflows/workflow-1/run") {
+      await jsonRoute(route, 201, { run: { artifactMap: {}, createdAt: "2026-05-04T00:00:00.000Z", id: "workflow-run-1", inputs: {}, status: "COMPLETED", workflowId: "workflow-1" } });
+      return;
+    }
+    await jsonRoute(route, 404, { error: "Unhandled Skill workflow route" });
+  });
+  await page.route("**/api/skill-schedules**", async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      await jsonRoute(route, 200, { schedules: [] });
+      return;
+    }
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/skill-schedules") {
+      await jsonRoute(route, 201, { schedule: { cronExpression: "0 9 * * *", enabled: false, id: "schedule-1", inputs: {}, name: "Daily Skill run", skillId: "skill-1", timezone: "America/Chicago" } });
+      return;
+    }
+    if (request.method() === "POST" && new URL(request.url()).pathname === "/api/skill-schedules/schedule-1/run-now") {
+      await jsonRoute(route, 201, { run });
+      return;
+    }
+    await jsonRoute(route, 404, { error: "Unhandled Skill schedule route" });
   });
   await page.route("**/api/skill-runs/run-1", async (route) => {
     await jsonRoute(route, 200, { run });
@@ -136,5 +176,25 @@ test.describe("Skills", () => {
     await expect(page.getByRole("heading", { name: "Skill Run Trace" })).toBeVisible();
     await expect(page.getByRole("button", { name: /Acme research report/ })).toBeVisible();
     await expect(page.getByText("# Acme Research Report")).toBeVisible();
+  });
+
+  test("creates custom Skills, workflows, and schedules from structured panels", async ({ page }) => {
+    await mockSkillsApi(page);
+
+    await page.goto("/skills");
+    await page.getByRole("button", { exact: true, name: "Create" }).click();
+    await expect(page.getByRole("heading", { name: "Create Custom Skill" })).toBeVisible();
+    await page.getByRole("button", { name: "Save Skill" }).click();
+    await expect(page.getByText("Saved as")).toBeVisible();
+    await page.getByRole("button", { name: "Test Run" }).click();
+    await expect(page.getByText("completed · Completed custom Skill test run.")).toBeVisible();
+
+    await page.getByRole("button", { name: "Workflows" }).click();
+    await page.getByRole("button", { name: "Save & Run Workflow" }).click();
+    await expect(page.getByText("completed · Skill workflow")).toBeVisible();
+
+    await page.getByRole("button", { name: "Scheduled" }).click();
+    await page.getByRole("button", { name: "Save & Run Now" }).click();
+    await expect(page.getByText("completed · Created cited research report for Acme.")).toBeVisible();
   });
 });

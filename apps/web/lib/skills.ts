@@ -1,10 +1,18 @@
 import type {
+  CreateSkillRequest,
+  CreateSkillScheduleRequest,
+  CreateSkillWorkflowRequest,
   RunSkillRequest,
   RunSkillResponse,
+  SkillImportBundle,
   SkillDetail,
+  SkillScheduleSummary,
   SkillRunDetail,
   SkillRunSummary,
   SkillSummary,
+  SkillWorkflowRunSummary,
+  SkillWorkflowSummary,
+  UpdateSkillRequest,
 } from "@handle/shared";
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_HANDLE_API_BASE_URL ?? "http://127.0.0.1:3001";
@@ -107,5 +115,166 @@ export async function getSkillRun({
   if (!response.ok) throw new Error(await parseApiError(response, "Failed to load Skill run"));
   const body = (await response.json()) as { run?: SkillRunDetail };
   if (!body.run) throw new Error("Skill run detail response was empty");
+  return body.run;
+}
+
+export async function createSkill({
+  input,
+  token,
+}: {
+  input: CreateSkillRequest;
+  token: string | null;
+}) {
+  const response = await fetch(`${apiBaseUrl}/api/skills`, {
+    body: JSON.stringify(input),
+    headers: authHeaders(token),
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to create Skill"));
+  const body = (await response.json()) as { skill?: SkillDetail };
+  if (!body.skill) throw new Error("Create Skill response was empty");
+  return body.skill;
+}
+
+export async function updateSkill({
+  input,
+  skillId,
+  token,
+}: {
+  input: UpdateSkillRequest;
+  skillId: string;
+  token: string | null;
+}) {
+  const response = await fetch(`${apiBaseUrl}/api/skills/${encodeURIComponent(skillId)}`, {
+    body: JSON.stringify(input),
+    headers: authHeaders(token),
+    method: "PUT",
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to update Skill"));
+  const body = (await response.json()) as { skill?: SkillDetail };
+  if (!body.skill) throw new Error("Update Skill response was empty");
+  return body.skill;
+}
+
+export async function exportSkill({
+  skillId,
+  token,
+}: {
+  skillId: string;
+  token: string | null;
+}) {
+  const response = await fetch(`${apiBaseUrl}/api/skills/${encodeURIComponent(skillId)}/export`, {
+    headers: authHeaders(token),
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to export Skill"));
+  const body = (await response.json()) as { bundle?: SkillImportBundle };
+  if (!body.bundle) throw new Error("Export Skill response was empty");
+  return body.bundle;
+}
+
+export async function importSkill({
+  bundle,
+  token,
+}: {
+  bundle: SkillImportBundle;
+  token: string | null;
+}) {
+  const response = await fetch(`${apiBaseUrl}/api/skills/import`, {
+    body: JSON.stringify({ bundle, sourceName: "skills-ui-import.json" }),
+    headers: authHeaders(token),
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to import Skill"));
+  const body = (await response.json()) as { skill?: SkillDetail };
+  if (!body.skill) throw new Error("Import Skill response was empty");
+  return body.skill;
+}
+
+export async function listSkillWorkflows({ token }: { token: string | null }) {
+  const response = await fetch(`${apiBaseUrl}/api/skill-workflows`, {
+    headers: authHeaders(token),
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to load Skill workflows"));
+  const body = (await response.json()) as { workflows?: SkillWorkflowSummary[] };
+  return body.workflows ?? [];
+}
+
+export async function createSkillWorkflow({
+  input,
+  token,
+}: {
+  input: CreateSkillWorkflowRequest;
+  token: string | null;
+}) {
+  const response = await fetch(`${apiBaseUrl}/api/skill-workflows`, {
+    body: JSON.stringify(input),
+    headers: authHeaders(token),
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to create Skill workflow"));
+  const body = (await response.json()) as { workflow?: SkillWorkflowSummary };
+  if (!body.workflow) throw new Error("Create Skill workflow response was empty");
+  return body.workflow;
+}
+
+export async function runSkillWorkflow({
+  workflowId,
+  token,
+}: {
+  workflowId: string;
+  token: string | null;
+}) {
+  const response = await fetch(`${apiBaseUrl}/api/skill-workflows/${encodeURIComponent(workflowId)}/run`, {
+    body: JSON.stringify({}),
+    headers: authHeaders(token),
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to run Skill workflow"));
+  const body = (await response.json()) as { run?: SkillWorkflowRunSummary };
+  if (!body.run) throw new Error("Run Skill workflow response was empty");
+  return body.run;
+}
+
+export async function listSkillSchedules({ token }: { token: string | null }) {
+  const response = await fetch(`${apiBaseUrl}/api/skill-schedules`, {
+    headers: authHeaders(token),
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to load Skill schedules"));
+  const body = (await response.json()) as { schedules?: SkillScheduleSummary[] };
+  return body.schedules ?? [];
+}
+
+export async function createSkillSchedule({
+  input,
+  token,
+}: {
+  input: CreateSkillScheduleRequest;
+  token: string | null;
+}) {
+  const response = await fetch(`${apiBaseUrl}/api/skill-schedules`, {
+    body: JSON.stringify(input),
+    headers: authHeaders(token),
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to create Skill schedule"));
+  const body = (await response.json()) as { schedule?: SkillScheduleSummary };
+  if (!body.schedule) throw new Error("Create Skill schedule response was empty");
+  return body.schedule;
+}
+
+export async function runSkillScheduleNow({
+  scheduleId,
+  token,
+}: {
+  scheduleId: string;
+  token: string | null;
+}) {
+  const response = await fetch(`${apiBaseUrl}/api/skill-schedules/${encodeURIComponent(scheduleId)}/run-now`, {
+    body: JSON.stringify({}),
+    headers: authHeaders(token),
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to run Skill schedule"));
+  const body = (await response.json()) as RunSkillResponse;
   return body.run;
 }

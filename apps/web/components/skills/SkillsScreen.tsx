@@ -1,22 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { SkillSummary } from "@handle/shared";
+import type { SkillScheduleSummary, SkillSummary, SkillWorkflowSummary } from "@handle/shared";
 import { CheckCircle2, Search, Sparkles, XCircle } from "lucide-react";
 import { PillButton } from "@/components/design-system";
 import { useHandleAuth } from "@/lib/handleAuth";
-import { listSkills } from "@/lib/skills";
+import { listSkillSchedules, listSkills, listSkillWorkflows } from "@/lib/skills";
 import { cn } from "@/lib/utils";
+import { CustomSkillPanel, ImportExportPanel, SchedulePanel, WorkflowPanel } from "./SkillsAdvancedPanel";
 
-type Tab = "builtin" | "recent";
+type Tab = "builtin" | "recent" | "personal" | "project" | "custom" | "workflows" | "scheduled" | "import";
 
 export function SkillsScreen() {
   const { getToken, isLoaded } = useHandleAuth();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [schedules, setSchedules] = useState<SkillScheduleSummary[]>([]);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [tab, setTab] = useState<Tab>("builtin");
+  const [token, setToken] = useState<string | null>(null);
+  const [workflows, setWorkflows] = useState<SkillWorkflowSummary[]>([]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -26,8 +30,17 @@ export function SkillsScreen() {
       setError(null);
       try {
         const token = await getToken();
-        const loaded = await listSkills({ q: query, token });
-        if (!cancelled) setSkills(loaded);
+        setToken(token);
+        const [loaded, loadedWorkflows, loadedSchedules] = await Promise.all([
+          listSkills({ q: query, token }),
+          listSkillWorkflows({ token }),
+          listSkillSchedules({ token }),
+        ]);
+        if (!cancelled) {
+          setSkills(loaded);
+          setWorkflows(loadedWorkflows);
+          setSchedules(loadedSchedules);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Could not load Skills");
@@ -62,17 +75,19 @@ export function SkillsScreen() {
               </p>
             </div>
           </div>
-          <PillButton disabled variant="secondary">Create Skill in Stage 2</PillButton>
+          <PillButton onClick={() => setTab("custom")} variant="secondary">Create Skill</PillButton>
         </header>
 
         <section className="grid gap-3 rounded-[8px] border border-border-subtle bg-bg-canvas p-4">
           <div className="flex flex-wrap items-center gap-2">
             <TabButton active={tab === "builtin"} onClick={() => setTab("builtin")}>Built-in</TabButton>
             <TabButton active={tab === "recent"} onClick={() => setTab("recent")}>Recent Runs</TabButton>
-            <TabButton active={false} disabled onClick={() => undefined}>Personal</TabButton>
-            <TabButton active={false} disabled onClick={() => undefined}>Project</TabButton>
-            <TabButton active={false} disabled onClick={() => undefined}>Workflows</TabButton>
-            <TabButton active={false} disabled onClick={() => undefined}>Scheduled</TabButton>
+            <TabButton active={tab === "personal"} onClick={() => setTab("personal")}>Personal</TabButton>
+            <TabButton active={tab === "project"} onClick={() => setTab("project")}>Project</TabButton>
+            <TabButton active={tab === "custom"} onClick={() => setTab("custom")}>Create</TabButton>
+            <TabButton active={tab === "workflows"} onClick={() => setTab("workflows")}>Workflows</TabButton>
+            <TabButton active={tab === "scheduled"} onClick={() => setTab("scheduled")}>Scheduled</TabButton>
+            <TabButton active={tab === "import"} onClick={() => setTab("import")}>Import/Export</TabButton>
           </div>
           <label className="flex min-w-[280px] flex-1 items-center gap-2 rounded-[8px] border border-border-subtle bg-bg-base px-3 py-2 text-[13px]">
             <Search className="h-4 w-4 text-text-muted" />
@@ -100,15 +115,40 @@ export function SkillsScreen() {
           <div className="text-[13px] text-text-secondary">Loading Skills...</div>
         ) : tab === "recent" ? (
           <RecentRunGrid skills={recent} />
+        ) : tab === "personal" ? (
+          <SkillGrid empty="No personal Skills yet." skills={skills.filter((skill) => skill.visibility === "PERSONAL")} />
+        ) : tab === "project" ? (
+          <SkillGrid empty="No project Skills in the current context yet." skills={skills.filter((skill) => skill.visibility === "PROJECT")} />
+        ) : tab === "custom" ? (
+          <CustomSkillPanel onCreated={(skill) => setSkills((current) => [skill, ...current])} skills={skills} token={token} />
+        ) : tab === "workflows" ? (
+          <WorkflowPanel onCreated={(workflow) => setWorkflows((current) => [workflow, ...current])} skills={skills} token={token} workflows={workflows} />
+        ) : tab === "scheduled" ? (
+          <SchedulePanel onCreated={(schedule) => setSchedules((current) => [schedule, ...current])} schedules={schedules} skills={skills} token={token} />
+        ) : tab === "import" ? (
+          <ImportExportPanel skills={skills} token={token} />
         ) : (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {skills.map((skill) => (
-              <SkillCard key={skill.id} skill={skill} />
-            ))}
-          </div>
+          <SkillGrid empty="No Skills found." skills={skills} />
         )}
       </div>
     </main>
+  );
+}
+
+function SkillGrid({ empty, skills }: { empty: string; skills: SkillSummary[] }) {
+  if (skills.length === 0) {
+    return (
+      <div className="rounded-[8px] border border-border-subtle bg-bg-canvas px-4 py-8 text-[13px] text-text-secondary">
+        {empty}
+      </div>
+    );
+  }
+  return (
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {skills.map((skill) => (
+        <SkillCard key={skill.id} skill={skill} />
+      ))}
+    </div>
   );
 }
 
