@@ -1,4 +1,5 @@
 export type TaskStatus =
+  | 'QUEUED'
   | 'RUNNING'
   | 'WAITING'
   | 'STOPPED'
@@ -377,6 +378,7 @@ export interface IntegrationSettingsResponse {
 }
 
 export type AgentRunStatus =
+  | 'QUEUED'
   | 'RUNNING'
   | 'WAITING'
   | 'PAUSED'
@@ -431,6 +433,93 @@ export interface AgentRunSummary {
   backend: BackendType;
   startedAt?: string;
   completedAt?: string | null;
+  asyncMode?: boolean;
+  workflowId?: string | null;
+  workflowRunId?: string | null;
+  workflowStatus?: string | null;
+  queuedAt?: string | null;
+  lastHeartbeatAt?: string | null;
+  lastNotifiedAt?: string | null;
+}
+
+export type NotificationEventType =
+  | 'TASK_COMPLETED'
+  | 'TASK_FAILED'
+  | 'APPROVAL_NEEDED'
+  | 'CRITIC_FLAGGED';
+
+export type NotificationChannel = 'EMAIL' | 'SLACK' | 'WEBHOOK';
+
+export type NotificationStatus = 'PENDING' | 'SENT' | 'FAILED' | 'SKIPPED';
+
+export interface TemporalSettingsSummary {
+  enabled: boolean;
+  address: string;
+  namespace: string;
+  taskQueue: string;
+  health: {
+    checkedAt?: string | null;
+    detail?: string | null;
+    status: 'online' | 'offline' | 'unknown';
+  };
+  updatedAt?: string | null;
+}
+
+export interface NotificationSettingsSummary {
+  emailEnabled: boolean;
+  emailRecipient?: string | null;
+  slackEnabled: boolean;
+  slackChannelId?: string | null;
+  webhookEnabled: boolean;
+  webhookUrl?: string | null;
+  eventTypes: NotificationEventType[];
+  updatedAt?: string | null;
+}
+
+export interface ProjectNotificationSettingsSummary {
+  projectId: string;
+  inheritGlobal: boolean;
+  emailEnabled?: boolean | null;
+  emailRecipient?: string | null;
+  slackEnabled?: boolean | null;
+  slackChannelId?: string | null;
+  webhookEnabled?: boolean | null;
+  webhookUrl?: string | null;
+  eventTypes?: NotificationEventType[] | null;
+  updatedAt?: string | null;
+}
+
+export interface AsyncTaskSummary {
+  id: string;
+  conversationId: string;
+  projectId?: string | null;
+  projectName?: string | null;
+  goal: string;
+  status: AgentRunStatus;
+  asyncMode: boolean;
+  workflowId?: string | null;
+  workflowRunId?: string | null;
+  workflowStatus?: string | null;
+  queuedAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  lastHeartbeatAt?: string | null;
+  lastNotifiedAt?: string | null;
+}
+
+export interface NotificationDeliverySummary {
+  id: string;
+  userId: string;
+  projectId?: string | null;
+  agentRunId?: string | null;
+  eventType: NotificationEventType;
+  channel: NotificationChannel;
+  recipient: string;
+  status: NotificationStatus;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  dispatchedAt?: string | null;
+  createdAt?: string | null;
 }
 
 export interface SendConversationMessageResponse {

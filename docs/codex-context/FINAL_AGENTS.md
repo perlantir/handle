@@ -27,7 +27,7 @@ The locked-in third-party stack:
 - Voice output: OpenAI TTS
 - Authentication: Clerk
 - OAuth orchestration: Nango (for third-party integrations)
-- Background jobs / schedules: BullMQ + node-cron
+- Background jobs / schedules: Temporal self-hosted (Phase 6.5 stack update)
 - Database: Postgres + Prisma
 - Vector store: pgvector on Postgres
 - Observability: LangSmith
@@ -73,7 +73,7 @@ RULED OUT:
 - Native SwiftUI Mac app for the primary UI. Use Next.js + React.
   Tauri wraps it for Mac distribution in Phase 11.
 - Custom voice / TTS pipelines. Use OpenAI Whisper + OpenAI TTS.
-- Custom job queue. Use BullMQ.
+- Custom job queue. Use Temporal.
 
 If a task seems to require any of these, stop and ask.
 
@@ -423,8 +423,8 @@ Phase 5.
 RULE 25: SCHEDULES GO THROUGH BULLMQ
 ==================================================
 
-Every scheduled or recurring task uses BullMQ. Do not roll setTimeout
-or setInterval-based schedulers.
+Every scheduled, recurring, or async background task uses Temporal.
+Do not roll setTimeout or setInterval-based schedulers.
 
 Reasons:
 - Persistence across server restarts
