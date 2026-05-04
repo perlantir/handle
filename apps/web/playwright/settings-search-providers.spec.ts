@@ -150,7 +150,7 @@ test("Settings Search saves a BYOK provider and tests it", async ({ page }) => {
   const { requests } = await mockSettingsApi(page);
 
   await openSettings(page);
-  await page.getByRole("button", { name: "Search" }).click();
+  await page.getByRole("button", { exact: true, name: "Search" }).click();
 
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Tavily" })).toBeVisible();
@@ -159,7 +159,7 @@ test("Settings Search saves a BYOK provider and tests it", async ({ page }) => {
   await page.getByLabel("Tavily enabled").click();
   await page.getByLabel("Tavily API key").fill("tvly-test-key-not-real");
   await page.getByLabel("Tavily memory scope").selectOption("PROJECT_ONLY");
-  await page.getByRole("button", { name: "Save" }).first().click();
+  await page.getByRole("button", { exact: true, name: "Save" }).first().click();
 
   await expect(page.getByText("Tavily saved")).toBeVisible();
   await expect(page.getByText("Configured")).toBeVisible();
