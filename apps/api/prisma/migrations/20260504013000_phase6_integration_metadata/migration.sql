@@ -1,0 +1,1 @@
+ALTER TABLE "Integration" ADD COLUMN "metadata" JSONB NOT NULL DEFAULT '{}';

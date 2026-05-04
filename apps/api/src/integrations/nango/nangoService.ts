@@ -1037,6 +1037,7 @@ function serializeConnection(row: {
   lastHealthCheckAt: Date | null;
   lastUsedAt: Date | null;
   memoryScope: string;
+  metadata?: unknown;
   nangoConnectionId: string | null;
   nangoIntegrationId: string | null;
   status: string;
@@ -1055,6 +1056,10 @@ function serializeConnection(row: {
     lastHealthCheckAt: row.lastHealthCheckAt?.toISOString() ?? null,
     lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
     memoryScope: row.memoryScope as MemoryScope,
+    metadata:
+      row.metadata && typeof row.metadata === "object"
+        ? (row.metadata as Record<string, unknown>)
+        : null,
     nangoConnectionId: row.nangoConnectionId,
     nangoIntegrationId: row.nangoIntegrationId,
     status: row.status as IntegrationConnectionStatus,

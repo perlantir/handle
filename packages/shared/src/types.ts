@@ -362,6 +362,7 @@ export interface IntegrationConnectionSummary {
   lastHealthCheckAt?: string | null;
   lastUsedAt?: string | null;
   memoryScope: MemoryScope;
+  metadata?: Record<string, unknown> | null;
   nangoConnectionId?: string | null;
   nangoIntegrationId?: string | null;
   status: IntegrationConnectionStatus;

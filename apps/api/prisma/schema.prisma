@@ -169,6 +169,7 @@ model Integration {
   scopes            Json                        @default("[]")
   defaultAccount    Boolean                     @default(false)
   memoryScope       MemoryScope                 @default(NONE)
+  metadata          Json                        @default("{}")
   lastUsedAt        DateTime?
   lastHealthCheckAt DateTime?
   lastErrorCode     String?
