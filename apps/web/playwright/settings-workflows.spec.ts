@@ -22,6 +22,20 @@ async function mockApi(page: Page) {
   });
   await page.route("**/api/settings/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/settings/integrations") {
+      await jsonRoute(route, 200, {
+        connectors: [
+          { connectorId: "github", displayName: "GitHub", tier: 1 },
+          { connectorId: "slack", displayName: "Slack", tier: 1 },
+        ],
+        connections: [
+          { connectorId: "github", id: "github-1", status: "CONNECTED" },
+        ],
+        connectorSettings: [],
+        nango: { configured: true, host: "https://api.nango.dev" },
+      });
+      return;
+    }
     if (path === "/api/settings/providers") {
       await jsonRoute(route, 200, { providers: [] });
       return;
@@ -62,7 +76,7 @@ async function mockApi(page: Page) {
 async function openSettings(page: Page) {
   await page.goto("/sign-in");
   await page.getByRole("link", { name: "Continue as smoke user" }).click();
-  await page.getByRole("link", { name: "Settings" }).click();
+  await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 }
 
@@ -70,8 +84,15 @@ test("Settings Workflows creates and runs a workflow", async ({ page }) => {
   const { requests } = await mockApi(page);
   await openSettings(page);
   await page.getByRole("button", { name: "Workflows" }).click();
+  await expect(page.getByRole("button", { name: "Workflows" })).toHaveAttribute("aria-current", "page");
 
   await page.getByLabel("Workflow name").fill("Post release PRs");
+  await expect(page.getByLabel("Workflow trigger connector")).toBeVisible();
+  await expect(page.getByLabel("Workflow trigger event")).toBeVisible();
+  await page.getByRole("button", { name: "Add action" }).click();
+  await expect(page.getByLabel("Workflow action 2 connector")).toBeVisible();
+  await page.getByLabel("Workflow action 2 connector").selectOption("github");
+  await page.getByLabel("Workflow action 2 Title").fill("Release follow-up");
   await page.getByRole("button", { name: "Save workflow" }).click();
   await expect(page.getByText("Workflow saved")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Post release PRs" })).toBeVisible();
@@ -84,4 +105,5 @@ test("Settings Workflows creates and runs a workflow", async ({ page }) => {
     triggerConnectorId: "github",
     triggerEventType: "pull_request.merged",
   });
+  expect(requests.find((request) => request.method === "POST" && request.path === "/api/workflows")?.body.actions).toHaveLength(2);
 });
