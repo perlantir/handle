@@ -160,6 +160,7 @@ interface CreateAppOptions {
   createProvider?: (config: ProviderConfig) => ProviderInstance;
   getUserId?: () => string | null;
   keychain?: KeychainLike;
+  nangoService?: CreateSettingsRouterOptions["nangoService"];
   openPathInFinder?: CreateSettingsRouterOptions["openPathInFinder"];
   resetBrowserProfile?: CreateSettingsRouterOptions["resetBrowserProfile"];
   runMemoryComposeCommand?: CreateSettingsRouterOptions["runMemoryComposeCommand"];
@@ -173,6 +174,7 @@ function createApp({
   createProvider,
   getUserId = () => "user-test",
   keychain,
+  nangoService,
   openPathInFinder,
   resetBrowserProfile,
   runMemoryComposeCommand,
@@ -188,6 +190,7 @@ function createApp({
   };
   if (createProvider) routerOptions.createProvider = createProvider;
   if (keychain) routerOptions.keychain = keychain;
+  if (nangoService) routerOptions.nangoService = nangoService;
   if (openPathInFinder) routerOptions.openPathInFinder = openPathInFinder;
   if (resetBrowserProfile) routerOptions.resetBrowserProfile = resetBrowserProfile;
   if (runMemoryComposeCommand) {
@@ -972,6 +975,51 @@ describe("settings providers route", () => {
       error: "Rate limit: retry after 10s",
       ok: false,
       providerId: "openai",
+    });
+  });
+
+  it("saves Nango and connector OAuth settings through Settings", async () => {
+    const nangoService = {
+      listSettings: vi.fn().mockResolvedValue({
+        connections: [],
+        connectorSettings: [],
+        connectors: [],
+        nango: { configured: false, host: "https://api.nango.dev" },
+      }),
+      saveConnectorOAuthApp: vi.fn().mockResolvedValue({ saved: true }),
+      saveNangoSecret: vi.fn().mockResolvedValue({
+        configured: true,
+        host: "https://api.nango.dev",
+      }),
+      validateNangoSecret: vi.fn().mockResolvedValue({ ok: true }),
+    };
+    const app = createApp({ nangoService });
+
+    await request(app)
+      .get("/api/settings/integrations")
+      .expect(200);
+    expect(nangoService.listSettings).toHaveBeenCalledWith("user-test");
+
+    await request(app)
+      .post("/api/settings/integrations/nango")
+      .send({ secretKey: "nango-test-key-not-real" })
+      .expect(200);
+    expect(nangoService.saveNangoSecret).toHaveBeenCalledWith({
+      secretKey: "nango-test-key-not-real",
+    });
+    expect(nangoService.validateNangoSecret).toHaveBeenCalled();
+
+    await request(app)
+      .post("/api/settings/integrations/github/oauth-app")
+      .send({
+        clientId: "github-client-id-not-real",
+        clientSecret: "github-client-secret-not-real",
+      })
+      .expect(200);
+    expect(nangoService.saveConnectorOAuthApp).toHaveBeenCalledWith({
+      clientId: "github-client-id-not-real",
+      clientSecret: "github-client-secret-not-real",
+      connectorId: "github",
     });
   });
 

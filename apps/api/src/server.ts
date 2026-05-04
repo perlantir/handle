@@ -16,6 +16,7 @@ import { approvalsRouter } from "./routes/approvals";
 import { agentRunsRouter } from "./routes/agentRuns";
 import { actionsRouter } from "./routes/actions";
 import { healthRouter } from "./routes/health";
+import { integrationsRouter } from "./routes/integrations";
 import { memoryRouter } from "./routes/memory";
 import { projectsRouter } from "./routes/projects";
 import { settingsRouter } from "./routes/settings";
@@ -54,6 +55,7 @@ export async function createServer() {
   app.use("/api", agentRunsRouter);
   app.use("/api", actionsRouter);
   app.use("/api/approvals", approvalsRouter);
+  app.use("/api", integrationsRouter);
   app.use("/api", memoryRouter);
   app.use("/api", projectsRouter);
   app.use("/api/settings", settingsRouter);

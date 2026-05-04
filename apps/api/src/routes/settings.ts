@@ -42,6 +42,17 @@ import {
 } from "../providers/types";
 import { HandleZepClient, type MemoryStatusSnapshot } from "../memory/zepClient";
 import type { MemoryProvider } from "../memory/memoryLog";
+import { createNangoService } from "../integrations/nango/nangoService";
+import {
+  IntegrationError,
+  integrationErrorCode,
+  integrationErrorMessage,
+} from "../integrations/nango/errors";
+import { connectorById } from "../integrations/nango/connectors";
+import type {
+  IntegrationConnectorId,
+  IntegrationSettingsResponse,
+} from "@handle/shared";
 
 const TEST_PROMPT = "Hello, respond with OK.";
 const GLOBAL_SETTINGS_ID = "global";
@@ -100,6 +111,20 @@ const updateMemorySettingsSchema = z
 const setMemoryCloudKeySchema = z.object({
   apiKey: z.string().min(1),
 });
+
+const saveNangoSecretSchema = z
+  .object({
+    host: z.string().url().optional(),
+    secretKey: z.string().min(1),
+  })
+  .strict();
+
+const saveConnectorOAuthAppSchema = z
+  .object({
+    clientId: z.string().min(1),
+    clientSecret: z.string().min(1),
+  })
+  .strict();
 
 const resetMemorySchema = z.object({
   confirmation: z.literal("delete"),
@@ -215,6 +240,16 @@ export interface CreateSettingsRouterOptions {
   openPathInFinder?: OpenPathInFinder;
   resetBrowserProfile?: ResetBrowserProfile;
   runMemoryComposeCommand?: RunMemoryComposeCommand;
+  nangoService?: {
+    listSettings(userId: string): Promise<IntegrationSettingsResponse>;
+    saveConnectorOAuthApp(input: {
+      clientId: string;
+      clientSecret: string;
+      connectorId: IntegrationConnectorId;
+    }): Promise<unknown>;
+    saveNangoSecret(input: { host?: string; secretKey: string }): Promise<unknown>;
+    validateNangoSecret(): Promise<unknown>;
+  };
   store?: SettingsRouteStore;
   testActualChromeConnection?: TestActualChromeConnection;
 }
@@ -261,6 +296,18 @@ function errorCauseMessage(err: unknown) {
   }
 
   return null;
+}
+
+function integrationHttpStatus(err: unknown) {
+  if (err instanceof IntegrationError) {
+    if (err.code === "validation_error") return 400;
+    if (err.code === "nango_not_configured" || err.code === "settings_invalid") {
+      return 409;
+    }
+    if (err.code === "not_connected" || err.code === "provider_not_found") return 404;
+    if (err.code === "rate_limited") return 429;
+  }
+  return 500;
 }
 
 function validateApiKeyFormat(providerId: ProviderId, apiKey: string) {
@@ -519,12 +566,19 @@ export function createSettingsRouter({
   openPathInFinder = defaultOpenPathInFinder,
   resetBrowserProfile = defaultResetBrowserProfile,
   runMemoryComposeCommand = defaultRunMemoryComposeCommand,
+  nangoService,
   store = prisma,
   testActualChromeConnection = defaultTestActualChromeConnection,
 }: CreateSettingsRouterOptions = {}) {
   const router = Router();
   const chatgptOAuth =
     chatgptOAuthService ?? createChatGptOAuthService({ keychain });
+  const integrations =
+    nangoService ??
+    createNangoService({
+      keychain,
+      prisma,
+    });
 
   router.get(
     "/execution",
@@ -720,6 +774,81 @@ export function createSettingsRouter({
         if (result.ok) deleted += 1;
       }
       return res.json({ deleted, reset: true });
+    }),
+  );
+
+  router.get(
+    "/integrations",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const settings = await integrations.listSettings(userId);
+      return res.json(settings);
+    }),
+  );
+
+  router.post(
+    "/integrations/nango",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const parsed = saveNangoSecretSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      try {
+        const nango = await integrations.saveNangoSecret({
+          secretKey: parsed.data.secretKey,
+          ...(parsed.data.host ? { host: parsed.data.host } : {}),
+        });
+        const validation = await integrations.validateNangoSecret();
+        return res.json({ nango, validation });
+      } catch (err) {
+        return res.status(integrationHttpStatus(err)).json({
+          code: integrationErrorCode(err),
+          error: integrationErrorMessage(err),
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/integrations/:connectorId/oauth-app",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const connectorId = req.params.connectorId;
+      const connector = connectorId ? connectorById(connectorId) : null;
+      if (!connector) {
+        return res.status(404).json({ error: "Unknown integration connector." });
+      }
+
+      const parsed = saveConnectorOAuthAppSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      try {
+        const result = await integrations.saveConnectorOAuthApp({
+          clientId: parsed.data.clientId,
+          clientSecret: parsed.data.clientSecret,
+          connectorId: connector.connectorId,
+        });
+        return res.json(result);
+      } catch (err) {
+        return res.status(integrationHttpStatus(err)).json({
+          code: integrationErrorCode(err),
+          error: integrationErrorMessage(err),
+        });
+      }
     }),
   );
 
