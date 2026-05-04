@@ -21,6 +21,7 @@ const TIMEOUT_MS = canonicalMode
   ? Number.parseInt(process.env.HANDLE_E2E_CANONICAL_TIMEOUT_MS ?? "360000", 10)
   : 60_000;
 const API_PORT = new URL(API_URL).port || "3001";
+const WEB_PORT = new URL(WEB_URL).port || "3000";
 const PROXY_LOOP_TEXT = "Failed to proxy http://localhost:3000";
 
 const output = [];
@@ -420,7 +421,7 @@ try {
       "--hostname",
       "127.0.0.1",
       "--port",
-      "3000",
+      WEB_PORT,
     ],
     env,
   );
