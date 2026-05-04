@@ -9,6 +9,13 @@ the user's third-party services. OAuth and token refresh go through Nango. The
 phase is development-environment only; production OAuth app rollout and Tauri
 distribution polish are deferred to Phase 11.
 
+Phase 6 is split into two ship gates to reduce audit-cycle risk:
+
+- Phase 6.0 ships as `v0.6.0`: Nango infrastructure, Settings UI scaffold,
+  Tier 1 read tools, and Tier 1 write tools with approval gates.
+- Phase 6.1 ships as `v0.6.1`: Tier 2 connectors, Tier 3 connectors, memory/UI
+  hardening, final audit harness expansion, and SIGNOFF.
+
 ## Goals
 
 - Ship 13 connectors in priority order:
@@ -39,6 +46,9 @@ distribution polish are deferred to Phase 11.
   calls unless a connector explicitly needs lightweight metadata caching.
 - Connector-specific automations or unattended schedules. Phase 9 schedules will
   reuse this integration layer.
+- Editing `.env` as an integration setup path. Phase 6 uses Settings-first
+  credential setup so non-coders can configure integrations without touching
+  files.
 
 ## References Checked
 
@@ -51,13 +61,22 @@ distribution polish are deferred to Phase 11.
 - Current catalog lists Gmail, Slack, Notion, Google Drive, GitHub, Google
   Calendar, Cloudflare, Vercel, Linear, Google Sheets/Google Docs via Google
   Workspace entries, and Zapier. Obsidian is not clearly listed as a
-  first-party Nango OAuth connector and is called out in Open Questions.
+  first-party Nango OAuth connector; Phase 6.1 implements it as a local-vault
+  filesystem connector mediated by Phase 4 SafetyGovernor.
 
 ## Ground Truth Decisions
 
 - Nango is the integration auth layer.
 - Phase 6 uses the BYOK pattern: the user supplies their own OAuth app
   credentials for each service in development.
+- All credentials are entered through Settings UI. The user never edits `.env`
+  to configure Phase 6.
+- Nango secret key is stored through the existing protected credential pattern
+  and loaded from Settings data on each Nango call. No server restart is
+  required when the user saves or rotates the key.
+- Provider OAuth client IDs and client secrets are configured per connector in
+  Settings -> Integrations. Client secrets use the same protected credential
+  path as AI provider keys.
 - Nango stores third-party access and refresh tokens. Handle stores only
   connection metadata, aliases, status, selected scopes, and memory preferences.
 - Phase 6 is dev-only.
@@ -71,6 +90,16 @@ distribution polish are deferred to Phase 11.
 - Connector-level forbidden patterns always apply regardless of permission mode.
 - Integration memory defaults to `NONE`.
 - Multi-account is in scope for Phase 6.
+- OAuth app naming convention is locked: `Handle Dev - <Connector>`, for
+  example `Handle Dev - Gmail`.
+- Account aliases are global per connector, not per project. Project default
+  account preferences may layer on top later.
+- Settings -> Integrations is the canonical UI route. Do not add a top-level
+  Integrations sidebar route in Phase 6.
+- Zapier scope for Phase 6.1 is trigger Zaps, read history, and create Zaps via
+  Zapier MCP-style capabilities.
+- Obsidian scope for Phase 6.1 is a single configured local vault. Multi-vault
+  support is deferred to Phase 11.
 
 ## Architecture
 
@@ -79,11 +108,16 @@ distribution polish are deferred to Phase 11.
 Stage 1 adds `apps/api/src/integrations/nango/`:
 
 - `nangoClient.ts`: lazy initializes `@nangohq/node` with
-  `NANGO_SECRET_KEY` and optional `NANGO_HOST`.
+  Nango credentials read from Settings-backed protected storage.
 - `nangoService.ts`: canonical wrapper used by routes and tools.
 - `errors.ts`: maps Nango and provider API failures into typed Handle errors.
 - `connectors.ts`: metadata registry for all 13 connectors.
 - `connectionHealth.ts`: lightweight health checks and state transitions.
+
+Nango config is hot-reloaded. `nangoService.ts` reads current settings on each
+call and constructs a short-lived client or uses an invalidation-aware client
+cache keyed by the protected credential version. A saved Nango key or OAuth app
+credential change must not require a backend restart.
 
 The wrapper exposes:
 
@@ -121,11 +155,40 @@ The Settings UI allows the user to enter OAuth app credentials per connector in
 development. Nango Connect supports user-provided OAuth credential overrides
 during the connect session; Phase 6 should use that path when available.
 
-Handle must never log OAuth client secrets. If any Nango setup path requires
-storing connector client IDs/secrets in Handle first, store them using the
-existing server-side credential storage pattern and redact them at every log
-boundary. The spec prefers passing them into Nango Connect rather than building
-parallel token or OAuth storage.
+Handle must never log OAuth client secrets. Connector client IDs may be stored
+plainly because they are public OAuth identifiers, but connector client secrets
+and the Nango secret key use the same Keychain-backed protected credential
+pattern as AI provider keys. Database rows store credential references and setup
+state, not plaintext secrets.
+
+Settings -> Integrations provides:
+
+- "Setup Nango" dialog with deep link to `https://app.nango.dev`, key paste
+  field, save button, and test button.
+- per-connector OAuth setup dialog with provider-specific deep links:
+  - Google Cloud Console for Gmail, Drive, Calendar, Sheets, and Docs
+  - Slack API site
+  - Notion integrations page
+  - GitHub developer settings
+  - Cloudflare API/OAuth app settings
+  - Vercel integration/OAuth settings
+  - Linear OAuth app settings
+  - Zapier developer platform
+- connector-specific checklist showing:
+  - app name: `Handle Dev - <Connector>`
+  - required scopes
+  - redirect URI for copy-paste
+  - client ID field
+  - client secret field
+  - save and test buttons
+
+Setup state is visible on the dashboard:
+
+- `Nango not configured`
+- `Nango configured, no OAuth apps registered`
+- `Ready to connect`
+- per-connector `Missing credentials`, `Ready`, `Connected`, `Reconnect`,
+  `Rate limited`, or `Error`
 
 ### Database Schema
 
@@ -181,10 +244,40 @@ model Integration {
   @@index([userId, status])
   @@unique([userId, connectorId, accountAlias])
 }
+
+model NangoSettings {
+  id              String    @id @default("global")
+  secretKeyRef    String?
+  host            String    @default("https://api.nango.dev")
+  configured      Boolean   @default(false)
+  lastValidatedAt DateTime?
+  lastErrorCode   String?
+  lastErrorMessage String?
+  updatedAt       DateTime  @default(now()) @updatedAt
+}
+
+model IntegrationConnectorSettings {
+  id                  String                 @id @default(cuid())
+  connectorId          IntegrationConnectorId @unique
+  nangoProviderId      String?
+  oauthClientId        String?
+  oauthClientSecretRef String?
+  requiredScopes       Json                   @default("[]")
+  redirectUri          String?
+  setupStatus          String                 @default("missing_credentials")
+  lastValidatedAt      DateTime?
+  lastErrorCode        String?
+  lastErrorMessage     String?
+  updatedAt            DateTime               @default(now()) @updatedAt
+}
 ```
 
 If Clerk's local user model evolves before Stage 1 lands, use the canonical
 Handle user ID already used by provider settings and projects.
+
+`secretKeyRef` and `oauthClientSecretRef` point to protected credential records
+or Keychain entries. Plaintext secret values are never stored in Prisma and are
+never returned from API routes.
 
 ### Multi-Account Model
 
@@ -229,8 +322,8 @@ type IntegrationToolRisk = "read" | "write" | "destructive" | "forbidden";
 
 - `read`: runs without approval.
 - `write`: approval required in `ASK` and `PLAN`; may run in `FULL_ACCESS`.
-- `destructive`: approval required in all modes except a future explicit
-  per-session "always approve" rule; connector forbidden patterns still deny.
+- `destructive`: approval required in all modes; connector forbidden patterns
+  still deny.
 - `forbidden`: deny without approval.
 
 Approval request payload:
@@ -244,11 +337,18 @@ Approval request payload:
   target: "to: nick@example.com",
   risk: "write",
   reason: "Send email to nick@example.com with subject \"...\"",
+  agentReason?: "The user asked me to send this summary to Nick after reviewing the draft.",
   approvalId: "..."
 }
 ```
 
 Approval modal copy must include the connector, account, action, and target.
+When `agentReason` is present, the modal displays it so the user sees the
+agent's stated reasoning before approving sensitive actions such as
+`gmail.send`, Cloudflare DNS changes, Vercel rollbacks, and similar writes.
+Phase 6.0 does not require `agentReason` for every approval event; the modal must
+render correctly when it is absent. Phase 6.0 Stage 3 should populate it for Tier
+1 write actions.
 
 ### Audit, Action Log, and Failure Memory
 
@@ -315,6 +415,11 @@ Examples:
 
 If memory is offline, integration tools still run. The UI shows the existing
 memory-offline banner and logs the skipped memory operation.
+
+Per-message memory override from the composer applies to integrations too. When
+the user turns memory off for a message, integration `memoryCandidates` are
+dropped for that message. This follows the Phase 5 memory override exactly: no
+integration recall/save side effect should occur for a memory-disabled turn.
 
 ### Error UX
 
@@ -694,8 +799,8 @@ Memory allowlist:
 
 - Zap names and automation preferences only
 
-Open scope decision: confirm whether Phase 6 supports triggering existing Zaps
-only, creating/updating Zaps, monitoring task history, or all of the above.
+Phase 6.1 scope is trigger existing Zaps, read Zap/task history, and create
+Zaps. This should follow Zapier MCP-style capabilities where available.
 
 ### Tier 3: Obsidian
 
@@ -722,21 +827,26 @@ Memory allowlist:
 
 - vault aliases, note titles, and user-approved facts only
 
-Architecture note: Obsidian is likely not an OAuth/Nango connector in the same
-shape as the cloud services. Unless Stage 1 verifies a suitable Nango connector,
-Obsidian should be implemented as a local-vault connector mediated by Phase 4
+Architecture note: Obsidian is not treated as a Nango OAuth connector in Phase
+6.1. It is a local-vault filesystem connector mediated by Phase 4
 SafetyGovernor, project permission mode, and the same integration Settings UI.
+Phase 6.1 supports one vault path. Multi-vault support is deferred to Phase 11.
+The vault path is stored as Integration metadata, and Obsidian tools must deny
+any path traversal or symlink escape outside the configured vault.
 
 ## Settings -> Integrations UI
 
-Route: `/settings/integrations` or the existing Settings shell's Integrations
-tab. If the app already has a top-level `/integrations` route from earlier
-specs, use the Settings tab as the canonical management location and link to it
-from the sidebar.
+Route: Settings -> Integrations tab only. Do not add a top-level `/integrations`
+sidebar link in Phase 6.
 
 Layout follows Screen 10:
 
 - Header: "Integrations" with connection count and "Add integration".
+- Nango setup banner:
+  - `Nango not configured`
+  - `Nango configured, no OAuth apps registered`
+  - `Ready to connect`
+  - action button opens "Setup Nango"
 - Connected section:
   - card grid using the design-system IntegrationCard pattern
   - connector avatar, connector name, account alias/label
@@ -766,9 +876,9 @@ Layout follows Screen 10:
 For each connector:
 
 1. User selects connector.
-2. UI shows dev OAuth app setup checklist and required redirect URI.
-3. User enters OAuth client ID/secret or confirms Nango Connect will collect
-   overrides.
+2. UI shows dev OAuth app setup checklist, provider deep link, `Handle Dev -
+   <Connector>` app name, and required redirect URI.
+3. User enters OAuth client ID/secret in Settings.
 4. Backend creates Nango connect session.
 5. UI opens Nango Connect.
 6. On success, UI asks for account alias if one was not returned.
@@ -783,6 +893,9 @@ Stage 1 endpoints:
 
 - `GET /api/integrations`
 - `GET /api/integrations/connectors`
+- `GET /api/settings/integrations`
+- `POST /api/settings/integrations/nango`
+- `POST /api/settings/integrations/:connectorId/oauth-app`
 - `POST /api/integrations/:connectorId/connect-session`
 - `POST /api/integrations/:connectorId/reconnect-session`
 - `POST /api/integrations/:connectorId/complete`
@@ -801,15 +914,34 @@ API endpoints, unless UI-only test buttons need a safe read-only route.
 - No implementation.
 - Handoff for review before Stage 1.
 
-### Stage 1: Nango Infrastructure
+### Stage 0.5: Structural Amendments
+
+- Apply the Phase 6.0/6.1 split.
+- Lock Settings-first credential setup.
+- Record the resolved Stage 0 review decisions.
+- No implementation.
+- Handoff for review before Stage 1.
+
+### Phase 6.0: `v0.6.0`
+
+Phase 6.0 ships from branch `phase-6/integrations` and includes Stages 1, 2,
+and 3. Manual audit must cover Sections A, B, C, D, G, H, I, and J at minimum.
+After audit and SIGNOFF, merge to main and tag `v0.6.0`.
+
+### Stage 1: Nango Infrastructure and Settings Scaffold
 
 - Install `@nangohq/node`.
 - Add Nango service wrapper, typed errors, and connector registry.
 - Add Integration Prisma model and migration.
-- Add Settings -> Integrations scaffold.
+- Add NangoSettings and IntegrationConnectorSettings storage with protected
+  credential references.
+- Add Settings -> Integrations scaffold with "Setup Nango" and per-connector
+  OAuth app setup.
 - Add start/complete/reconnect/test/disconnect API routes.
+- Verify and document Nango provider IDs for all 13 connectors before Stage 2
+  hardcodes IDs.
 - Smoke: one dummy or low-risk connector OAuth flow end-to-end, preferably
-  GitHub if credentials are available.
+  GitHub through Settings UI if credentials are available. No `.env` editing.
 - Handoff before connector tools.
 
 ### Stage 2: Tier 1 Read Tools
@@ -822,17 +954,28 @@ API endpoints, unless UI-only test buttons need a safe read-only route.
 
 - Add write tools for Tier 1.
 - Add connector forbidden patterns.
+- Review forbidden patterns for Tier 1 before Stage 3 smokes lock them in.
 - Add action log and failure memory integration.
+
+### Phase 6.1: `v0.6.1`
+
+Phase 6.1 opens a new branch `phase-6.1/integrations-tier-2-3` from updated
+main after Phase 6.0 ships. It includes Stages 4, 5, 6, and 7. Manual audit
+must cover all sections, including E and F, and repeat the Phase 6.0 regression
+sections. After audit and SIGNOFF, merge to main and tag `v0.6.1`.
 
 ### Stage 4: Tier 2 Connectors
 
 - Calendar, Cloudflare, Vercel, Linear.
 - Read/write tools, approvals, typed errors.
+- Review forbidden patterns for Tier 2 before Stage 4 smokes lock them in.
 
 ### Stage 5: Tier 3 Connectors
 
 - Sheets, Docs, Zapier, Obsidian.
-- Resolve Zapier and Obsidian open questions before implementation.
+- Zapier includes trigger, history, and create-Zap scope.
+- Obsidian is a single-vault local filesystem connector.
+- Review forbidden patterns for Tier 3 before Stage 5 smokes lock them in.
 
 ### Stage 6: Memory and UI Hardening
 
@@ -851,6 +994,7 @@ API endpoints, unless UI-only test buttons need a safe read-only route.
 
 Planned smoke commands:
 
+- `pnpm smoke:integrations-settings-nango-config`
 - `pnpm smoke:integrations-nango-connect`
 - `pnpm smoke:integrations-settings-ui`
 - `pnpm smoke:integrations-multi-account`
@@ -865,6 +1009,10 @@ Planned smoke commands:
 Existing Phase 1-5 regression smokes must still pass before final Phase 6
 handoff.
 
+Phase 6.0 handoff requires the Stage 1 GitHub OAuth flow smoke through Settings
+UI, plus Tier 1 read/write smokes once Stages 2 and 3 land. Phase 6.1 adds Tier
+2 and Tier 3 smokes.
+
 ## Manual Audit Harness
 
 Create `scripts/manual-audit/phase6-integrations.md` with these sections.
@@ -872,9 +1020,12 @@ Create `scripts/manual-audit/phase6-integrations.md` with these sections.
 ### Section A: Nango and BYOK Setup
 
 - Verify branch and CI status.
-- Verify Nango dev environment variables.
+- Verify Settings -> Integrations shows `Nango not configured` before setup.
+- Paste Nango secret key through the Setup Nango dialog.
+- Verify no `.env` editing is required.
+- Verify Nango status changes to configured after save.
 - For each Tier 1 connector, verify OAuth app credentials are entered or Nango
-  Connect asks for BYOK credentials.
+  Connect asks for BYOK credentials through Settings UI.
 - Verify redirect URI matches Nango configuration.
 
 ### Section B: Settings -> Integrations UI
@@ -961,28 +1112,32 @@ Create `scripts/manual-audit/phase6-integrations.md` with these sections.
   allowlisted and redacted before writes.
 - Provider rate limits and inconsistent API errors can cause agent loops unless
   typed errors are explicit.
-- Obsidian may not fit Nango OAuth. Treat this as an architectural decision
-  before writing code.
-- Zapier scope can become too broad quickly. Keep Phase 6 bounded to the
-  resolved subset.
+- Obsidian is a local-vault filesystem connector, so it must not bypass Phase 4
+  path safety or approval rules.
+- Zapier scope includes trigger, history, and Zap creation. Keep Phase 6.1
+  bounded to those capabilities and deny broad automation fan-out.
 
 ## Stop Conditions
 
 - Nango does not support enough of the 13 connectors to preserve the planned
   architecture.
-- BYOK OAuth credentials cannot be passed through Nango without Handle storing
+- Settings-first BYOK OAuth credentials cannot be passed through Nango without
+  Handle storing
   third-party refresh tokens.
-- Obsidian requires an architecture that bypasses Phase 4 SafetyGovernor.
-- Zapier scope requires broad automation creation before the user approves it.
+- Hot-reload of Nango settings cannot work without a server restart.
+- Obsidian local-vault tooling requires an architecture that bypasses Phase 4
+  SafetyGovernor.
+- Zapier scope requires broad automation fan-out before the user approves it.
 - Any connector write path cannot be represented in the typed approval flow.
-- Stage 1 Nango infrastructure takes more than one focused day, indicating an
-  unknown platform or account setup issue.
+- Stage 1 Nango infrastructure takes more than 1.5 focused days, indicating an
+  unknown platform, BYOK, or account setup issue.
 
 ## Success Criteria
 
 - Stage 0 spec approved by user.
-- Stage 1 Nango infrastructure connects one dev connector end-to-end.
-- All 13 connectors are visible in Settings -> Integrations.
+- Phase 6.0 Stage 1 Nango infrastructure connects GitHub end-to-end through
+  Settings UI without `.env` edits.
+- All 13 connectors are visible in Settings -> Integrations with setup state.
 - Multi-account add/remove/switch works.
 - All Tier 1-3 read tools work against controlled test data.
 - All write tools require approval under `ASK` and `PLAN`.
@@ -994,45 +1149,46 @@ Create `scripts/manual-audit/phase6-integrations.md` with these sections.
 - Typed error UX offers reconnect, retry, account selection, or approval actions
   where appropriate.
 - Required smokes and Playwright tests pass.
-- Manual audit Sections A-J pass.
-- Three consecutive GitHub Actions CI runs pass on the final phase tip.
-- SIGNOFF is committed after user audit.
+- Phase 6.0 manual audit Sections A, B, C, D, G, H, I, and J pass before tag
+  `v0.6.0`.
+- Phase 6.1 manual audit Sections A-J pass before tag `v0.6.1`.
+- Three consecutive GitHub Actions CI runs pass on each final phase tip.
+- SIGNOFF is committed after each user audit.
 
-## Open Questions Requiring User Decision
+## Resolved Stage 0 Review Decisions
 
 1. OAuth app naming convention:
-   - Proposed: `Handle Dev - <Connector> - <UserNameOrMachine>`.
-   - Need decision before writing setup docs and BYOK copy.
+   - Use `Handle Dev - <Connector>`, for example `Handle Dev - Gmail`.
 2. Account aliasing:
-   - Proposed: default to provider label/email/org; allow user rename; enforce
-     unique alias per connector.
-   - Need decision on whether aliases should be global or per project.
-3. Obsidian vault handling:
-   - Is Phase 6 Obsidian a local-vault connector using filesystem access, or is
-     there a specific Obsidian plugin/API/Nango path the user wants?
-   - Should multi-vault be supported in Phase 6?
-4. Zapier scope:
-   - Trigger existing Zaps only?
-   - Create/update Zaps?
-   - Monitor task history?
-   - All of the above?
+   - Aliases are global per connector, not per project.
+   - Project default account is a future per-project preference layered on top
+     of global aliases.
+3. Obsidian:
+   - Implement as a local-vault filesystem connector mediated by Phase 4
+     SafetyGovernor.
+   - Phase 6.1 supports one vault path.
+   - Multi-vault is deferred to Phase 11.
+4. Zapier:
+   - Phase 6.1 includes trigger Zaps, read history, and create Zaps.
+   - Use Zapier MCP-style capabilities where available.
 5. Per-connector forbidden patterns:
-   - This spec lists initial patterns. Need connector-by-connector audit before
-     implementation, especially Gmail, Slack, Cloudflare, Vercel, Zapier, and
-     Obsidian.
-6. Nango provider keys:
-   - Confirm exact provider IDs for all 13 connectors in the dev Nango
-     environment before Stage 1 routes hardcode IDs.
-7. Integration route placement:
-   - Proposed canonical UI is Settings -> Integrations, with optional sidebar
-     link. Confirm if a top-level `/integrations` page is also desired in
-     Phase 6.
+   - Initial patterns in this spec are the baseline.
+   - Each tier handoff includes a forbidden-pattern review checklist before its
+     smokes lock in behavior.
+6. Nango provider IDs:
+   - Resolve during Stage 1 implementation by verifying each of the 13
+     connectors against the actual Nango catalog.
+   - Document the provider IDs before Stage 2 connector tools hardcode IDs.
+7. Integration UI route placement:
+   - Settings -> Integrations tab only.
+   - No top-level sidebar link in Phase 6.
 
-## Stage 0 Handoff Gate
+## Stage 0.5 Handoff Gate
 
-Stage 0 is complete when:
+Stage 0.5 is complete when:
 
-- This spec is committed as `Phase 6: Specification draft`.
+- The structural amendments are committed as
+  `Phase 6 spec: Apply structural amendments`.
 - `pnpm test` passes on the branch with only the spec change.
 - No Stage 1 implementation code has been written.
 - The user reviews and approves the spec before implementation begins.
