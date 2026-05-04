@@ -12,6 +12,19 @@ function cardStatus(status: AsyncTaskSummary["status"]) {
   return status;
 }
 
+function statusLabel(status: AsyncTaskSummary["status"]) {
+  return status.toLowerCase();
+}
+
+function statusTimestamp(task: AsyncTaskSummary) {
+  if (task.status === "COMPLETED") return task.completedAt ?? task.startedAt ?? task.queuedAt;
+  if (task.status === "RUNNING") return task.startedAt ?? task.queuedAt;
+  if (task.status === "QUEUED") return task.queuedAt;
+  if (task.status === "PAUSED") return task.lastHeartbeatAt ?? task.startedAt ?? task.queuedAt;
+  if (task.status === "WAITING") return task.lastHeartbeatAt ?? task.startedAt ?? task.queuedAt;
+  return task.completedAt ?? task.startedAt ?? task.queuedAt;
+}
+
 function timestamp(value?: string | null) {
   if (!value) return "Not started";
   return new Date(value).toLocaleString();
@@ -76,7 +89,7 @@ export function AsyncTasksScreen() {
         {tasks.map((task) => (
           <a href={`/tasks/${task.id}`} key={task.id}>
             <ContinueCard
-              meta={`${task.workflowStatus ?? task.projectName ?? "Background"} · ${timestamp(task.queuedAt ?? task.startedAt)}`}
+              meta={`${statusLabel(task.status)} · ${timestamp(statusTimestamp(task))}${task.notificationFailed ? " · notification delivery failed" : ""}`}
               status={cardStatus(task.status)}
               tag={task.projectName ?? "Async"}
               title={task.goal}

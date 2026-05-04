@@ -12,6 +12,10 @@ function cardStatus(status: AsyncTaskSummary["status"]) {
   return status;
 }
 
+function statusLabel(status: AsyncTaskSummary["status"]) {
+  return status.toLowerCase();
+}
+
 export function ContinueBand() {
   const { getToken, isLoaded } = useHandleAuth();
   const [tasks, setTasks] = useState<AsyncTaskSummary[]>([]);
@@ -64,7 +68,7 @@ export function ContinueBand() {
             key={task.id}
           >
             <ContinueCard
-              meta={task.workflowStatus ?? task.projectName ?? "Background"}
+              meta={`${statusLabel(task.status)}${task.notificationFailed ? " · notification delivery failed" : ""}`}
               status={cardStatus(task.status)}
               tag={task.projectName ?? "Async"}
               title={task.goal}

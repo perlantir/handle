@@ -58,6 +58,16 @@ async function mockAsyncTasksApi(page: Page) {
           status: "WAITING",
           workflowStatus: "awaiting_approval",
         },
+        {
+          asyncMode: true,
+          completedAt: "2026-05-04T01:00:00.000Z",
+          conversationId: "conversation-3",
+          goal: "Finished with a notification failure",
+          id: "run-3",
+          notificationFailed: true,
+          projectName: "Ops",
+          status: "COMPLETED",
+        },
       ],
     });
   });
@@ -67,11 +77,13 @@ test("tasks page shows async background runs", async ({ page }) => {
   await mockAsyncTasksApi(page);
   await page.goto("/sign-in");
   await page.getByRole("link", { name: "Continue as smoke user" }).click();
-  await page.getByRole("link", { name: "Tasks" }).click();
+  await page.getByRole("link", { name: "Tasks", exact: true }).click();
 
   await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
   await expect(page.getByText("Build the weekly release report")).toBeVisible();
   await expect(page.getByText("Waiting for Gmail send approval")).toBeVisible();
+  await expect(page.getByText("Finished with a notification failure")).toBeVisible();
+  await expect(page.getByText(/completed .*notification delivery failed/)).toBeVisible();
   await expect(page.getByText("Queued", { exact: true })).toBeVisible();
   await expect(page.getByText("Waiting", { exact: true })).toBeVisible();
 });

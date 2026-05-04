@@ -86,7 +86,7 @@ describe("authenticated screens", () => {
               role: "ASSISTANT",
             },
           ],
-          status: "COMPLETED",
+          status: "STOPPED",
         }}
         taskId="task-markdown"
       />,

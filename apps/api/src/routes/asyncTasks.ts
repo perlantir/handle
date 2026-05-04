@@ -21,7 +21,7 @@ function serializeRun(run: {
   workflowId?: string | null;
   workflowRunId?: string | null;
   workflowStatus?: string | null;
-}): AsyncTaskSummary {
+}, failedNotifications: Set<string> = new Set()): AsyncTaskSummary {
   return {
     asyncMode: Boolean(run.asyncMode),
     completedAt: run.completedAt?.toISOString() ?? null,
@@ -30,6 +30,7 @@ function serializeRun(run: {
     id: run.id,
     lastHeartbeatAt: run.lastHeartbeatAt?.toISOString() ?? null,
     lastNotifiedAt: run.lastNotifiedAt?.toISOString() ?? null,
+    notificationFailed: failedNotifications.has(run.id),
     projectId: run.conversation?.project?.id ?? null,
     projectName: run.conversation?.project?.name ?? null,
     queuedAt: run.queuedAt?.toISOString() ?? null,
@@ -59,7 +60,19 @@ asyncTasksRouter.get(
         userId,
       },
     });
+    const failedNotifications = await prisma.notificationDelivery.findMany({
+      select: { agentRunId: true },
+      where: {
+        agentRunId: { in: runs.map((run) => run.id) },
+        status: "FAILED",
+      },
+    });
+    const failedRunIds = new Set(
+      failedNotifications
+        .map((delivery) => delivery.agentRunId)
+        .filter((id): id is string => Boolean(id)),
+    );
 
-    return res.json({ tasks: runs.map(serializeRun) });
+    return res.json({ tasks: runs.map((run) => serializeRun(run, failedRunIds)) });
   }),
 );
