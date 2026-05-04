@@ -1,8 +1,10 @@
 services:
   temporal:
     image: temporalio/admin-tools:1.25
-    command:
+    user: "0:0"
+    entrypoint:
       - temporal
+    command:
       - server
       - start-dev
       - --ip
