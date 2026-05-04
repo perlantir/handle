@@ -83,6 +83,10 @@ function createSkillStore() {
     skillRunStep: {
       create: async ({ data }: any) => {
         const now = new Date();
+        const duplicate = steps.some((step) => step.skillRunId === data.skillRunId && step.index === data.index);
+        if (duplicate) {
+          throw new Error("Unique constraint failed on the fields: (`skillRunId`,`index`)");
+        }
         const row = { ...data, createdAt: now, id: nextId("step"), startedAt: now, updatedAt: now };
         steps.push(row);
         return row;
@@ -131,6 +135,7 @@ describe("skills routes", () => {
       status: "COMPLETED",
     });
     expect(response.body.run.steps.length).toBeGreaterThan(1);
+    expect(new Set(response.body.run.steps.map((step: any) => step.index)).size).toBe(response.body.run.steps.length);
     expect(response.body.run.artifacts.map((artifact: any) => artifact.kind)).toEqual([
       "REPORT",
       "SOURCE_SET",

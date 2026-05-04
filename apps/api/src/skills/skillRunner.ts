@@ -110,7 +110,7 @@ export async function runSkill({
     for (const [offset, step] of generated.steps.entries()) {
       await addStep(store, run.id, offset + 1, step);
     }
-    for (const artifact of generated.artifacts) {
+    for (const [artifactOffset, artifact] of generated.artifacts.entries()) {
       const created = await store.skillArtifact.create({
         data: {
           citations: jsonInput(artifact.citations ?? []),
@@ -122,7 +122,7 @@ export async function runSkill({
           title: artifact.title,
         },
       });
-      await addStep(store, run.id, generated.steps.length + 1, {
+      await addStep(store, run.id, generated.steps.length + artifactOffset + 1, {
         artifactId: created.id,
         safeSummary: `Created artifact "${created.title}" (${created.kind}).`,
         title: "Create artifact",
