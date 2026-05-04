@@ -150,6 +150,7 @@ interface AgentRunContext {
   } | null;
   providerId: string | null;
   modelName: string | null;
+  userId?: string | null;
 }
 
 interface SafetySettingsStore {
@@ -190,6 +191,7 @@ interface RunAgentDependencies {
       sharedMemoryNamespaceId?: string;
       taskId: string;
       trustedDomains?: string[];
+      userId?: string;
     },
     options: { llm: BaseChatModel },
   ) => Promise<AgentLike>;
@@ -876,6 +878,7 @@ export function createAgentRunner({
         taskId,
         sandbox,
         trustedDomains,
+        ...(typeof runContext.userId === "string" ? { userId: runContext.userId } : {}),
       };
       const agent = await createAgent(agentContext, { llm: model });
       runControl.throwIfCancelled();

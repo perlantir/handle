@@ -570,6 +570,7 @@ export function createProjectsRouter({
           ...(parsed.data.modelName ? { modelName: parsed.data.modelName } : {}),
           ...(parsed.data.providerId ? { providerId: parsed.data.providerId } : {}),
           status: "RUNNING",
+          userId,
         },
       });
 

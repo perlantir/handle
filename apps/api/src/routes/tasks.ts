@@ -147,6 +147,7 @@ export function createTasksRouter({
               ? { providerId: parsed.data.providerOverride }
               : {}),
             status: "RUNNING",
+            userId,
           },
         });
       } else if (store.task) {

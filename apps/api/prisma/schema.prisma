@@ -221,6 +221,7 @@ enum MessageRole {
 model AgentRun {
   id             String         @id @default(cuid())
   conversationId String
+  userId         String?
   status         AgentRunStatus @default(RUNNING)
   goal           String
   result         String?
@@ -242,6 +243,7 @@ model AgentRun {
 
   @@index([conversationId, startedAt])
   @@index([status])
+  @@index([userId])
 }
 
 enum AgentRunStatus {
