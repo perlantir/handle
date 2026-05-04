@@ -20,6 +20,10 @@ import { isProviderId, type ProviderId } from "../providers/types";
 
 const projectSchema = z.object({
   browserMode: z.enum(["SEPARATE_PROFILE", "ACTUAL_CHROME"]).optional(),
+  criticEnabled: z.boolean().optional(),
+  criticMaxRevisions: z.number().int().min(1).max(10).optional(),
+  criticModel: z.string().min(1).nullable().optional(),
+  criticScope: z.enum(["all", "writes-only", "risky-only"]).optional(),
   customScopePath: z.string().min(1).nullable().optional(),
   defaultBackend: z.enum(["E2B", "LOCAL"]).optional(),
   defaultModel: z.string().min(1).nullable().optional(),

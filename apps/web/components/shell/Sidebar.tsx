@@ -94,6 +94,10 @@ export function Sidebar() {
       const token = await getToken();
       const input: Parameters<typeof createProject>[0]['input'] = {
         browserMode: draft.browserMode,
+        criticEnabled: draft.criticEnabled,
+        criticMaxRevisions: draft.criticMaxRevisions,
+        criticModel: draft.criticModel || null,
+        criticScope: draft.criticScope,
         defaultBackend: draft.defaultBackend,
         memoryScope: draft.memoryScope,
         name: draft.name.trim(),
@@ -128,6 +132,10 @@ export function Sidebar() {
       const token = await getToken();
       const input: Parameters<typeof updateProject>[0]['input'] = {
         browserMode: draft.browserMode,
+        criticEnabled: draft.criticEnabled,
+        criticMaxRevisions: draft.criticMaxRevisions,
+        criticModel: draft.criticModel || null,
+        criticScope: draft.criticScope,
         defaultBackend: draft.defaultBackend,
         defaultModel: draft.defaultModel || null,
         defaultProvider: draft.defaultProvider || null,
@@ -492,6 +500,10 @@ export function Sidebar() {
 
 interface ProjectDraft {
   browserMode: ProjectSummary['browserMode'];
+  criticEnabled: boolean;
+  criticMaxRevisions: number;
+  criticModel: string;
+  criticScope: NonNullable<ProjectSummary['criticScope']>;
   customScopePath: string;
   defaultBackend: ProjectSummary['defaultBackend'];
   defaultModel: string;
@@ -505,6 +517,10 @@ interface ProjectDraft {
 function defaultProjectDraft(): ProjectDraft {
   return {
     browserMode: 'SEPARATE_PROFILE',
+    criticEnabled: false,
+    criticMaxRevisions: 3,
+    criticModel: '',
+    criticScope: 'risky-only',
     customScopePath: '',
     defaultBackend: 'E2B',
     defaultModel: '',
@@ -519,6 +535,10 @@ function defaultProjectDraft(): ProjectDraft {
 function draftFromProject(project: ProjectSummary): ProjectDraft {
   return {
     browserMode: project.browserMode,
+    criticEnabled: project.criticEnabled ?? false,
+    criticMaxRevisions: project.criticMaxRevisions ?? 3,
+    criticModel: project.criticModel ?? '',
+    criticScope: project.criticScope ?? 'risky-only',
     customScopePath: project.customScopePath ?? '',
     defaultBackend: project.defaultBackend,
     defaultModel: project.defaultModel ?? '',
@@ -658,6 +678,60 @@ function ProjectDraftFields({
           <option value="NONE">Memory off</option>
         </select>
       </label>
+
+      <div className="grid gap-3 rounded-[12px] border border-border-subtle bg-bg-surface p-3">
+        <label className="flex items-center justify-between gap-3">
+          <span className="text-[12.5px] font-medium text-text-secondary">Critic review</span>
+          <input
+            aria-label="Enable critic review"
+            checked={draft.criticEnabled}
+            onChange={(event) =>
+              onChange((current) => ({
+                ...current,
+                criticEnabled: event.target.checked,
+              }))
+            }
+            type="checkbox"
+          />
+        </label>
+
+        <label className="grid gap-1.5">
+          <span className="text-[12.5px] font-medium text-text-secondary">Critic scope</span>
+          <select
+            aria-label="Critic intervention scope"
+            className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none"
+            disabled={!draft.criticEnabled}
+            onChange={(event) =>
+              onChange((current) => ({
+                ...current,
+                criticScope: event.target.value as NonNullable<ProjectSummary['criticScope']>,
+              }))
+            }
+            value={draft.criticScope}
+          >
+            <option value="risky-only">Risky decisions only</option>
+            <option value="writes-only">Writes only</option>
+            <option value="all">All decisions</option>
+          </select>
+        </label>
+
+        <label className="grid gap-1.5">
+          <span className="text-[12.5px] font-medium text-text-secondary">Max revise cycles</span>
+          <input
+            aria-label="Critic max revise cycles"
+            className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none"
+            disabled={!draft.criticEnabled}
+            inputMode="numeric"
+            onChange={(event) =>
+              onChange((current) => ({
+                ...current,
+                criticMaxRevisions: Number(event.target.value) || 3,
+              }))
+            }
+            value={draft.criticMaxRevisions}
+          />
+        </label>
+      </div>
 
       <label className="grid gap-1.5">
         <span className="text-[12.5px] font-medium text-text-secondary">Default backend</span>

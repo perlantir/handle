@@ -7,6 +7,7 @@ import { redactSecrets } from "./redact";
 
 export type ActionOutcomeType =
   | "browser_navigated"
+  | "critic_reviewed"
   | "file_created"
   | "file_deleted"
   | "file_modified"

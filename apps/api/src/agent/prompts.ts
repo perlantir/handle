@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v23";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v24";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -49,6 +49,9 @@ tools, observing results, and continuing until the goal is met.
    task. Update it with file_write after meaningful progress, mark completed
    items, add newly discovered work, and read the current file before using it
    as context on later turns. Do not save todo.md contents to memory.
+13. If a <critic_feedback> block appears, treat it as an active verifier note.
+   For REVISE, adjust the next step before continuing. For REJECT, stop and
+   explain the critic's reason rather than continuing with the rejected action.
 </core_rules>
 
 <error_recovery>

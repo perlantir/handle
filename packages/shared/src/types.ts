@@ -158,6 +158,7 @@ export interface FailurePatternSummary {
 
 export type ActionOutcomeType =
   | 'browser_navigated'
+  | 'critic_reviewed'
   | 'file_created'
   | 'file_deleted'
   | 'file_modified'
@@ -275,6 +276,10 @@ export interface CreateTaskResponse {
 export type WorkspaceScope = 'DEFAULT_WORKSPACE' | 'CUSTOM_FOLDER' | 'DESKTOP' | 'FULL_ACCESS';
 
 export type ProjectPermissionMode = 'FULL_ACCESS' | 'ASK' | 'PLAN';
+
+export type CriticInterventionScope = 'all' | 'writes-only' | 'risky-only';
+
+export type CriticVerdict = 'APPROVE' | 'REVISE' | 'REJECT';
 
 export type BackendType = 'E2B' | 'LOCAL';
 
@@ -428,6 +433,10 @@ export interface ProjectSummary {
   defaultProvider?: string | null;
   defaultModel?: string | null;
   browserMode: BrowserMode;
+  criticEnabled?: boolean;
+  criticMaxRevisions?: number;
+  criticModel?: string | null;
+  criticScope?: CriticInterventionScope;
   createdAt?: string;
   updatedAt?: string;
 }

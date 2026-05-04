@@ -43,6 +43,14 @@ import {
 } from "../providers/types";
 import { createHandleAgent } from "./createAgent";
 import { createComputerUseToolDefinitions } from "./computerUseTools";
+import {
+  CriticRejectedError,
+  criticEnabled,
+  formatCriticFeedback,
+  isCriticRejectedError,
+  runCriticReview,
+  shouldCriticReviewToolStep,
+} from "./critic";
 import { parseAgentFinalResult } from "./finalResult";
 import { emitInitialPlan } from "./plan";
 import { createAgentRunCheckpoint, latestCheckpointContext } from "./runCheckpoint";
@@ -116,6 +124,9 @@ interface TaskStore {
   };
   agentRunTrajectory?: TrajectoryStore["agentRunTrajectory"];
   sharedMemoryNamespace?: SharedMemoryStore["sharedMemoryNamespace"];
+  criticReview?: {
+    create(args: unknown): Promise<unknown>;
+  };
   message: {
     create(args: unknown): Promise<unknown>;
   };
@@ -134,6 +145,10 @@ interface TaskStore {
 
 interface ProjectContext {
   browserMode: string | null;
+  criticEnabled?: boolean | null;
+  criticMaxRevisions?: number | null;
+  criticModel?: string | null;
+  criticScope?: string | null;
   customScopePath: string | null;
   defaultBackend: string | null;
   defaultModel: string | null;
@@ -188,6 +203,10 @@ interface RunAgentDependencies {
   createAgent?: (
     context: {
       backend: ExecutionBackend;
+      criticReviewToolResult?: (
+        step: TrajectoryStepRecord,
+        output: string,
+      ) => Promise<string>;
       memoryContext?: string;
       recordTrajectoryStep?: (step: TrajectoryStepRecord) => Promise<void>;
       sandbox: E2BSandboxLike;
@@ -696,6 +715,32 @@ export function createAgentRunner({
         );
         throw err;
       }
+      let criticContext = "";
+      if (criticEnabled(project)) {
+        const review = await runCriticReview({
+          agentRunId: taskId,
+          conversationId: runContext.conversationId,
+          goal,
+          interventionPoint: "post-plan-before-execute",
+          llm: model,
+          metadata: {
+            backend: selectedBackend,
+            model: provider.config.primaryModel,
+            providerId: provider.id,
+          },
+          project,
+          store,
+        });
+        emitEvent({
+          content: `Critic ${review.verdict}: ${review.reasoning || "No concerns."}`,
+          taskId,
+          type: "thought",
+        });
+        if (review.verdict === "REJECT") {
+          throw new CriticRejectedError(review);
+        }
+        criticContext = formatCriticFeedback(review);
+      }
       runControl.throwIfCancelled();
 
       const shouldUseDesktopSandbox =
@@ -878,6 +923,7 @@ export function createAgentRunner({
         failureMemoryContext,
         resumeContext,
         formatTodoMdContext(todoMd),
+        criticContext,
         actionContext,
       ]
         .filter((item) => item.trim().length > 0)
@@ -964,6 +1010,30 @@ export function createAgentRunner({
         ...(project?.permissionMode
           ? { projectPermissionMode: project.permissionMode }
           : {}),
+        criticReviewToolResult: async (step: TrajectoryStepRecord, output: string) => {
+          if (!shouldCriticReviewToolStep({ project, step })) return output;
+          const interventionPoint = step.toolName === "file_write"
+            ? "post-code-before-run"
+            : "post-tool-result-before-next-step";
+          const review = await runCriticReview({
+            agentRunId: taskId,
+            conversationId: runContext?.conversationId ?? taskId,
+            goal,
+            interventionPoint,
+            llm: model,
+            metadata: { step, output },
+            project,
+            store,
+          });
+          emitEvent({
+            content: `Critic ${review.verdict}: ${review.reasoning || "No concerns."}`,
+            taskId,
+            type: "thought",
+          });
+          if (review.verdict === "REJECT") throw new CriticRejectedError(review);
+          const feedback = formatCriticFeedback(review);
+          return feedback ? `${output}\n\n${feedback}` : output;
+        },
         recordTrajectoryStep: async (step: TrajectoryStepRecord) => {
           await recordTrajectoryStep({ agentRunId: taskId, step, store });
           trajectoryStepCount += 1;
@@ -1132,6 +1202,39 @@ export function createAgentRunner({
       const message = redactSecrets(
         err instanceof Error ? err.message : String(err),
       );
+
+      if (isCriticRejectedError(err)) {
+        await createAssistantMessage(store, taskId, runContext, message);
+        await updateRun(store, taskId, {
+          result: message,
+          status: "ERROR",
+        }).catch((updateErr) => {
+          logger.warn({ err: updateErr, taskId }, "Failed to mark critic-rejected task as errored");
+        });
+        await completeTrajectory({
+          agentRunId: taskId,
+          outcome: "FAILED",
+          outcomeReason: message,
+          store,
+        });
+        if (store === prisma) {
+          void notifyTaskEvent({
+            agentRunId: taskId,
+            detail: message,
+            eventType: "CRITIC_FLAGGED",
+          }).catch((notifyErr) => {
+            logger.warn({ err: notifyErr, taskId }, "Critic notification failed");
+          });
+        }
+        emitEvent({ type: "error", message, taskId });
+        emitEvent({
+          detail: message,
+          status: "ERROR",
+          taskId,
+          type: "status_update",
+        });
+        return;
+      }
 
       await updateRun(store, taskId, { status: "ERROR" })
         .catch((updateErr) => {

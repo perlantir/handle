@@ -43,6 +43,10 @@ interface ApprovalResponse {
 
 interface ProjectInput {
   browserMode?: ProjectSummary['browserMode'];
+  criticEnabled?: boolean;
+  criticMaxRevisions?: number;
+  criticModel?: string | null;
+  criticScope?: ProjectSummary['criticScope'];
   customScopePath?: string | null;
   defaultBackend?: ProjectSummary['defaultBackend'];
   defaultModel?: string | null;

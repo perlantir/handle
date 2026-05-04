@@ -23,6 +23,10 @@ export interface ToolExecutionContext {
   projectId?: string;
   projectPermissionMode?: 'ASK' | 'FULL_ACCESS' | 'PLAN' | string | null;
   recordTrajectoryStep?: (step: TrajectoryStepRecord) => Promise<void>;
+  criticReviewToolResult?: (
+    step: TrajectoryStepRecord,
+    output: string,
+  ) => Promise<string>;
   requestApproval?: typeof awaitApproval;
   sandbox: E2BSandboxLike;
   sharedMemoryNamespaceId?: string;
@@ -53,7 +57,7 @@ export function createLangChainTool(definition: ToolDefinition, context: ToolExe
     const started = Date.now();
     try {
       const output = await definition.implementation(input, context);
-      await context.recordTrajectoryStep?.({
+      const step: TrajectoryStepRecord = {
         completedAt: new Date().toISOString(),
         durationMs: Date.now() - started,
         startedAt: startedAt.toISOString(),
@@ -62,8 +66,11 @@ export function createLangChainTool(definition: ToolDefinition, context: ToolExe
         toolInput: input,
         toolName: definition.name,
         toolOutput: output,
-      });
-      return output;
+      };
+      const reviewedOutput = await context.criticReviewToolResult?.(step, output) ?? output;
+      step.toolOutput = reviewedOutput;
+      await context.recordTrajectoryStep?.(step);
+      return reviewedOutput;
     } catch (err) {
       await context.recordTrajectoryStep?.({
         completedAt: new Date().toISOString(),

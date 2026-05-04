@@ -27,11 +27,16 @@ model Project {
   defaultProvider      String?
   defaultModel         String?
   browserMode          BrowserMode                  @default(SEPARATE_PROFILE)
+  criticEnabled        Boolean                      @default(false)
+  criticModel          String?
+  criticScope          String                       @default("risky-only")
+  criticMaxRevisions   Int                          @default(3)
   createdAt            DateTime                     @default(now())
   updatedAt            DateTime                     @updatedAt
   conversations        Conversation[]
   notificationSettings ProjectNotificationSettings?
   searchSettings       ProjectSearchSettings?
+  criticReviews        CriticReview[]
 
   @@index([createdAt])
 }
@@ -365,11 +370,28 @@ model AgentRun {
   checkpoints            AgentRunCheckpoint[]
   trajectory             AgentRunTrajectory?
   sharedMemoryNamespaces SharedMemoryNamespace[]
+  criticReviews          CriticReview[]
 
   @@index([conversationId, startedAt])
   @@index([status])
   @@index([userId])
   @@index([workflowRunId])
+}
+
+model CriticReview {
+  id                String   @id @default(cuid())
+  agentRunId        String
+  agentRun          AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  projectId         String?
+  project           Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  interventionPoint String
+  verdict           String
+  reasoning         String
+  metadata          Json     @default("{}")
+  createdAt         DateTime @default(now())
+
+  @@index([agentRunId, createdAt])
+  @@index([projectId, createdAt])
 }
 
 enum AgentRunStatus {
