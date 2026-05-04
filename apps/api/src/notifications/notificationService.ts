@@ -101,6 +101,33 @@ export interface NotifyTaskEventInput {
   detail?: string;
 }
 
+type NotificationAuditEvent = {
+  channel: NotificationChannel;
+  errorClass?: string;
+  event: "notification_failed" | "notification_sent";
+  eventType?: NotificationEventType;
+  status: "FAILED" | "SENT";
+  target: string;
+  taskId: string;
+  test?: boolean;
+};
+
+async function recordNotificationAuditEvent(event: NotificationAuditEvent) {
+  try {
+    await appendAuditEvent(event);
+  } catch (err) {
+    logger.warn(
+      {
+        channel: event.channel,
+        err,
+        event: event.event,
+        taskId: event.taskId,
+      },
+      "Notification audit event write failed",
+    );
+  }
+}
+
 function normalizeEvents(value: unknown): NotificationEventType[] {
   if (!Array.isArray(value)) return DEFAULT_EVENTS;
   const allowed = new Set(DEFAULT_EVENTS);
@@ -405,14 +432,14 @@ export async function testNotificationChannel({
       data: testUpdateData(channel, "SENT", null),
       where: { id: GLOBAL_SETTINGS_ID },
     });
-    await appendAuditEvent({
+    await recordNotificationAuditEvent({
       channel,
       event: "notification_sent",
       status: "SENT",
       target: redactSecrets(target),
       taskId: "notification-test",
       test: true,
-    }).catch(() => undefined);
+    });
     return {
       ok: true,
       status: serializeNotificationChannelStatuses({ settings }).find((item) => item.channel === channel),
@@ -423,7 +450,7 @@ export async function testNotificationChannel({
       data: testUpdateData(channel, "FAILED", message),
       where: { id: GLOBAL_SETTINGS_ID },
     });
-    await appendAuditEvent({
+    await recordNotificationAuditEvent({
       channel,
       errorClass: err instanceof Error ? err.name : "Error",
       event: "notification_failed",
@@ -431,7 +458,7 @@ export async function testNotificationChannel({
       target: redactSecrets(target),
       taskId: "notification-test",
       test: true,
-    }).catch(() => undefined);
+    });
     return {
       error: message,
       ok: false,
@@ -526,14 +553,14 @@ export async function notifyTaskEvent(
         taskId: input.agentRunId,
         timestamp: new Date().toISOString(),
       });
-      await appendAuditEvent({
+      await recordNotificationAuditEvent({
         channel: channel.channel,
         event: "notification_sent",
         eventType: input.eventType,
         status: "SENT",
         target: channel.channel === "WEBHOOK" ? redactSecrets(channel.recipient) : channel.channel,
         taskId: input.agentRunId,
-      }).catch(() => undefined);
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn(
@@ -567,7 +594,7 @@ export async function notifyTaskEvent(
         taskId: input.agentRunId,
         timestamp: new Date().toISOString(),
       }).catch(() => undefined);
-      await appendAuditEvent({
+      await recordNotificationAuditEvent({
         channel: channel.channel,
         errorClass: err instanceof Error ? err.name : "Error",
         event: "notification_failed",
@@ -575,7 +602,7 @@ export async function notifyTaskEvent(
         status: "FAILED",
         target: channel.channel === "WEBHOOK" ? redactSecrets(channel.recipient) : channel.channel,
         taskId: input.agentRunId,
-      }).catch(() => undefined);
+      });
     }
   }
 

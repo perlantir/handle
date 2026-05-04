@@ -1,23 +1,17 @@
-import { homedir } from 'node:os';
 import { lstatSync, mkdirSync, readlinkSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import pino from 'pino';
+import { expandHome, handleLogDir } from './logPaths';
 import { redactSecrets } from './redact';
 
-function expandHome(path: string) {
-  if (path === '~') return homedir();
-  if (path.startsWith('~/')) return join(homedir(), path.slice(2));
-  return path;
-}
-
 function collapseHome(path: string) {
-  const home = homedir();
+  const home = expandHome('~');
   if (path === home) return '~';
   if (path.startsWith(`${home}/`)) return `~/${path.slice(home.length + 1)}`;
   return path;
 }
 
-const logDir = expandHome(process.env.HANDLE_LOG_DIR ?? '~/Library/Logs/Handle');
+const logDir = handleLogDir();
 const logFile = join(logDir, 'api.log');
 const pinoRollCurrentLog = join(logDir, 'current.log');
 

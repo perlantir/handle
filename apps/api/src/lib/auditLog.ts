@@ -1,6 +1,6 @@
 import { appendFile, mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { handleLogDir } from "./logPaths";
 import { redactSecrets } from "./redact";
 
 export interface StructuredAuditEvent {
@@ -10,10 +10,7 @@ export interface StructuredAuditEvent {
 }
 
 export function auditLogPath() {
-  return join(
-    process.env.HANDLE_LOG_DIR ?? join(homedir(), "Library", "Logs", "Handle"),
-    "audit.log",
-  );
+  return join(handleLogDir(), "audit.log");
 }
 
 export async function appendAuditEvent(event: StructuredAuditEvent) {

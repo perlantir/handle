@@ -1,8 +1,8 @@
 import { createReadStream } from "node:fs";
 import { appendFile, mkdir, readFile, rm } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import readline from "node:readline";
+import { handleLogDir } from "./logPaths";
 import { redactSecrets } from "./redact";
 
 export type ActionOutcomeType =
@@ -34,7 +34,7 @@ export interface ActionLogSummary extends ActionLogEntry {
 }
 
 export function actionLogPath() {
-  return join(process.env.HANDLE_LOG_DIR ?? join(homedir(), "Library", "Logs", "Handle"), "actions.log");
+  return join(handleLogDir(), "actions.log");
 }
 
 export async function appendActionLog(entry: ActionLogEntry) {

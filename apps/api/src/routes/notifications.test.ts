@@ -1,6 +1,7 @@
 import express from "express";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { appendAuditEvent } from "../lib/auditLog";
 import { notificationsRouter } from "./notifications";
 
 vi.mock("../auth/clerkMiddleware", () => ({
@@ -75,6 +76,7 @@ function app() {
 describe("notifications routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("loads notification and Temporal status", async () => {
@@ -126,5 +128,33 @@ describe("notifications routes", () => {
       channel: "WEBHOOK",
       lastTestStatus: "FAILED",
     });
+  });
+
+  it("writes an audit event when a webhook notification test succeeds", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+      })),
+    );
+
+    const response = await request(app())
+      .post("/api/settings/notifications/test")
+      .send({
+        channel: "WEBHOOK",
+        recipient: "https://example.com/hook",
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.ok).toBe(true);
+    expect(appendAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "WEBHOOK",
+        event: "notification_sent",
+        status: "SENT",
+        taskId: "notification-test",
+        test: true,
+      }),
+    );
   });
 });
