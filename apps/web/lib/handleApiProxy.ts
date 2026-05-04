@@ -43,10 +43,39 @@ export async function proxyHandleApiRequest(
     requestInit.body = await request.text();
   }
 
-  const upstream = await fetch(upstreamUrl(path), requestInit);
+  const url = upstreamUrl(path);
+  const startedAt = Date.now();
 
-  return new Response(upstream.body, {
-    headers: responseHeaders(upstream),
-    status: upstream.status,
-  });
+  try {
+    const upstream = await fetch(url, requestInit);
+    const body = await upstream.arrayBuffer();
+    console.info(
+      JSON.stringify({
+        durationMs: Date.now() - startedAt,
+        method,
+        path,
+        proxyPhase: "handle_api_proxy",
+        status: upstream.status,
+      }),
+    );
+
+    return new Response(body, {
+      headers: responseHeaders(upstream),
+      status: upstream.status,
+    });
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : "Unknown proxy error",
+        method,
+        path,
+        proxyPhase: "handle_api_proxy",
+      }),
+    );
+    return Response.json(
+      { error: "Handle API proxy request failed." },
+      { status: 502 },
+    );
+  }
 }

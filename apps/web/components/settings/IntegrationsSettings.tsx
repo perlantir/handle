@@ -42,6 +42,9 @@ interface ConnectorDraft {
 
 type StatusTone = "error" | "success";
 type StatusState = { message: string; tone: StatusTone };
+type ConnectionTestState =
+  | { detail?: string; state: "failed" | "passed" }
+  | { state: "testing" };
 
 const emptyDraft: ConnectorDraft = {
   accountAlias: "default",
@@ -84,6 +87,9 @@ export function IntegrationsSettings() {
     null,
   );
   const [status, setStatus] = useState<StatusState | null>(null);
+  const [connectionTestStates, setConnectionTestStates] = useState<
+    Record<string, ConnectionTestState>
+  >({});
   const [working, setWorking] = useState<string | null>(null);
 
   useEffect(() => {
@@ -266,9 +272,22 @@ export function IntegrationsSettings() {
   async function handleTestConnection(connection: IntegrationConnectionSummary) {
     setWorking(`${connection.id}:test`);
     setStatus(null);
+    setConnectionTestStates((current) => ({
+      ...current,
+      [connection.id]: { state: "testing" },
+    }));
     try {
       const result = await testIntegration(connection.id);
       await refresh();
+      setConnectionTestStates((current) => ({
+        ...current,
+        [connection.id]: result.ok
+          ? { detail: "Health check passed", state: "passed" }
+          : {
+              detail: result.error ?? "Health check failed",
+              state: "failed",
+            },
+      }));
       setStatus({
         message: result.ok
           ? `${connection.accountAlias} health check passed`
@@ -276,9 +295,14 @@ export function IntegrationsSettings() {
         tone: result.ok ? "success" : "error",
       });
     } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Connection test failed";
+      setConnectionTestStates((current) => ({
+        ...current,
+        [connection.id]: { detail: message, state: "failed" },
+      }));
       setStatus({
-        message:
-          error instanceof Error ? error.message : "Connection test failed",
+        message,
         tone: "error",
       });
     } finally {
@@ -412,6 +436,7 @@ export function IntegrationsSettings() {
               connector={connector}
               connectorSettings={connectorSettings}
               connections={connections}
+              connectionTestStates={connectionTestStates}
               connectLink={connectLinks[connector.connectorId]}
               draft={drafts[connector.connectorId] ?? draftForConnector()}
               key={connector.connectorId}
@@ -434,6 +459,7 @@ function ConnectorCard({
   connector,
   connectorSettings,
   connections,
+  connectionTestStates,
   connectLink,
   draft,
   onComplete,
@@ -447,6 +473,7 @@ function ConnectorCard({
   connector: IntegrationConnectorSummary;
   connectorSettings: IntegrationConnectorSettingsSummary | undefined;
   connections: IntegrationConnectionSummary[];
+  connectionTestStates: Record<string, ConnectionTestState>;
   connectLink: string | undefined;
   draft: ConnectorDraft;
   onComplete: () => void;
@@ -643,6 +670,9 @@ function ConnectorCard({
                   {connection.status}
                   {connection.defaultAccount ? " · default" : ""}
                 </div>
+                <ConnectionTestStatus
+                  state={connectionTestStates[connection.id]}
+                />
               </div>
               <div className="flex items-center gap-2">
                 <PillButton
@@ -675,6 +705,44 @@ function ConnectorCard({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function ConnectionTestStatus({
+  state,
+}: {
+  state: ConnectionTestState | undefined;
+}) {
+  if (!state) return null;
+
+  if (state.state === "testing") {
+    return (
+      <div className="mt-1 inline-flex items-center gap-1.5 text-[11px] font-medium text-text-tertiary">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        Testing
+      </div>
+    );
+  }
+
+  const passed = state.state === "passed";
+
+  return (
+    <div
+      className={cn(
+        "mt-1 inline-flex items-center gap-1.5 text-[11px] font-medium",
+        passed ? "text-status-success" : "text-status-error",
+      )}
+    >
+      {passed ? (
+        <CheckCircle2 className="h-3 w-3" />
+      ) : (
+        <XCircle className="h-3 w-3" />
+      )}
+      <span>{passed ? "Connected" : "Failed"}</span>
+      {state.detail ? (
+        <span className="font-normal text-text-tertiary">· {state.detail}</span>
+      ) : null}
+    </div>
   );
 }
 

@@ -284,6 +284,7 @@ test.describe("Settings Integrations", () => {
 
     await page.getByRole("button", { name: "Test default" }).click();
     await expect(page.getByText("default health check passed")).toBeVisible();
+    await expect(page.getByText("Connected", { exact: true })).toBeVisible();
 
     expect(
       requests.find(
