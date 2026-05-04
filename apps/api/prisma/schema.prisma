@@ -17,19 +17,20 @@ model User {
 }
 
 model Project {
-  id              String         @id @default(cuid())
-  name            String
-  workspaceScope  ScopeType      @default(DEFAULT_WORKSPACE)
-  customScopePath String?
-  permissionMode  String         @default("ASK")
-  memoryScope     MemoryScope    @default(GLOBAL_AND_PROJECT)
-  defaultBackend  BackendType    @default(E2B)
-  defaultProvider String?
-  defaultModel    String?
-  browserMode     BrowserMode    @default(SEPARATE_PROFILE)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  conversations   Conversation[]
+  id                   String                       @id @default(cuid())
+  name                 String
+  workspaceScope       ScopeType                    @default(DEFAULT_WORKSPACE)
+  customScopePath      String?
+  permissionMode       String                       @default("ASK")
+  memoryScope          MemoryScope                  @default(GLOBAL_AND_PROJECT)
+  defaultBackend       BackendType                  @default(E2B)
+  defaultProvider      String?
+  defaultModel         String?
+  browserMode          BrowserMode                  @default(SEPARATE_PROFILE)
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  conversations        Conversation[]
+  notificationSettings ProjectNotificationSettings?
 
   @@index([createdAt])
 }
@@ -65,12 +66,12 @@ model BrowserSettings {
 }
 
 model MemorySettings {
-  id                           String      @id @default("global")
-  provider                     String      @default("self-hosted")
-  defaultScopeForNewProjects   MemoryScope @default(GLOBAL_AND_PROJECT)
-  cloudBaseURL                 String?
-  selfHostedBaseURL            String      @default("http://127.0.0.1:8000")
-  updatedAt                    DateTime    @default(now()) @updatedAt
+  id                         String      @id @default("global")
+  provider                   String      @default("self-hosted")
+  defaultScopeForNewProjects MemoryScope @default(GLOBAL_AND_PROJECT)
+  cloudBaseURL               String?
+  selfHostedBaseURL          String      @default("http://127.0.0.1:8000")
+  updatedAt                  DateTime    @default(now()) @updatedAt
 }
 
 enum TaskStatus {
@@ -130,56 +131,137 @@ enum IntegrationConnectionStatus {
   ERROR
 }
 
+model TemporalSettings {
+  id               String    @id @default("global")
+  enabled          Boolean   @default(true)
+  address          String    @default("127.0.0.1:7233")
+  namespace        String    @default("default")
+  taskQueue        String    @default("handle-agent-runs")
+  lastHealthStatus String    @default("unknown")
+  lastErrorCode    String?
+  lastErrorMessage String?
+  lastCheckedAt    DateTime?
+  updatedAt        DateTime  @default(now()) @updatedAt
+}
+
+model NotificationSettings {
+  id             String   @id @default("global")
+  emailEnabled   Boolean  @default(false)
+  emailRecipient String?
+  slackEnabled   Boolean  @default(false)
+  slackChannelId String?
+  webhookEnabled Boolean  @default(false)
+  webhookUrl     String?
+  eventTypes     Json     @default("[\"TASK_COMPLETED\",\"TASK_FAILED\",\"APPROVAL_NEEDED\",\"CRITIC_FLAGGED\"]")
+  updatedAt      DateTime @default(now()) @updatedAt
+}
+
+model ProjectNotificationSettings {
+  id             String   @id @default(cuid())
+  projectId      String   @unique
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  inheritGlobal  Boolean  @default(true)
+  emailEnabled   Boolean?
+  emailRecipient String?
+  slackEnabled   Boolean?
+  slackChannelId String?
+  webhookEnabled Boolean?
+  webhookUrl     String?
+  eventTypes     Json?
+  updatedAt      DateTime @default(now()) @updatedAt
+}
+
+model NotificationDelivery {
+  id           String                @id @default(cuid())
+  userId       String
+  projectId    String?
+  agentRunId   String?
+  eventType    NotificationEventType
+  channel      NotificationChannel
+  recipient    String
+  payload      Json                  @default("{}")
+  status       NotificationStatus    @default(PENDING)
+  errorCode    String?
+  errorMessage String?
+  dispatchedAt DateTime?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([agentRunId])
+  @@index([status])
+}
+
+enum NotificationEventType {
+  TASK_COMPLETED
+  TASK_FAILED
+  APPROVAL_NEEDED
+  CRITIC_FLAGGED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SLACK
+  WEBHOOK
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
 model NangoSettings {
-  id               String   @id @default("global")
-  configured       Boolean  @default(false)
-  host             String   @default("https://api.nango.dev")
+  id               String    @id @default("global")
+  configured       Boolean   @default(false)
+  host             String    @default("https://api.nango.dev")
   lastErrorCode    String?
   lastErrorMessage String?
   lastValidatedAt  DateTime?
   secretKeyRef     String?
-  updatedAt        DateTime @default(now()) @updatedAt
+  updatedAt        DateTime  @default(now()) @updatedAt
 }
 
 model IntegrationConnectorSettings {
-  id                    String                 @id @default(cuid())
-  connectorId            IntegrationConnectorId @unique
-  lastErrorCode          String?
-  lastErrorMessage       String?
-  lastValidatedAt        DateTime?
-  nangoIntegrationId     String?
-  nangoProviderId        String?
-  oauthClientId          String?
-  oauthClientSecretRef   String?
-  redirectUri            String?
-  requiredScopes         Json                   @default("[]")
-  setupStatus            String                 @default("missing_credentials")
-  updatedAt              DateTime               @default(now()) @updatedAt
+  id                   String                 @id @default(cuid())
+  connectorId          IntegrationConnectorId @unique
+  lastErrorCode        String?
+  lastErrorMessage     String?
+  lastValidatedAt      DateTime?
+  nangoIntegrationId   String?
+  nangoProviderId      String?
+  oauthClientId        String?
+  oauthClientSecretRef String?
+  redirectUri          String?
+  requiredScopes       Json                   @default("[]")
+  setupStatus          String                 @default("missing_credentials")
+  updatedAt            DateTime               @default(now()) @updatedAt
 }
 
 model Integration {
-  id                String                      @id @default(cuid())
-  userId            String
-  connectorId       IntegrationConnectorId
+  id                 String                      @id @default(cuid())
+  userId             String
+  connectorId        IntegrationConnectorId
   nangoIntegrationId String?
-  nangoConnectionId String?
-  accountAlias      String
-  accountLabel      String?
-  status            IntegrationConnectionStatus @default(DISCONNECTED)
-  scopes            Json                        @default("[]")
-  defaultAccount    Boolean                     @default(false)
-  memoryScope       MemoryScope                 @default(NONE)
-  metadata          Json                        @default("{}")
-  lastUsedAt        DateTime?
-  lastHealthCheckAt DateTime?
-  lastErrorCode     String?
-  lastErrorMessage  String?
-  createdAt         DateTime                    @default(now())
-  updatedAt         DateTime                    @updatedAt
+  nangoConnectionId  String?
+  accountAlias       String
+  accountLabel       String?
+  status             IntegrationConnectionStatus @default(DISCONNECTED)
+  scopes             Json                        @default("[]")
+  defaultAccount     Boolean                     @default(false)
+  memoryScope        MemoryScope                 @default(NONE)
+  metadata           Json                        @default("{}")
+  lastUsedAt         DateTime?
+  lastHealthCheckAt  DateTime?
+  lastErrorCode      String?
+  lastErrorMessage   String?
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
 
+  @@unique([userId, connectorId, accountAlias])
   @@index([userId, connectorId])
   @@index([userId, status])
-  @@unique([userId, connectorId, accountAlias])
 }
 
 model Conversation {
@@ -220,34 +302,43 @@ enum MessageRole {
 }
 
 model AgentRun {
-  id             String         @id @default(cuid())
-  conversationId String
-  userId         String?
-  status         AgentRunStatus @default(RUNNING)
-  goal           String
-  result         String?
-  toolCalls      Json           @default("[]")
-  costUsd        Decimal?       @db.Decimal(10, 4)
-  backend        BackendType    @default(E2B)
-  providerId     String?
-  modelName      String?
-  sandboxId      String?
-  startedAt      DateTime       @default(now())
-  completedAt    DateTime?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  conversation   Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  messages       Message[]
-  checkpoints    AgentRunCheckpoint[]
-  trajectory     AgentRunTrajectory?
+  id                     String                  @id @default(cuid())
+  conversationId         String
+  userId                 String?
+  status                 AgentRunStatus          @default(RUNNING)
+  goal                   String
+  result                 String?
+  toolCalls              Json                    @default("[]")
+  costUsd                Decimal?                @db.Decimal(10, 4)
+  backend                BackendType             @default(E2B)
+  providerId             String?
+  modelName              String?
+  sandboxId              String?
+  workflowId             String?                 @unique
+  workflowRunId          String?
+  workflowStatus         String?
+  queuedAt               DateTime?
+  lastHeartbeatAt        DateTime?
+  lastNotifiedAt         DateTime?
+  asyncMode              Boolean                 @default(false)
+  startedAt              DateTime                @default(now())
+  completedAt            DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  conversation           Conversation            @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  messages               Message[]
+  checkpoints            AgentRunCheckpoint[]
+  trajectory             AgentRunTrajectory?
   sharedMemoryNamespaces SharedMemoryNamespace[]
 
   @@index([conversationId, startedAt])
   @@index([status])
   @@index([userId])
+  @@index([workflowRunId])
 }
 
 enum AgentRunStatus {
+  QUEUED
   RUNNING
   WAITING
   PAUSED
@@ -257,18 +348,18 @@ enum AgentRunStatus {
 }
 
 model AgentRunTrajectory {
-  id             String             @id @default(cuid())
-  agentRunId     String             @unique
-  agentRun       AgentRun           @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
-  steps          Json               @default("[]")
-  outcome        TrajectoryOutcome  @default(RUNNING)
+  id             String              @id @default(cuid())
+  agentRunId     String              @unique
+  agentRun       AgentRun            @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  steps          Json                @default("[]")
+  outcome        TrajectoryOutcome   @default(RUNNING)
   outcomeReason  String?
-  outcomeMetrics Json               @default("{}")
-  goal           String             @default("")
+  outcomeMetrics Json                @default("{}")
+  goal           String              @default("")
   goalEmbedding  Bytes?
   templateId     String?
   template       TrajectoryTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  createdAt      DateTime           @default(now())
+  createdAt      DateTime            @default(now())
   completedAt    DateTime?
 
   @@index([outcome, createdAt])

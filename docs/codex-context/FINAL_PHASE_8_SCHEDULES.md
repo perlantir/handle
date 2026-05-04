@@ -9,7 +9,7 @@ GOAL
 
 Add scheduled / recurring tasks to Handle. Users can create
 schedules like "every Monday at 9am, summarize my unread Gmail."
-Schedules run via BullMQ (Redis-backed). UI matches Screen 08.
+Schedules run via Temporal after the Phase 6.5 stack update. UI matches Screen 08.
 
 Phase 8 ships in 1-2 weeks.
 
@@ -18,7 +18,7 @@ SCOPE
 ==================================================
 
 In scope:
-- BullMQ setup with Redis
+- Temporal schedule setup
 - Schedule entity in DB
 - Cron-based scheduling
 - Schedule lifecycle (create, pause, resume, delete)
@@ -28,7 +28,7 @@ In scope:
 - Notifications on completion (UI banner + optional email)
 
 Out of scope:
-- Distributed BullMQ (single Redis only)
+- Production-grade Temporal deployment (self-hosted dev only)
 - Schedule conflict detection
 - Email notifications (UI only for Phase 8; email in Phase 11)
 
@@ -62,7 +62,7 @@ model Schedule {
   timezone       String     @default("UTC")
   skillId        String?    // Optional skill to use
   isEnabled      Boolean    @default(true)
-  bullJobId      String?    // BullMQ repeatable job ID
+  workflowId     String?    // Temporal schedule/workflow ID
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   lastRunAt      DateTime?
@@ -337,7 +337,7 @@ Phase 11 polish adds: email notifications, push notifications.
 TESTS
 ==================================================
 
-1. createSchedule registers BullMQ repeatable job
+1. createSchedule registers Temporal schedule
 2. pauseSchedule removes repeatable job
 3. resumeSchedule re-adds it
 4. deleteSchedule cleans up
@@ -397,7 +397,7 @@ IMPLEMENTATION ORDER
 ==================================================
 
 1. Schedule schema
-2. Redis + BullMQ setup
+2. Temporal setup
 3. Worker process
 4. Schedule lifecycle (create/pause/resume/delete)
 5. Schedule API

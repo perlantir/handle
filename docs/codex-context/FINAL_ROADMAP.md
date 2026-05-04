@@ -213,7 +213,7 @@ PHASE 8: SCHEDULES
 ==================================================
 
 Scope:
-- BullMQ setup (Redis)
+- Temporal self-hosted setup
 - Schedule entity in database
 - Cron-based scheduling
 - Schedule UI (Screen 08 from design)
@@ -488,7 +488,7 @@ Do not relitigate:
 11. Zep for memory (not Mem0, not custom)
 12. Nango for OAuth orchestration (not Pipedream, not custom)
 13. Clerk for auth (not Auth.js, not custom)
-14. BullMQ for jobs (not Bree, Agenda, or custom)
+14. Temporal for jobs and schedules (not BullMQ, Bree, Agenda, or custom)
 15. OpenAI Whisper + OpenAI TTS for voice (not ElevenLabs,
     not Deepgram)
 16. Cloudflare R2 for file storage (not S3, not local disk for
