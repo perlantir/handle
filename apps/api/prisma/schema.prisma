@@ -104,6 +104,83 @@ enum MemoryScope {
   NONE
 }
 
+enum IntegrationConnectorId {
+  GMAIL
+  SLACK
+  NOTION
+  GOOGLE_DRIVE
+  GITHUB
+  GOOGLE_CALENDAR
+  CLOUDFLARE
+  VERCEL
+  LINEAR
+  GOOGLE_SHEETS
+  GOOGLE_DOCS
+  ZAPIER
+  OBSIDIAN
+}
+
+enum IntegrationConnectionStatus {
+  DISCONNECTED
+  CONNECTING
+  CONNECTED
+  EXPIRED
+  REVOKED
+  RATE_LIMITED
+  ERROR
+}
+
+model NangoSettings {
+  id               String   @id @default("global")
+  configured       Boolean  @default(false)
+  host             String   @default("https://api.nango.dev")
+  lastErrorCode    String?
+  lastErrorMessage String?
+  lastValidatedAt  DateTime?
+  secretKeyRef     String?
+  updatedAt        DateTime @default(now()) @updatedAt
+}
+
+model IntegrationConnectorSettings {
+  id                    String                 @id @default(cuid())
+  connectorId            IntegrationConnectorId @unique
+  lastErrorCode          String?
+  lastErrorMessage       String?
+  lastValidatedAt        DateTime?
+  nangoIntegrationId     String?
+  nangoProviderId        String?
+  oauthClientId          String?
+  oauthClientSecretRef   String?
+  redirectUri            String?
+  requiredScopes         Json                   @default("[]")
+  setupStatus            String                 @default("missing_credentials")
+  updatedAt              DateTime               @default(now()) @updatedAt
+}
+
+model Integration {
+  id                String                      @id @default(cuid())
+  userId            String
+  connectorId       IntegrationConnectorId
+  nangoIntegrationId String?
+  nangoConnectionId String?
+  accountAlias      String
+  accountLabel      String?
+  status            IntegrationConnectionStatus @default(DISCONNECTED)
+  scopes            Json                        @default("[]")
+  defaultAccount    Boolean                     @default(false)
+  memoryScope       MemoryScope                 @default(NONE)
+  lastUsedAt        DateTime?
+  lastHealthCheckAt DateTime?
+  lastErrorCode     String?
+  lastErrorMessage  String?
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+
+  @@index([userId, connectorId])
+  @@index([userId, status])
+  @@unique([userId, connectorId, accountAlias])
+}
+
 model Conversation {
   id        String     @id @default(cuid())
   projectId String
