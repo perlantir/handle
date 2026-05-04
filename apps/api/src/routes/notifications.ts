@@ -6,7 +6,9 @@ import { asyncHandler } from "../lib/http";
 import { prisma } from "../lib/prisma";
 import {
   ensureNotificationSettings,
+  serializeNotificationChannelStatuses,
   serializeNotificationSettings,
+  testNotificationChannel,
 } from "../notifications/notificationService";
 
 const notificationEventSchema = z.enum([
@@ -32,6 +34,13 @@ const updateProjectNotificationsSchema = updateNotificationsSchema.extend({
   inheritGlobal: z.boolean().optional(),
 });
 
+const testNotificationSchema = z
+  .object({
+    channel: z.enum(["EMAIL", "SLACK", "WEBHOOK"]),
+    recipient: z.string().min(1),
+  })
+  .strict();
+
 export const notificationsRouter = Router();
 
 function compactData<T extends Record<string, unknown>>(value: T) {
@@ -50,6 +59,11 @@ notificationsRouter.get(
       ensureNotificationSettings(prisma),
       loadTemporalSettings(prisma),
     ]);
+    const deliveries = await prisma.notificationDelivery.findMany({
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+      where: { userId },
+    });
     const temporalHealth = await checkTemporalConnection(temporalSettings);
 
     await prisma.temporalSettings.update({
@@ -63,6 +77,13 @@ notificationsRouter.get(
     }).catch(() => undefined);
 
     return res.json({
+      channelStatus: serializeNotificationChannelStatuses({
+        deliveries,
+        settings: notifications,
+      }),
+      failureBanner: deliveries.some((delivery) => delivery.status === "FAILED")
+        ? "One or more notification deliveries failed. Review the channel cards below."
+        : null,
       notifications: serializeNotificationSettings(notifications),
       temporal: {
         address: temporalSettings.address,
@@ -72,6 +93,30 @@ notificationsRouter.get(
         taskQueue: temporalSettings.taskQueue,
       },
     });
+  }),
+);
+
+notificationsRouter.post(
+  "/settings/notifications/test",
+  asyncHandler(async (req, res) => {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const parsed = testNotificationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ error: "Invalid request", details: parsed.error.flatten() });
+    }
+
+    await ensureNotificationSettings(prisma);
+    const result = await testNotificationChannel({
+      channel: parsed.data.channel,
+      recipient: parsed.data.recipient,
+      userId,
+    });
+
+    return res.status(result.ok ? 200 : 400).json(result);
   }),
 );
 

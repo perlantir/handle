@@ -1,11 +1,13 @@
 import type {
   NotificationChannel,
+  NotificationChannelStatusSummary,
   NotificationEventType,
   NotificationSettingsSummary,
 } from "@handle/shared";
 import type { Prisma } from "@prisma/client";
 import { createDefaultIntegrationToolRuntime } from "../integrations/toolRuntime";
 import { appendActionLog } from "../lib/actionLog";
+import { appendAuditEvent } from "../lib/auditLog";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
@@ -42,6 +44,7 @@ export interface NotificationServiceStore {
     update(args: unknown): Promise<unknown>;
   };
   notificationSettings?: {
+    update?(args: unknown): Promise<NotificationSettingsRow>;
     upsert(args: unknown): Promise<NotificationSettingsRow>;
   };
   projectNotificationSettings?: {
@@ -52,14 +55,31 @@ export interface NotificationServiceStore {
 
 interface NotificationSettingsRow {
   emailEnabled: boolean;
+  emailLastTestError?: string | null;
+  emailLastTestStatus?: string | null;
+  emailLastTestedAt?: Date | string | null;
   emailRecipient: string | null;
   eventTypes: unknown;
   id: string;
   slackChannelId: string | null;
   slackEnabled: boolean;
+  slackLastTestError?: string | null;
+  slackLastTestStatus?: string | null;
+  slackLastTestedAt?: Date | string | null;
   updatedAt?: Date | string;
   webhookEnabled: boolean;
+  webhookLastTestError?: string | null;
+  webhookLastTestStatus?: string | null;
+  webhookLastTestedAt?: Date | string | null;
   webhookUrl: string | null;
+}
+
+interface NotificationDeliveryRow {
+  channel: NotificationChannel;
+  errorMessage?: string | null;
+  status: string;
+  dispatchedAt?: Date | string | null;
+  updatedAt?: Date | string | null;
 }
 
 interface ProjectNotificationSettingsRow {
@@ -126,6 +146,35 @@ export function serializeNotificationSettings(
     webhookEnabled: row.webhookEnabled,
     webhookUrl: row.webhookUrl,
   };
+}
+
+export function serializeNotificationChannelStatuses({
+  deliveries = [],
+  settings,
+}: {
+  deliveries?: NotificationDeliveryRow[];
+  settings: NotificationSettingsRow;
+}): NotificationChannelStatusSummary[] {
+  const latestDeliveryByChannel = new Map<NotificationChannel, NotificationDeliveryRow>();
+  for (const delivery of deliveries) {
+    if (!latestDeliveryByChannel.has(delivery.channel)) {
+      latestDeliveryByChannel.set(delivery.channel, delivery);
+    }
+  }
+
+  return (["EMAIL", "SLACK", "WEBHOOK"] as NotificationChannel[]).map((channel) => {
+    const delivery = latestDeliveryByChannel.get(channel);
+    const test = testFields(settings, channel);
+    return {
+      channel,
+      lastDeliveryAt: iso(delivery?.dispatchedAt ?? delivery?.updatedAt ?? null),
+      lastDeliveryError: delivery?.errorMessage ?? null,
+      lastDeliveryStatus: (delivery?.status as NotificationChannelStatusSummary["lastDeliveryStatus"]) ?? null,
+      lastTestAt: iso(test.testedAt),
+      lastTestError: test.error,
+      lastTestStatus: test.status,
+    };
+  });
 }
 
 function effectiveSettings(
@@ -243,6 +292,154 @@ async function deliverNotification({
   }
 }
 
+function testFields(row: NotificationSettingsRow, channel: NotificationChannel) {
+  if (channel === "EMAIL") {
+    return {
+      error: row.emailLastTestError ?? null,
+      status: normalizeTestStatus(row.emailLastTestStatus),
+      testedAt: row.emailLastTestedAt ?? null,
+    };
+  }
+  if (channel === "SLACK") {
+    return {
+      error: row.slackLastTestError ?? null,
+      status: normalizeTestStatus(row.slackLastTestStatus),
+      testedAt: row.slackLastTestedAt ?? null,
+    };
+  }
+  return {
+    error: row.webhookLastTestError ?? null,
+    status: normalizeTestStatus(row.webhookLastTestStatus),
+    testedAt: row.webhookLastTestedAt ?? null,
+  };
+}
+
+function normalizeTestStatus(value: string | null | undefined) {
+  return value === "SENT" || value === "FAILED" ? value : null;
+}
+
+function iso(value: Date | string | null | undefined) {
+  if (!value) return null;
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function validateRecipient(channel: NotificationChannel, recipient: string) {
+  const trimmed = recipient.trim();
+  if (!trimmed) throw new Error("Target is required.");
+  if (channel === "EMAIL" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    throw new Error("Enter a valid email address.");
+  }
+  if (channel === "SLACK" && !/^(#[A-Za-z0-9._-]+|[CGD][A-Z0-9]{8,})$/.test(trimmed)) {
+    throw new Error("Enter a Slack channel name like #updates or a Slack channel ID.");
+  }
+  if (channel === "WEBHOOK") {
+    try {
+      const url = new URL(trimmed);
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error("Webhook URL must use http or https.");
+      }
+    } catch {
+      throw new Error("Enter a valid webhook URL.");
+    }
+  }
+  return trimmed;
+}
+
+function testUpdateData(channel: NotificationChannel, status: "FAILED" | "SENT", error: string | null) {
+  const now = new Date();
+  if (channel === "EMAIL") {
+    return {
+      emailLastTestError: error,
+      emailLastTestStatus: status,
+      emailLastTestedAt: now,
+    };
+  }
+  if (channel === "SLACK") {
+    return {
+      slackLastTestError: error,
+      slackLastTestStatus: status,
+      slackLastTestedAt: now,
+    };
+  }
+  return {
+    webhookLastTestError: error,
+    webhookLastTestStatus: status,
+    webhookLastTestedAt: now,
+  };
+}
+
+export async function testNotificationChannel({
+  channel,
+  recipient,
+  store = prisma,
+  userId,
+}: {
+  channel: NotificationChannel;
+  recipient: string;
+  store?: NotificationServiceStore;
+  userId: string;
+}) {
+  if (!store.notificationSettings?.update) {
+    throw new Error("Notification settings store is unavailable.");
+  }
+
+  let target = recipient.trim();
+  const payload = {
+    eventType: "TASK_COMPLETED",
+    goal: "Handle notification test",
+    projectId: null,
+    projectName: null,
+    status: "TEST",
+    text: "Handle notification test - if you see this, the channel is connected.",
+  };
+
+  try {
+    target = validateRecipient(channel, recipient);
+    await deliverNotification({
+      channel,
+      payload,
+      recipient: target,
+      userId,
+    });
+    const settings = await store.notificationSettings.update({
+      data: testUpdateData(channel, "SENT", null),
+      where: { id: GLOBAL_SETTINGS_ID },
+    });
+    await appendAuditEvent({
+      channel,
+      event: "notification_sent",
+      status: "SENT",
+      target: redactSecrets(target),
+      taskId: "notification-test",
+      test: true,
+    }).catch(() => undefined);
+    return {
+      ok: true,
+      status: serializeNotificationChannelStatuses({ settings }).find((item) => item.channel === channel),
+    };
+  } catch (err) {
+    const message = redactSecrets(err instanceof Error ? err.message : String(err));
+    const settings = await store.notificationSettings.update({
+      data: testUpdateData(channel, "FAILED", message),
+      where: { id: GLOBAL_SETTINGS_ID },
+    });
+    await appendAuditEvent({
+      channel,
+      errorClass: err instanceof Error ? err.name : "Error",
+      event: "notification_failed",
+      status: "FAILED",
+      target: redactSecrets(target),
+      taskId: "notification-test",
+      test: true,
+    }).catch(() => undefined);
+    return {
+      error: message,
+      ok: false,
+      status: serializeNotificationChannelStatuses({ settings }).find((item) => item.channel === channel),
+    };
+  }
+}
+
 export async function notifyTaskEvent(
   input: NotifyTaskEventInput,
   store: NotificationServiceStore = prisma,
@@ -329,6 +526,14 @@ export async function notifyTaskEvent(
         taskId: input.agentRunId,
         timestamp: new Date().toISOString(),
       });
+      await appendAuditEvent({
+        channel: channel.channel,
+        event: "notification_sent",
+        eventType: input.eventType,
+        status: "SENT",
+        target: channel.channel === "WEBHOOK" ? redactSecrets(channel.recipient) : channel.channel,
+        taskId: input.agentRunId,
+      }).catch(() => undefined);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn(
@@ -347,6 +552,30 @@ export async function notifyTaskEvent(
         },
         where: { id: delivery.id },
       });
+      await appendActionLog({
+        conversationId: run.conversationId,
+        description: `Failed ${channel.channel.toLowerCase()} notification for ${input.eventType}`,
+        metadata: {
+          channel: channel.channel,
+          errorClass: err instanceof Error ? err.name : "Error",
+          eventType: input.eventType,
+        },
+        outcomeType: "integration_action",
+        projectId: projectId ?? "unknown",
+        reversible: false,
+        target: channel.channel,
+        taskId: input.agentRunId,
+        timestamp: new Date().toISOString(),
+      }).catch(() => undefined);
+      await appendAuditEvent({
+        channel: channel.channel,
+        errorClass: err instanceof Error ? err.name : "Error",
+        event: "notification_failed",
+        eventType: input.eventType,
+        status: "FAILED",
+        target: channel.channel === "WEBHOOK" ? redactSecrets(channel.recipient) : channel.channel,
+        taskId: input.agentRunId,
+      }).catch(() => undefined);
     }
   }
 

@@ -7,6 +7,8 @@ import type {
   ConversationSummary,
   CreateTaskResponse,
   FailurePatternSummary,
+  NotificationChannel,
+  NotificationChannelStatusSummary,
   MemoryFactSummary,
   NotificationEventType,
   NotificationSettingsSummary,
@@ -564,6 +566,8 @@ export async function listAsyncTasks({
 export async function getNotificationSettings({
   token,
 }: AuthenticatedRequestInput): Promise<{
+  channelStatus: NotificationChannelStatusSummary[];
+  failureBanner?: string | null;
   notifications: NotificationSettingsSummary;
   temporal: TemporalSettingsSummary;
 }> {
@@ -577,6 +581,8 @@ export async function getNotificationSettings({
   }
 
   return response.json() as Promise<{
+    channelStatus: NotificationChannelStatusSummary[];
+    failureBanner?: string | null;
     notifications: NotificationSettingsSummary;
     temporal: TemporalSettingsSummary;
   }>;
@@ -612,4 +618,43 @@ export async function updateNotificationSettings({
   const body = (await response.json()) as { notifications?: NotificationSettingsSummary };
   if (!body.notifications) throw new Error('Notification save returned no settings');
   return body.notifications;
+}
+
+export async function testNotificationChannel({
+  channel,
+  recipient,
+  token,
+}: AuthenticatedRequestInput & {
+  channel: NotificationChannel;
+  recipient: string;
+}): Promise<{
+  error?: string;
+  ok: boolean;
+  status?: NotificationChannelStatusSummary;
+}> {
+  const response = await fetch(`${apiBaseUrl}/api/settings/notifications/test`, {
+    body: JSON.stringify({ channel, recipient }),
+    headers: authHeaders(token),
+    method: 'POST',
+  });
+
+  const body = (await response.json().catch(() => null)) as {
+    error?: string;
+    ok?: boolean;
+    status?: NotificationChannelStatusSummary;
+  } | null;
+  if (!response.ok) {
+    if (body?.ok === false) {
+      return {
+        error: body.error ?? 'Notification test failed',
+        ok: false,
+        ...(body.status ? { status: body.status } : {}),
+      };
+    }
+    throw new Error(body?.error ?? 'Notification test failed');
+  }
+  return {
+    ok: Boolean(body?.ok),
+    ...(body?.status ? { status: body.status } : {}),
+  };
 }

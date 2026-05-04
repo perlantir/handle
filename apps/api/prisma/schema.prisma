@@ -157,15 +157,24 @@ model TemporalSettings {
 }
 
 model NotificationSettings {
-  id             String   @id @default("global")
-  emailEnabled   Boolean  @default(false)
-  emailRecipient String?
-  slackEnabled   Boolean  @default(false)
-  slackChannelId String?
-  webhookEnabled Boolean  @default(false)
-  webhookUrl     String?
-  eventTypes     Json     @default("[\"TASK_COMPLETED\",\"TASK_FAILED\",\"APPROVAL_NEEDED\",\"CRITIC_FLAGGED\"]")
-  updatedAt      DateTime @default(now()) @updatedAt
+  id                    String    @id @default("global")
+  emailEnabled          Boolean   @default(false)
+  emailRecipient        String?
+  emailLastTestStatus   String?
+  emailLastTestedAt     DateTime?
+  emailLastTestError    String?
+  slackEnabled          Boolean   @default(false)
+  slackChannelId        String?
+  slackLastTestStatus   String?
+  slackLastTestedAt     DateTime?
+  slackLastTestError    String?
+  webhookEnabled        Boolean   @default(false)
+  webhookUrl            String?
+  webhookLastTestStatus String?
+  webhookLastTestedAt   DateTime?
+  webhookLastTestError  String?
+  eventTypes            Json      @default("[\"TASK_COMPLETED\",\"TASK_FAILED\",\"APPROVAL_NEEDED\",\"CRITIC_FLAGGED\"]")
+  updatedAt             DateTime  @default(now()) @updatedAt
 }
 
 model ProjectNotificationSettings {

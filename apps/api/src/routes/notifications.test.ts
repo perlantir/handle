@@ -21,6 +21,10 @@ vi.mock("../temporal/client", () => ({
   })),
 }));
 
+vi.mock("../lib/auditLog", () => ({
+  appendAuditEvent: vi.fn(async () => undefined),
+}));
+
 const notificationSettings = {
   emailEnabled: false,
   emailRecipient: null,
@@ -38,6 +42,9 @@ vi.mock("../lib/prisma", () => ({
     notificationSettings: {
       update: vi.fn(async (args) => ({ ...notificationSettings, ...args.data })),
       upsert: vi.fn(async () => notificationSettings),
+    },
+    notificationDelivery: {
+      findMany: vi.fn(async () => []),
     },
     project: {
       findUnique: vi.fn(async () => ({ id: "project-1" })),
@@ -103,5 +110,21 @@ describe("notifications routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.notifications.slackEnabled).toBe(true);
+  });
+
+  it("validates notification test targets and stores failed test status", async () => {
+    const response = await request(app())
+      .post("/api/settings/notifications/test")
+      .send({
+        channel: "WEBHOOK",
+        recipient: "not-a-url",
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.ok).toBe(false);
+    expect(response.body.status).toMatchObject({
+      channel: "WEBHOOK",
+      lastTestStatus: "FAILED",
+    });
   });
 });

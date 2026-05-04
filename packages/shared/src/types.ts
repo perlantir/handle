@@ -594,6 +594,16 @@ export interface NotificationSettingsSummary {
   updatedAt?: string | null;
 }
 
+export interface NotificationChannelStatusSummary {
+  channel: NotificationChannel;
+  lastDeliveryAt?: string | null;
+  lastDeliveryError?: string | null;
+  lastDeliveryStatus?: NotificationStatus | null;
+  lastTestAt?: string | null;
+  lastTestError?: string | null;
+  lastTestStatus?: 'FAILED' | 'SENT' | null;
+}
+
 export interface ProjectNotificationSettingsSummary {
   projectId: string;
   inheritGlobal: boolean;
@@ -623,6 +633,7 @@ export interface AsyncTaskSummary {
   completedAt?: string | null;
   lastHeartbeatAt?: string | null;
   lastNotifiedAt?: string | null;
+  notificationFailed?: boolean;
 }
 
 export interface NotificationDeliverySummary {

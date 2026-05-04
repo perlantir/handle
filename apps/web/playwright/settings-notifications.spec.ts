@@ -25,6 +25,24 @@ async function mockSettingsApi(page: Page) {
     webhookEnabled: false,
     webhookUrl: null,
   };
+  const channelStatus = [
+    {
+      channel: "EMAIL",
+      lastDeliveryStatus: null,
+      lastTestStatus: null,
+    },
+    {
+      channel: "SLACK",
+      lastDeliveryError: "channel_not_found",
+      lastDeliveryStatus: "FAILED",
+      lastTestStatus: "FAILED",
+    },
+    {
+      channel: "WEBHOOK",
+      lastDeliveryStatus: "SENT",
+      lastTestStatus: null,
+    },
+  ];
 
   await page.route("**/api/projects**", async (route) => {
     await jsonRoute(route, 200, { projects: [] });
@@ -58,6 +76,8 @@ async function mockSettingsApi(page: Page) {
 
     if (path === "/api/settings/notifications" && method === "GET") {
       await jsonRoute(route, 200, {
+        channelStatus,
+        failureBanner: "One or more notification deliveries failed. Review the channel cards below.",
         notifications,
         temporal: {
           address: "127.0.0.1:7233",
@@ -69,6 +89,21 @@ async function mockSettingsApi(page: Page) {
           },
           namespace: "default",
           taskQueue: "handle-agent-runs",
+        },
+      });
+      return;
+    }
+
+    if (path === "/api/settings/notifications/test" && method === "POST") {
+      const body = await requestBody(route);
+      requests.push(body);
+      await jsonRoute(route, 200, {
+        ok: true,
+        status: {
+          channel: body.channel,
+          lastDeliveryStatus: "SENT",
+          lastTestAt: "2026-05-04T00:05:00.000Z",
+          lastTestStatus: "SENT",
         },
       });
       return;
@@ -91,7 +126,7 @@ async function mockSettingsApi(page: Page) {
 async function openSettings(page: Page) {
   await page.goto("/sign-in");
   await page.getByRole("link", { name: "Continue as smoke user" }).click();
-  await page.getByRole("link", { name: "Settings" }).click();
+  await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 }
 
@@ -100,14 +135,18 @@ test("Settings Notifications renders Temporal status and saves opt-in channels",
   await openSettings(page);
 
   await page.getByRole("button", { name: "Notifications" }).click();
+  await expect(page.getByRole("button", { name: "Notifications" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("Temporal worker")).toBeVisible();
   await expect(page.getByText("online")).toBeVisible();
+  await expect(page.getByText("One or more notification deliveries failed")).toBeVisible();
 
   await page.getByLabel("Webhook enabled").click();
   await page.getByLabel("Webhook notification URL").fill("https://example.com/handle-webhook");
+  await page.getByText("Test connection").nth(2).click();
+  await expect(page.getByText("Test successful - message delivered")).toBeVisible();
   await page.getByLabel("Email enabled").click();
   await page.getByLabel("Email notification recipient").fill("user@example.com");
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
 
   await expect(page.getByText("Notifications saved")).toBeVisible();
   expect(requests.at(-1)).toMatchObject({
