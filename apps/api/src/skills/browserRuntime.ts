@@ -17,7 +17,7 @@ export function runtimeTraceForMode({
   if (!mode || mode === "standard" || mode === "wide_research") {
     return { artifacts: [], steps: [] };
   }
-  const allowedModes = Array.isArray(runtimePolicy.browserModes) ? runtimePolicy.browserModes.map(String) : ["server_browser"];
+  const allowedModes = Array.isArray(runtimePolicy.browserModes) ? runtimePolicy.browserModes.map((item) => String(item).toLowerCase()) : ["server_browser"];
   if (mode === "local_browser" && !allowedModes.includes("local_browser")) {
     throw new Error("Local browser mode is not allowed by this Skill runtime policy");
   }
