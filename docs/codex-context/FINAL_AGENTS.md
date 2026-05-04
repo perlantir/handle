@@ -641,6 +641,22 @@ Use clear language: "I am blocked because X. The options I see
 are A and B. Which do you prefer?"
 
 ==================================================
+RULE 35: Live smoke means real browser clicks, not API testing in isolation.
+==================================================
+
+For every UI feature, "live smoke" before handoff means opening a browser at 127.0.0.1:3000, navigating to the feature, and clicking through the actual user flow end-to-end. Direct API curl tests, Playwright headless smokes, programmatic tool calls, and unit tests do NOT count as live smoke for UI features. They are necessary but insufficient.
+Required for live smoke:
+
+Open browser to 127.0.0.1:3000
+Navigate to the feature using the same actions a user would (sidebar clicks, button clicks, form submissions)
+Verify each step's outcome in the browser, including any DevTools console output
+Document the walkthrough step-by-step in handoff: "Clicked X, saw Y, then clicked Z..."
+
+Background: Phase 5 F-014 (memory_forget) and Phase 6.0 F-100 (Settings integrations Connect button) both passed automated smokes but failed real UI flow. The gap is consistently: APIs work in isolation, but UI handlers wire URLs/state incorrectly. Live smoke catches this.
+If a UI feature requires user input that Codex can't provide (real OAuth credentials, pasting Keychain data, etc.), document the walkthrough up to the point Codex can verify, then explicitly hand off the user-only steps.
+
+
+==================================================
 END OF STANDING RULES
 ==================================================
 
