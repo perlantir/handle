@@ -458,7 +458,7 @@ try {
   const taskResponsePromise = page.waitForResponse((response) => {
     const url = new URL(response.url());
     return (
-      url.origin === API_URL &&
+      (url.origin === API_URL || url.origin === WEB_URL) &&
       /^\/api\/conversations\/[^/]+\/messages$/.test(url.pathname) &&
       response.request().method() === "POST"
     );
