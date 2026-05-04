@@ -68,20 +68,20 @@ export interface ParsedSkillMarkdownSection {
 }
 
 export interface SkillTraceStepInput {
-  connectorId?: string;
-  metadata?: Record<string, unknown>;
+  connectorId?: string | undefined;
+  metadata?: Record<string, unknown> | undefined;
   safeSummary: string;
   status?: "completed" | "failed" | "running" | "waiting";
   title: string;
-  toolName?: string;
+  toolName?: string | undefined;
   type: SkillRunStepType;
 }
 
 export interface SkillArtifactInput {
-  citations?: Array<Record<string, unknown>>;
-  inlineContent?: string;
+  citations?: Array<Record<string, unknown>> | undefined;
+  inlineContent?: string | undefined;
   kind: SkillArtifactKind;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | undefined;
   mimeType: string;
   title: string;
 }
