@@ -160,6 +160,7 @@ export type ActionOutcomeType =
   | 'file_created'
   | 'file_deleted'
   | 'file_modified'
+  | 'integration_action'
   | 'memory_forgotten'
   | 'memory_saved'
   | 'shell_command_executed';
@@ -208,6 +209,7 @@ export interface ApprovalPayload {
   integration?: string;
   action?: string;
   target?: string;
+  agentReason?: string;
   reason: string;
 }
 

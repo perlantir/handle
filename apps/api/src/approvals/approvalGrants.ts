@@ -24,6 +24,10 @@ export function approvalGrantKey(request: ApprovalPayload) {
       return request.action && request.target
         ? `browser:${request.action}:${request.target}`
         : null;
+    case 'destructive_integration_action':
+      return request.integration && request.action && request.target
+        ? `integration:${request.integration}:${request.action}:${request.target}`
+        : null;
     default:
       return null;
   }

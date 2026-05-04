@@ -10,6 +10,7 @@ export type ActionOutcomeType =
   | "file_created"
   | "file_deleted"
   | "file_modified"
+  | "integration_action"
   | "memory_forgotten"
   | "memory_saved"
   | "shell_command_executed";

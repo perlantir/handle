@@ -17,6 +17,7 @@ const outcomeOptions: Array<{ label: string; value: ActionOutcomeType | "" }> = 
   { label: "File deleted", value: "file_deleted" },
   { label: "Shell command", value: "shell_command_executed" },
   { label: "Browser navigated", value: "browser_navigated" },
+  { label: "Integration action", value: "integration_action" },
   { label: "Memory saved", value: "memory_saved" },
   { label: "Memory forgotten", value: "memory_forgotten" },
 ];

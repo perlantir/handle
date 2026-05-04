@@ -87,7 +87,8 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
   const isHostAffectingApproval =
     approval.request.type === "file_delete" ||
     approval.request.type === "file_write_outside_workspace" ||
-    approval.request.type === "shell_exec";
+    approval.request.type === "shell_exec" ||
+    approval.request.type === "destructive_integration_action";
   const isRiskyBrowserAction = approval.request.type === "risky_browser_action";
   const title = approvalTitle(approval);
   const approvalDisabled = isSubmitting || (isActualChromeApproval && !understandsActualChromeRisk);
@@ -130,6 +131,11 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
         {(isRiskyBrowserAction || title !== approval.request.reason) && (
           <p className="mt-2 text-[13px] leading-[19px] text-text-secondary">
             {approval.request.reason}
+          </p>
+        )}
+        {approval.request.agentReason && (
+          <p className="mt-3 rounded-[10px] border border-border-subtle bg-bg-canvas px-3 py-2 text-[12px] leading-[18px] text-text-secondary">
+            Agent reason: {approval.request.agentReason}
           </p>
         )}
       </div>
@@ -215,7 +221,7 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
           </>
         ) : (
           <span className="text-[12px] text-text-secondary">
-            Browser approvals apply to this action only.
+            This approval applies to this action only.
           </span>
         )}
         <span className="flex-1" />

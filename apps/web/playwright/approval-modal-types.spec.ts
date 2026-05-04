@@ -181,4 +181,33 @@ test.describe("Approval modal types", () => {
       .poll(() => responses)
       .toContainEqual({ approvalId: "approval-type-test", decision: "approved" });
   });
+
+  test("renders destructive integration approval agent reason", async ({ page }) => {
+    const { responses } = await mockWorkspaceApis(page, "task-integration-write", {
+      action: "create issue",
+      agentReason: "Track the audit follow-up in GitHub.",
+      integration: "GitHub",
+      reason: "GitHub wants to create issue perlantir/handle.",
+      target: "perlantir/handle",
+      type: "destructive_integration_action",
+    });
+
+    await page.goto("/tasks/task-integration-write");
+
+    await expect(
+      page.getByRole("heading", {
+        name: "GitHub wants to create issue perlantir/handle.",
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Agent reason: Track the audit follow-up in GitHub."),
+    ).toBeVisible();
+    await expect(page.getByText("Integration · write")).toBeVisible();
+
+    await page.getByLabel("Always approve this command or edit for this project").click();
+    await page.getByRole("button", { name: "Approve" }).click();
+    await expect
+      .poll(() => responses)
+      .toContainEqual({ alwaysApprove: true, approvalId: "approval-type-test", decision: "approved" });
+  });
 });

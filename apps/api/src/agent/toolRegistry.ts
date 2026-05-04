@@ -6,6 +6,7 @@ import type { E2BSandboxLike, ExecutionBackend } from '../execution/types';
 import type { IntegrationToolRuntime } from '../integrations/toolRuntime';
 import type { MemoryProjectContext } from '../memory/sessionMemory';
 import type { TrajectoryStepRecord } from '../memory/trajectoryMemory';
+import type { awaitApproval } from '../approvals/approvalWaiter';
 
 export type ApprovalRequirement = boolean | ((input: unknown, context: ToolExecutionContext) => boolean | Promise<boolean>);
 
@@ -18,7 +19,9 @@ export interface ToolExecutionContext {
   memoryContext?: string;
   memoryProject?: MemoryProjectContext | null;
   projectId?: string;
+  projectPermissionMode?: 'ASK' | 'FULL_ACCESS' | 'PLAN' | string | null;
   recordTrajectoryStep?: (step: TrajectoryStepRecord) => Promise<void>;
+  requestApproval?: typeof awaitApproval;
   sandbox: E2BSandboxLike;
   sharedMemoryNamespaceId?: string;
   trustedDomains?: string[];

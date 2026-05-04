@@ -863,6 +863,9 @@ export function createAgentRunner({
         ...(memoryContext ? { memoryContext } : {}),
         ...(memoryProject ? { memoryProject } : {}),
         ...(project?.id ? { projectId: project.id } : {}),
+        ...(project?.permissionMode
+          ? { projectPermissionMode: project.permissionMode }
+          : {}),
         recordTrajectoryStep: async (step: TrajectoryStepRecord) => {
           await recordTrajectoryStep({ agentRunId: taskId, step, store });
           trajectoryStepCount += 1;
