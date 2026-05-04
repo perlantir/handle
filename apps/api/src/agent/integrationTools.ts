@@ -14,7 +14,7 @@ import { redactSecrets } from "../lib/redact";
 import type { ToolDefinition, ToolExecutionContext } from "./toolRegistry";
 import { displayToolName } from "./toolRegistry";
 
-type Method = "GET" | "PATCH" | "POST";
+type Method = "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
 
 interface ProviderRequestSpec<T extends z.AnyZodObject> {
   connectorId: IntegrationConnectorId;
@@ -229,6 +229,156 @@ const githubCreatePullRequestInput = z.object({
   title: z.string().min(1).max(500),
 });
 
+const calendarListInput = z.object({ accountAlias });
+const calendarEventsInput = z.object({
+  accountAlias,
+  calendarId: z.string().min(1).nullable().optional(),
+  maxResults,
+  query: z.string().min(1).nullable().optional(),
+  timeMax: z.string().datetime().nullable().optional(),
+  timeMin: z.string().datetime().nullable().optional(),
+});
+const calendarEventInput = z.object({
+  accountAlias,
+  calendarId: z.string().min(1),
+  eventId: z.string().min(1),
+});
+const calendarCreateEventInput = z.object({
+  accountAlias,
+  agentReason,
+  attendees: z.array(z.string().email()).max(20).nullable().optional(),
+  calendarId: z.string().min(1).nullable().optional(),
+  description: z.string().max(20_000).nullable().optional(),
+  end: z.string().datetime(),
+  location: z.string().max(500).nullable().optional(),
+  start: z.string().datetime(),
+  title: z.string().min(1).max(500),
+});
+const calendarUpdateEventInput = z.object({
+  accountAlias,
+  agentReason,
+  calendarId: z.string().min(1),
+  eventId: z.string().min(1),
+  patch: z.record(z.unknown()),
+});
+const calendarDeleteEventInput = z.object({
+  accountAlias,
+  agentReason,
+  calendarId: z.string().min(1),
+  eventId: z.string().min(1),
+});
+
+const cloudflareAccountInput = z.object({ accountAlias });
+const cloudflareDnsInput = z.object({
+  accountAlias,
+  zoneId: z.string().min(1),
+});
+const cloudflarePagesInput = z.object({
+  accountAlias,
+  accountId: z.string().min(1),
+  projectName: z.string().min(1),
+});
+const cloudflareUpdateDnsInput = z.object({
+  accountAlias,
+  agentReason,
+  patch: z.record(z.unknown()),
+  recordId: z.string().min(1),
+  zoneId: z.string().min(1),
+});
+const cloudflareCreateDnsInput = z.object({
+  accountAlias,
+  agentReason,
+  record: z.record(z.unknown()),
+  zoneId: z.string().min(1),
+});
+const cloudflarePurgeCacheInput = z.object({
+  accountAlias,
+  agentReason,
+  files: z.array(z.string().url()).max(100).nullable().optional(),
+  purgeEverything: z.boolean().nullable().optional(),
+  zoneId: z.string().min(1),
+});
+const cloudflareDeployPagesInput = z.object({
+  accountAlias,
+  accountId: z.string().min(1),
+  agentReason,
+  projectName: z.string().min(1),
+  source: z.record(z.unknown()).nullable().optional(),
+});
+
+const vercelProjectsInput = z.object({
+  accountAlias,
+  teamId: z.string().min(1).nullable().optional(),
+});
+const vercelDeploymentsInput = z.object({
+  accountAlias,
+  projectId: z.string().min(1).nullable().optional(),
+  teamId: z.string().min(1).nullable().optional(),
+});
+const vercelDeploymentLogsInput = z.object({
+  accountAlias,
+  deploymentId: z.string().min(1),
+});
+const vercelProjectInput = z.object({
+  accountAlias,
+  projectIdOrName: z.string().min(1),
+  teamId: z.string().min(1).nullable().optional(),
+});
+const vercelCreateDeploymentInput = z.object({
+  accountAlias,
+  agentReason,
+  projectIdOrName: z.string().min(1),
+  ref: z.string().min(1).nullable().optional(),
+  teamId: z.string().min(1).nullable().optional(),
+});
+const vercelDeploymentActionInput = z.object({
+  accountAlias,
+  agentReason,
+  deploymentId: z.string().min(1),
+});
+const vercelRollbackInput = z.object({
+  accountAlias,
+  agentReason,
+  deploymentId: z.string().min(1),
+  projectIdOrName: z.string().min(1),
+});
+
+const linearSearchIssuesInput = z.object({
+  accountAlias,
+  maxResults,
+  query: z.string().min(1),
+  teamId: z.string().min(1).nullable().optional(),
+});
+const linearIssueInput = z.object({
+  accountAlias,
+  issueIdOrKey: z.string().min(1),
+});
+const linearListInput = z.object({
+  accountAlias,
+  teamId: z.string().min(1).nullable().optional(),
+});
+const linearCreateIssueInput = z.object({
+  accountAlias,
+  agentReason,
+  assigneeId: z.string().min(1).nullable().optional(),
+  description: z.string().max(65_000).nullable().optional(),
+  projectId: z.string().min(1).nullable().optional(),
+  teamId: z.string().min(1),
+  title: z.string().min(1).max(500),
+});
+const linearUpdateIssueInput = z.object({
+  accountAlias,
+  agentReason,
+  issueId: z.string().min(1),
+  patch: z.record(z.unknown()),
+});
+const linearCommentIssueInput = z.object({
+  accountAlias,
+  agentReason,
+  body: z.string().min(1).max(65_000),
+  issueId: z.string().min(1),
+});
+
 const WRITE_VERB_PATTERN =
   /\b(send|create|update|delete|remove|archive|reply|post|upload|copy|share|invite|merge|close|reopen|assign|label|comment|write)\b/i;
 
@@ -379,6 +529,7 @@ function createWriteTool<T extends z.AnyZodObject>({
   action,
   connectorId,
   description,
+  destructive,
   displayName,
   forbidden,
   inputSchema,
@@ -388,6 +539,7 @@ function createWriteTool<T extends z.AnyZodObject>({
   target,
 }: ProviderRequestSpec<T> & {
   action: string;
+  destructive?: (input: z.infer<T>) => boolean;
   displayName: string;
   forbidden?: (input: z.infer<T>) => string | null;
   target: (input: z.infer<T>) => string;
@@ -398,7 +550,9 @@ function createWriteTool<T extends z.AnyZodObject>({
     inputSchema,
     name,
     requiresApproval: (input, context) =>
-      !isFullAccess(context) || Boolean(forbidden?.(input as z.infer<T>)),
+      !isFullAccess(context) ||
+      Boolean(destructive?.(input as z.infer<T>)) ||
+      Boolean(forbidden?.(input as z.infer<T>)),
     sideEffectClass: "write",
     async implementation(input, context) {
       const parsed = inputSchema.parse(input);
@@ -420,6 +574,7 @@ function createWriteTool<T extends z.AnyZodObject>({
         action,
         agentReason: "agentReason" in parsed ? parsed.agentReason : null,
         context,
+        destructive: destructive?.(parsed) ?? false,
         displayName,
         target: target(parsed),
       });
@@ -568,6 +723,40 @@ function notionCreatePayload(input: z.infer<typeof notionCreatePageInput>) {
       },
     },
   };
+}
+
+function calendarEventPayload(input: z.infer<typeof calendarCreateEventInput>) {
+  return {
+    ...(input.attendees?.length
+      ? { attendees: input.attendees.map((email) => ({ email })) }
+      : {}),
+    ...(input.description ? { description: input.description } : {}),
+    end: { dateTime: input.end },
+    ...(input.location ? { location: input.location } : {}),
+    start: { dateTime: input.start },
+    summary: input.title,
+  };
+}
+
+function containsForbiddenInfrastructureChange(value: unknown) {
+  const text = JSON.stringify(value).toLowerCase();
+  return (
+    text.includes("nameserver") ||
+    text.includes("security_level") ||
+    text.includes("disable_security") ||
+    text.includes("env") ||
+    text.includes("secret")
+  );
+}
+
+function cloudflareDnsForbidden(input: { patch?: unknown; record?: unknown }) {
+  return containsForbiddenInfrastructureChange(input.patch ?? input.record)
+    ? "Cloudflare nameserver, security control, and secret/env changes are denied in Phase 6."
+    : null;
+}
+
+function linearGraphql(query: string, variables: Record<string, unknown> = {}) {
+  return { query, variables };
 }
 
 export function createTier1IntegrationToolDefinitions(): ToolDefinition[] {
@@ -928,5 +1117,384 @@ export function createTier1IntegrationToolDefinitions(): ToolDefinition[] {
       }),
       target: (input) => `${input.owner}/${input.repo}:${input.head}->${input.base}`,
     }),
+
+    createReadTool({
+      connectorId: "google-calendar",
+      description: "List Google Calendar calendars.",
+      inputSchema: calendarListInput,
+      name: "calendar_list_calendars",
+      request: () => ({ endpoint: "/calendar/v3/users/me/calendarList" }),
+    }),
+    createReadTool({
+      connectorId: "google-calendar",
+      description: "List Google Calendar events.",
+      inputSchema: calendarEventsInput,
+      name: "calendar_list_events",
+      request: (input) => ({
+        endpoint: `/calendar/v3/calendars/${encodeURIComponent(input.calendarId ?? "primary")}/events`,
+        params: {
+          ...(input.query ? { q: input.query } : {}),
+          maxResults: optionalLimit(input.maxResults, 20),
+          ...(input.timeMax ? { timeMax: input.timeMax } : {}),
+          ...(input.timeMin ? { timeMin: input.timeMin } : {}),
+        },
+      }),
+    }),
+    createReadTool({
+      connectorId: "google-calendar",
+      description: "Get one Google Calendar event.",
+      inputSchema: calendarEventInput,
+      name: "calendar_get_event",
+      request: (input) => ({
+        endpoint: `/calendar/v3/calendars/${encodeURIComponent(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`,
+      }),
+    }),
+    createWriteTool({
+      action: "create event",
+      connectorId: "google-calendar",
+      description: "Create a Google Calendar event after approval unless Full Access is enabled.",
+      displayName: "Google Calendar",
+      inputSchema: calendarCreateEventInput,
+      name: "calendar_create_event",
+      request: (input) => ({
+        data: calendarEventPayload(input),
+        endpoint: `/calendar/v3/calendars/${encodeURIComponent(input.calendarId ?? "primary")}/events`,
+      }),
+      target: (input) => `${input.calendarId ?? "primary"}:${input.title}`,
+    }),
+    createWriteTool({
+      action: "update event",
+      connectorId: "google-calendar",
+      description: "Update a Google Calendar event after approval unless Full Access is enabled.",
+      displayName: "Google Calendar",
+      inputSchema: calendarUpdateEventInput,
+      method: "PATCH",
+      name: "calendar_update_event",
+      request: (input) => ({
+        data: input.patch,
+        endpoint: `/calendar/v3/calendars/${encodeURIComponent(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`,
+      }),
+      target: (input) => `${input.calendarId}:${input.eventId}`,
+    }),
+    createWriteTool({
+      action: "delete event",
+      connectorId: "google-calendar",
+      description: "Delete a targeted Google Calendar event after approval.",
+      destructive: () => true,
+      displayName: "Google Calendar",
+      inputSchema: calendarDeleteEventInput,
+      method: "DELETE",
+      name: "calendar_delete_event",
+      request: (input) => ({
+        endpoint: `/calendar/v3/calendars/${encodeURIComponent(input.calendarId)}/events/${encodeURIComponent(input.eventId)}`,
+      }),
+      target: (input) => `${input.calendarId}:${input.eventId}`,
+    }),
+    createExecuteTool("google-calendar", "calendar_execute", "Google Calendar"),
+
+    createReadTool({
+      connectorId: "cloudflare",
+      description: "List Cloudflare accounts.",
+      inputSchema: cloudflareAccountInput,
+      name: "cloudflare_list_accounts",
+      request: () => ({ endpoint: "/client/v4/accounts" }),
+    }),
+    createReadTool({
+      connectorId: "cloudflare",
+      description: "List Cloudflare zones.",
+      inputSchema: cloudflareAccountInput,
+      name: "cloudflare_list_zones",
+      request: () => ({ endpoint: "/client/v4/zones" }),
+    }),
+    createReadTool({
+      connectorId: "cloudflare",
+      description: "List Cloudflare DNS records for one zone.",
+      inputSchema: cloudflareDnsInput,
+      name: "cloudflare_list_dns_records",
+      request: (input) => ({
+        endpoint: `/client/v4/zones/${encodeURIComponent(input.zoneId)}/dns_records`,
+      }),
+    }),
+    createReadTool({
+      connectorId: "cloudflare",
+      description: "Get a Cloudflare Pages project.",
+      inputSchema: cloudflarePagesInput,
+      name: "cloudflare_get_pages_project",
+      request: (input) => ({
+        endpoint: `/client/v4/accounts/${encodeURIComponent(input.accountId)}/pages/projects/${encodeURIComponent(input.projectName)}`,
+      }),
+    }),
+    createWriteTool({
+      action: "update DNS record",
+      connectorId: "cloudflare",
+      description: "Update a Cloudflare DNS record after approval unless Full Access is enabled.",
+      displayName: "Cloudflare",
+      forbidden: cloudflareDnsForbidden,
+      inputSchema: cloudflareUpdateDnsInput,
+      method: "PATCH",
+      name: "cloudflare_update_dns_record",
+      request: (input) => ({
+        data: input.patch,
+        endpoint: `/client/v4/zones/${encodeURIComponent(input.zoneId)}/dns_records/${encodeURIComponent(input.recordId)}`,
+      }),
+      target: (input) => `${input.zoneId}:${input.recordId}`,
+    }),
+    createWriteTool({
+      action: "create DNS record",
+      connectorId: "cloudflare",
+      description: "Create a Cloudflare DNS record after approval unless Full Access is enabled.",
+      displayName: "Cloudflare",
+      forbidden: cloudflareDnsForbidden,
+      inputSchema: cloudflareCreateDnsInput,
+      name: "cloudflare_create_dns_record",
+      request: (input) => ({
+        data: input.record,
+        endpoint: `/client/v4/zones/${encodeURIComponent(input.zoneId)}/dns_records`,
+      }),
+      target: (input) => input.zoneId,
+    }),
+    createWriteTool({
+      action: "purge cache",
+      connectorId: "cloudflare",
+      description: "Purge Cloudflare cache after approval; purgeEverything always requires approval.",
+      destructive: (input) => input.purgeEverything === true,
+      displayName: "Cloudflare",
+      inputSchema: cloudflarePurgeCacheInput,
+      name: "cloudflare_purge_cache",
+      request: (input) => ({
+        data: input.purgeEverything
+          ? { purge_everything: true }
+          : { files: input.files ?? [] },
+        endpoint: `/client/v4/zones/${encodeURIComponent(input.zoneId)}/purge_cache`,
+      }),
+      target: (input) => input.zoneId,
+    }),
+    createWriteTool({
+      action: "deploy Pages",
+      connectorId: "cloudflare",
+      description: "Trigger a Cloudflare Pages deployment after approval unless Full Access is enabled.",
+      displayName: "Cloudflare",
+      inputSchema: cloudflareDeployPagesInput,
+      name: "cloudflare_deploy_pages",
+      request: (input) => ({
+        data: input.source ?? {},
+        endpoint: `/client/v4/accounts/${encodeURIComponent(input.accountId)}/pages/projects/${encodeURIComponent(input.projectName)}/deployments`,
+      }),
+      target: (input) => `${input.accountId}:${input.projectName}`,
+    }),
+    createExecuteTool("cloudflare", "cloudflare_execute", "Cloudflare"),
+
+    createReadTool({
+      connectorId: "vercel",
+      description: "List Vercel projects.",
+      inputSchema: vercelProjectsInput,
+      name: "vercel_list_projects",
+      request: (input) => ({
+        endpoint: "/v9/projects",
+        params: { ...(input.teamId ? { teamId: input.teamId } : {}) },
+      }),
+    }),
+    createReadTool({
+      connectorId: "vercel",
+      description: "List Vercel deployments.",
+      inputSchema: vercelDeploymentsInput,
+      name: "vercel_list_deployments",
+      request: (input) => ({
+        endpoint: "/v6/deployments",
+        params: {
+          ...(input.projectId ? { projectId: input.projectId } : {}),
+          ...(input.teamId ? { teamId: input.teamId } : {}),
+        },
+      }),
+    }),
+    createReadTool({
+      connectorId: "vercel",
+      description: "Get Vercel deployment logs/events.",
+      inputSchema: vercelDeploymentLogsInput,
+      name: "vercel_get_deployment_logs",
+      request: (input) => ({
+        endpoint: `/v2/deployments/${encodeURIComponent(input.deploymentId)}/events`,
+      }),
+    }),
+    createReadTool({
+      connectorId: "vercel",
+      description: "Get a Vercel project.",
+      inputSchema: vercelProjectInput,
+      name: "vercel_get_project",
+      request: (input) => ({
+        endpoint: `/v9/projects/${encodeURIComponent(input.projectIdOrName)}`,
+        params: { ...(input.teamId ? { teamId: input.teamId } : {}) },
+      }),
+    }),
+    createWriteTool({
+      action: "create deployment",
+      connectorId: "vercel",
+      description: "Create a Vercel deployment after approval unless Full Access is enabled.",
+      displayName: "Vercel",
+      inputSchema: vercelCreateDeploymentInput,
+      name: "vercel_create_deployment",
+      request: (input) => ({
+        data: {
+          name: input.projectIdOrName,
+          ...(input.ref ? { gitSource: { ref: input.ref } } : {}),
+        },
+        endpoint: "/v13/deployments",
+        params: { ...(input.teamId ? { teamId: input.teamId } : {}) },
+      }),
+      target: (input) => input.projectIdOrName,
+    }),
+    createWriteTool({
+      action: "cancel deployment",
+      connectorId: "vercel",
+      description: "Cancel a Vercel deployment after approval.",
+      destructive: () => true,
+      displayName: "Vercel",
+      inputSchema: vercelDeploymentActionInput,
+      method: "PATCH",
+      name: "vercel_cancel_deployment",
+      request: (input) => ({
+        endpoint: `/v12/deployments/${encodeURIComponent(input.deploymentId)}/cancel`,
+      }),
+      target: (input) => input.deploymentId,
+    }),
+    createWriteTool({
+      action: "rollback deployment",
+      connectorId: "vercel",
+      description: "Rollback a Vercel project after approval.",
+      destructive: () => true,
+      displayName: "Vercel",
+      inputSchema: vercelRollbackInput,
+      name: "vercel_rollback_deployment",
+      request: (input) => ({
+        data: { deploymentId: input.deploymentId },
+        endpoint: `/v9/projects/${encodeURIComponent(input.projectIdOrName)}/rollback`,
+      }),
+      target: (input) => `${input.projectIdOrName}:${input.deploymentId}`,
+    }),
+    createExecuteTool("vercel", "vercel_execute", "Vercel"),
+
+    createReadTool({
+      connectorId: "linear",
+      description: "Search Linear issues.",
+      inputSchema: linearSearchIssuesInput,
+      method: "POST",
+      name: "linear_search_issues",
+      request: (input) => ({
+        data: linearGraphql(
+          `query SearchIssues($filter: IssueFilter, $first: Int) { issues(filter: $filter, first: $first) { nodes { id identifier title url state { name } } } }`,
+          {
+            filter: {
+              ...(input.teamId ? { team: { id: { eq: input.teamId } } } : {}),
+              title: { containsIgnoreCase: input.query },
+            },
+            first: optionalLimit(input.maxResults, 10),
+          },
+        ),
+        endpoint: "/graphql",
+      }),
+    }),
+    createReadTool({
+      connectorId: "linear",
+      description: "Get a Linear issue.",
+      inputSchema: linearIssueInput,
+      method: "POST",
+      name: "linear_get_issue",
+      request: (input) => ({
+        data: linearGraphql(
+          `query Issue($id: String!) { issue(id: $id) { id identifier title description url state { name } assignee { name email } } }`,
+          { id: input.issueIdOrKey },
+        ),
+        endpoint: "/graphql",
+      }),
+    }),
+    createReadTool({
+      connectorId: "linear",
+      description: "List Linear teams.",
+      inputSchema: z.object({ accountAlias }),
+      method: "POST",
+      name: "linear_list_teams",
+      request: () => ({
+        data: linearGraphql(`query Teams { teams { nodes { id key name } } }`),
+        endpoint: "/graphql",
+      }),
+    }),
+    createReadTool({
+      connectorId: "linear",
+      description: "List Linear projects.",
+      inputSchema: linearListInput,
+      method: "POST",
+      name: "linear_list_projects",
+      request: (input) => ({
+        data: linearGraphql(
+          `query Projects($filter: ProjectFilter) { projects(filter: $filter) { nodes { id name state url } } }`,
+          { filter: input.teamId ? { team: { id: { eq: input.teamId } } } : {} },
+        ),
+        endpoint: "/graphql",
+      }),
+    }),
+    createWriteTool({
+      action: "create issue",
+      connectorId: "linear",
+      description: "Create a Linear issue after approval unless Full Access is enabled.",
+      displayName: "Linear",
+      inputSchema: linearCreateIssueInput,
+      method: "POST",
+      name: "linear_create_issue",
+      request: (input) => ({
+        data: linearGraphql(
+          `mutation CreateIssue($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title url } } }`,
+          {
+            input: {
+              ...(input.assigneeId ? { assigneeId: input.assigneeId } : {}),
+              ...(input.description ? { description: input.description } : {}),
+              ...(input.projectId ? { projectId: input.projectId } : {}),
+              teamId: input.teamId,
+              title: input.title,
+            },
+          },
+        ),
+        endpoint: "/graphql",
+      }),
+      target: (input) => input.teamId,
+    }),
+    createWriteTool({
+      action: "update issue",
+      connectorId: "linear",
+      description: "Update a Linear issue after approval unless Full Access is enabled.",
+      displayName: "Linear",
+      forbidden: (input) =>
+        JSON.stringify(input.patch).toLowerCase().includes("bulk")
+          ? "Bulk Linear issue updates are denied in Phase 6."
+          : null,
+      inputSchema: linearUpdateIssueInput,
+      method: "POST",
+      name: "linear_update_issue",
+      request: (input) => ({
+        data: linearGraphql(
+          `mutation UpdateIssue($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title url } } }`,
+          { id: input.issueId, input: input.patch },
+        ),
+        endpoint: "/graphql",
+      }),
+      target: (input) => input.issueId,
+    }),
+    createWriteTool({
+      action: "comment issue",
+      connectorId: "linear",
+      description: "Comment on a Linear issue after approval unless Full Access is enabled.",
+      displayName: "Linear",
+      inputSchema: linearCommentIssueInput,
+      method: "POST",
+      name: "linear_comment_issue",
+      request: (input) => ({
+        data: linearGraphql(
+          `mutation CommentIssue($input: CommentCreateInput!) { commentCreate(input: $input) { success comment { id url } } }`,
+          { input: { body: input.body, issueId: input.issueId } },
+        ),
+        endpoint: "/graphql",
+      }),
+      target: (input) => input.issueId,
+    }),
+    createExecuteTool("linear", "linear_execute", "Linear"),
   ];
 }

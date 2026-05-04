@@ -181,4 +181,54 @@ describe("Tier 1 integration read tools", () => {
     expect(request).not.toHaveBeenCalled();
     expect(result).toContain("forbidden pattern");
   });
+
+  it("registers Tier 2 read and write tools", () => {
+    const names = createTier1IntegrationToolDefinitions().map((definition) => definition.name);
+
+    expect(names).toEqual(expect.arrayContaining([
+      "calendar_list_calendars",
+      "calendar_create_event",
+      "cloudflare_list_zones",
+      "cloudflare_update_dns_record",
+      "vercel_list_projects",
+      "vercel_create_deployment",
+      "linear_search_issues",
+      "linear_create_issue",
+    ]));
+  });
+
+  it("keeps destructive Tier 2 writes behind approval even in Full Access", async () => {
+    const request = vi.fn();
+    const requestApproval = vi.fn().mockResolvedValue("denied");
+
+    const result = await tool("calendar_delete_event").implementation(
+      { calendarId: "primary", eventId: "event-1" },
+      context({ request }, { projectPermissionMode: "FULL_ACCESS", requestApproval }),
+    );
+
+    expect(requestApproval).toHaveBeenCalledWith(
+      "run-integration-test",
+      expect.objectContaining({
+        action: "delete event",
+        integration: "Google Calendar",
+        type: "destructive_integration_action",
+      }),
+    );
+    expect(request).not.toHaveBeenCalled();
+    expect(result).toContain("denied");
+  });
+
+  it("denies Cloudflare forbidden pattern writes before approval", async () => {
+    const request = vi.fn();
+    const requestApproval = vi.fn();
+
+    const result = await tool("cloudflare_update_dns_record").implementation(
+      { patch: { nameserver: "ns.example.com" }, recordId: "record-1", zoneId: "zone-1" },
+      context({ request }, { projectPermissionMode: "FULL_ACCESS", requestApproval }),
+    );
+
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(result).toContain("forbidden pattern");
+  });
 });

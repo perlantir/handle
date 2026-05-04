@@ -56,6 +56,7 @@
     "smoke:integrations-nango-connect": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/settings-integrations.spec.ts",
     "smoke:integrations-tier1-read": "pnpm --filter @handle/api exec dotenv -e ../../.env -- tsx ../../scripts/smoke/integrations-tier1-read.mjs",
     "smoke:integrations-tier1-write-approval": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/integrations-tier1-write-approval.mjs",
+    "smoke:integrations-tier2": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/integrations-tier2.mjs",
     "smoke:no-imperatives-as-facts": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-foundation.mjs no-imperatives-as-facts",
     "smoke:no-questions-as-facts": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-foundation.mjs no-questions-as-facts",
     "smoke:none-scope-skip-zep": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/memory-foundation.mjs none-scope-skip-zep",

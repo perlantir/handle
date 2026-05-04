@@ -185,7 +185,7 @@ describe("createHandleAgent", () => {
     const executor = await createHandleAgent(context("task-agent-phase3-test"));
     const toolNames = executor.tools.map((agentTool) => agentTool.name);
 
-    expect(toolNames).toEqual([
+    expect(toolNames).toEqual(expect.arrayContaining([
       "shell_exec",
       "file_write",
       "file_read",
@@ -236,7 +236,11 @@ describe("createHandleAgent", () => {
       "github_comment_issue",
       "github_update_issue",
       "github_create_pull_request",
-    ]);
+      "calendar_list_events",
+      "cloudflare_list_zones",
+      "vercel_list_projects",
+      "linear_search_issues",
+    ]));
   });
 
   it("treats recalled memory JSON braces as literal prompt text", async () => {

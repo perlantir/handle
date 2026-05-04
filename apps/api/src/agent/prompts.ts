@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v19";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v20";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -227,6 +227,11 @@ const PHASE_3_BROWSER_AND_COMPUTER_USE_PROMPT = `
   These tools request approval unless the project permission mode permits the
   action. Include agentReason when calling a write tool so the approval modal
   explains why the action is needed.
+- Tier 2 integration tools are also available for Google Calendar, Cloudflare,
+  Vercel, and Linear. Read tools do not require approval. Write tools use the
+  same approval/forbidden-pattern discipline, and destructive actions such as
+  deleting calendar events, cancelling deployments, or rolling back deployments
+  always require approval.
 </available_phase_3_tools>
 
 Phase 3 prompt version: ${SYSTEM_PROMPT_VERSION}
