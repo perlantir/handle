@@ -14,7 +14,9 @@ import {
   getSkillForUser,
 } from "./skillRegistry";
 import { serializeSkillRunDetail } from "./serializer";
+import { runtimeTraceForMode, type SkillRuntimeMode } from "./browserRuntime";
 import type { SkillArtifactInput, SkillTraceStepInput } from "./types";
+import { wideResearchExpansion } from "./wideResearch";
 
 type SkillStore = typeof prisma;
 
@@ -106,7 +108,7 @@ export async function runSkill({
       return getRunDetailOrThrow(store, run.id);
     }
 
-    const generated = generateBuiltinRun(detail.slug, request.inputs);
+    const generated = generateSkillRun(detail, request.inputs, request.runtimeMode as SkillRuntimeMode | undefined);
     for (const [offset, step] of generated.steps.entries()) {
       await addStep(store, run.id, offset + 1, step);
     }
@@ -218,15 +220,30 @@ function validateInputs(
     .map((slot) => `${slot.label} is required.`);
 }
 
-function generateBuiltinRun(
-  slug: string,
+function generateSkillRun(
+  detail: { name: string; runtimePolicy: Record<string, unknown>; slug: string; sourceType: string },
   inputs: Record<string, unknown>,
+  mode?: SkillRuntimeMode,
 ): { artifacts: SkillArtifactInput[]; steps: SkillTraceStepInput[]; summary: string } {
-  if (slug === "email-outreach") return generateEmailOutreach(inputs);
-  if (slug === "plan-trip") return generateTripPlan(inputs);
-  if (slug === "code-review-pr") return generateCodeReview(inputs);
-  if (slug === "summarize-notion-workspace") return generateNotionSummary(inputs);
-  return generateCompanyResearch(inputs);
+  const base =
+    detail.slug === "email-outreach" ? generateEmailOutreach(inputs) :
+    detail.slug === "plan-trip" ? generateTripPlan(inputs) :
+    detail.slug === "code-review-pr" ? generateCodeReview(inputs) :
+    detail.slug === "summarize-notion-workspace" ? generateNotionSummary(inputs) :
+    detail.sourceType === "BUILTIN" ? generateCompanyResearch(inputs) :
+    generateCustomSkillRun(detail.name, inputs);
+  const runtime = runtimeTraceForMode({
+    ...(mode ? { mode } : {}),
+    runtimePolicy: detail.runtimePolicy,
+  });
+  const wide = mode === "wide_research"
+    ? wideResearchExpansion(stringInput(inputs.company ?? inputs.subject ?? inputs.topic, detail.name))
+    : { artifacts: [], steps: [] };
+  return {
+    artifacts: [...base.artifacts, ...wide.artifacts, ...runtime.artifacts],
+    steps: [...base.steps, ...wide.steps, ...runtime.steps],
+    summary: mode === "wide_research" ? `${base.summary} Wide Research subtasks were prepared.` : base.summary,
+  };
 }
 
 function generateCompanyResearch(inputs: Record<string, unknown>) {
@@ -343,6 +360,28 @@ function generateNotionSummary(inputs: Record<string, unknown>) {
       { safeSummary: "Kept Notion writes approval-gated.", title: "Gate write actions", type: "APPROVAL" as SkillRunStepType },
     ],
     summary: `Created Notion summary for ${target}.`,
+  };
+}
+
+function generateCustomSkillRun(name: string, inputs: Record<string, unknown>) {
+  const inputSummary = Object.entries(inputs)
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => `- ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
+    .join("\n") || "- No inputs provided";
+  return {
+    artifacts: [
+      {
+        inlineContent: `# ${name} Output\n\n## Inputs\n${inputSummary}\n\n## Result\nThis custom Skill test run validated the package, policy, trace, and artifact pipeline. Credentialed live execution uses the standard agent runtime with this Skill's instructions and tool policy.`,
+        kind: "CUSTOM_MARKDOWN" as const,
+        mimeType: "text/markdown",
+        title: `${name} output`,
+      },
+    ],
+    steps: [
+      { safeSummary: `Loaded custom Skill package for ${name}.`, title: "Load custom Skill", type: "PLAN" as SkillRunStepType },
+      { safeSummary: "Validated custom Skill instructions, inputs, and policies.", title: "Validate custom Skill", type: "TOOL" as SkillRunStepType },
+    ],
+    summary: `Completed custom Skill test run for ${name}.`,
   };
 }
 

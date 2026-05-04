@@ -17,3 +17,12 @@ export interface AgentRunWorkflowInput {
     providerOverride?: string;
   };
 }
+
+export interface SkillRunWorkflowInput {
+  scheduleId?: string;
+  skillId?: string;
+  userId: string;
+  inputs?: Record<string, unknown>;
+  projectId?: string;
+  trigger?: "SCHEDULED" | "WORKFLOW";
+}
