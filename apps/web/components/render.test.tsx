@@ -71,6 +71,34 @@ describe("authenticated screens", () => {
     expect(html).toContain("Inspector");
     expect(html).toContain("Terminal");
   });
+
+  it("renders assistant Markdown instead of raw formatting markers", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceScreen
+        initialTask={{
+          goal: "Explain seasonal lag",
+          id: "task-markdown",
+          messages: [
+            {
+              content:
+                "The **hottest day** usually follows the solstice.\n\n- July\n- August\n\n```ts\nconst answer = 42;\n```",
+              id: "message-assistant",
+              role: "ASSISTANT",
+            },
+          ],
+          status: "COMPLETED",
+        }}
+        taskId="task-markdown"
+      />,
+    );
+
+    expect(html).toContain("<strong>hottest day</strong>");
+    expect(html).toContain("<li");
+    expect(html).toContain("<code");
+    expect(html).toContain('aria-label="Copy Handle message"');
+    expect(html).toContain('aria-label="Copy code block"');
+    expect(html).not.toContain("**hottest day**");
+  });
 });
 
 describe("design system token classes", () => {
