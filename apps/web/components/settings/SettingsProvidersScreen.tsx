@@ -36,6 +36,7 @@ import { ExecutionSettings } from "./ExecutionSettings";
 import { IntegrationsSettings } from "./IntegrationsSettings";
 import { MemorySettings } from "./MemorySettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
+import { SearchProvidersSettings } from "./SearchProvidersSettings";
 
 type OpenAIAuthChoice = "apiKey" | "both" | "chatgpt-oauth";
 
@@ -96,7 +97,8 @@ type SettingsSection =
   | "Execution"
   | "Integrations"
   | "Memory"
-  | "Providers";
+  | "Providers"
+  | "Search";
 
 const settingsNav: Array<{
   disabled?: boolean;
@@ -109,6 +111,7 @@ const settingsNav: Array<{
   { label: "Browser", section: "Browser" },
   { label: "Memory", section: "Memory" },
   { label: "Integrations", section: "Integrations" },
+  { label: "Search", section: "Search" },
   { disabled: true, label: "Profile" },
   { disabled: true, label: "Approvals & trust" },
   { disabled: true, label: "Privacy" },
@@ -543,6 +546,7 @@ export function SettingsProvidersScreen() {
           {activeSection === "Defaults" ? <ProjectDefaultsSettings /> : null}
           {activeSection === "Integrations" ? <IntegrationsSettings /> : null}
           {activeSection === "Memory" ? <MemorySettings /> : null}
+          {activeSection === "Search" ? <SearchProvidersSettings /> : null}
 
           {activeSection === "Providers" && loading ? (
             <div className="flex items-center gap-2 text-[12.5px] text-text-tertiary">
