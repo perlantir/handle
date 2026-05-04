@@ -406,7 +406,7 @@ export type IntegrationSetupStatus =
   | 'local_vault';
 
 export interface IntegrationConnectorSummary {
-  authType: 'local-vault' | 'nango';
+  authType: 'local-vault' | 'nango' | 'nango-api-key';
   connectorId: IntegrationConnectorId;
   description: string;
   displayName: string;

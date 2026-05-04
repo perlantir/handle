@@ -68,15 +68,17 @@ Phase 6 is split into two ship gates to reduce audit-cycle risk:
 
 - Nango is the integration auth layer.
 - Phase 6 uses the BYOK pattern: the user supplies their own OAuth app
-  credentials for each service in development.
+  credentials or provider API tokens for each service in development.
 - All credentials are entered through Settings UI. The user never edits `.env`
   to configure Phase 6.
 - Nango secret key is stored through the existing protected credential pattern
   and loaded from Settings data on each Nango call. No server restart is
   required when the user saves or rotates the key.
-- Provider OAuth client IDs and client secrets are configured per connector in
-  Settings -> Integrations. Client secrets use the same protected credential
-  path as AI provider keys.
+- Provider OAuth client IDs/secrets or provider API-token setup instructions are
+  configured per connector in Settings -> Integrations. OAuth client secrets use
+  the same protected credential path as AI provider keys. API tokens for
+  token-based providers are entered in Nango Connect and stored by Nango, not
+  Handle.
 - Nango stores third-party access and refresh tokens. Handle stores only
   connection metadata, aliases, status, selected scopes, and memory preferences.
 - Phase 6 is dev-only.
@@ -149,11 +151,22 @@ Use Nango connection tags for Handle attribution:
 }
 ```
 
-### BYOK OAuth Credentials
+### BYOK OAuth and API-Token Credentials
 
-The Settings UI allows the user to enter OAuth app credentials per connector in
-development. Nango Connect supports user-provided OAuth credential overrides
-during the connect session; Phase 6 should use that path when available.
+The Settings UI allows the user to enter OAuth app credentials per OAuth
+connector in development. Nango Connect supports user-provided OAuth credential
+overrides during the connect session; Phase 6 should use that path when
+available.
+
+Some connector APIs are token-based rather than OAuth-app based for Handle's
+tool surface:
+
+- Cloudflare uses scoped API tokens from Cloudflare My Profile -> API Tokens.
+- Vercel uses Vercel access tokens from Account Settings -> Tokens.
+
+For token-based connectors, Settings shows token setup instructions and starts
+Nango Connect. The provider token is pasted into Nango Connect and stored by
+Nango. Handle does not collect, persist, or log those tokens.
 
 Handle must never log OAuth client secrets. Connector client IDs may be stored
 plainly because they are public OAuth identifiers, but connector client secrets
@@ -165,19 +178,19 @@ Settings -> Integrations provides:
 
 - "Setup Nango" dialog with deep link to `https://app.nango.dev`, key paste
   field, save button, and test button.
-- per-connector OAuth setup dialog with provider-specific deep links:
+- per-connector setup dialog with provider-specific deep links:
   - Google Cloud Console for Gmail, Drive, Calendar, Sheets, and Docs
   - Slack API site
   - Notion integrations page
   - GitHub developer settings
-  - Cloudflare API/OAuth app settings
-  - Vercel integration/OAuth settings
+  - Cloudflare API token settings
+  - Vercel account token settings
   - Linear OAuth app settings
   - Zapier developer platform
 - connector-specific checklist showing:
-  - app name: `Handle Dev - <Connector>`
+  - app or token name: `Handle Dev - <Connector>`
   - required scopes
-  - redirect URI for copy-paste
+  - redirect URI for OAuth connectors only
   - client ID field
   - client secret field
   - save and test buttons
@@ -651,6 +664,11 @@ Memory allowlist:
 
 ### Tier 2: Cloudflare
 
+Auth setup: Cloudflare is token-based in Phase 6.1. The user creates a scoped
+API token named `Handle Dev - Cloudflare` and enters it in Nango Connect.
+Settings must not ask for an OAuth client ID, client secret, or callback URL for
+Cloudflare.
+
 Read tools:
 
 - `cloudflare.list_accounts({ accountAlias? })`
@@ -677,6 +695,10 @@ Memory allowlist:
 - zone/project aliases only
 
 ### Tier 2: Vercel
+
+Auth setup: Vercel is token-based in Phase 6.1. The user creates a Vercel access
+token named `Handle Dev - Vercel` and enters it in Nango Connect. Settings must
+not ask for an OAuth client ID, client secret, or callback URL for Vercel.
 
 Read tools:
 
@@ -800,7 +822,10 @@ Memory allowlist:
 - Zap names and automation preferences only
 
 Phase 6.1 scope is trigger existing Zaps, read Zap/task history, and create
-Zaps. This should follow Zapier MCP-style capabilities where available.
+Zaps. The current Nango provider ID is `zapier-nla`; audit must verify whether
+that provider covers all three surfaces. If Zap creation or task history is not
+covered by the provider, file a Phase 6.1 finding and either split Zapier into a
+workflow API setup or defer the unsupported operation explicitly.
 
 ### Tier 3: Obsidian
 

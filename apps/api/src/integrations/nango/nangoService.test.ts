@@ -78,6 +78,92 @@ describe("Nango service", () => {
     );
   });
 
+  it("creates API-token integrations without requiring OAuth client credentials", async () => {
+    const client = {
+      createConnectSession: vi.fn().mockResolvedValue({
+        data: {
+          connect_link: "https://connect.nango.dev/session-vercel",
+          expires_at: "2026-05-04T02:51:18.336Z",
+          token: "connect-token-test",
+        },
+      }),
+      createIntegration: vi.fn().mockResolvedValue({
+        data: { unique_key: "handle-dev-vercel" },
+      }),
+      getIntegration: vi.fn().mockRejectedValue({ status: 404 }),
+      updateIntegration: vi.fn(),
+    };
+    const prisma = {
+      integrationConnectorSettings: {
+        findUnique: vi.fn(),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      nangoSettings: {
+        upsert: vi.fn().mockResolvedValue({
+          configured: true,
+          host: "https://api.nango.dev",
+          secretKeyRef: NANGO_SECRET_KEY_ACCOUNT,
+        }),
+      },
+    } as unknown as PrismaClient;
+    const keychain = {
+      deleteCredential: vi.fn(),
+      getCredential: vi.fn().mockResolvedValue("nango-secret-key-not-real"),
+      setCredential: vi.fn(),
+    };
+    const service = createNangoService({
+      keychain,
+      nangoClientFactory: () => client as never,
+      prisma,
+    });
+
+    const result = await service.createConnectSession({
+      accountAlias: "default",
+      connectorId: "vercel",
+      userId: "user-test",
+    });
+
+    expect(result.connectLink).toBe("https://connect.nango.dev/session-vercel");
+    expect(prisma.integrationConnectorSettings.findUnique).not.toHaveBeenCalled();
+    expect(client.createIntegration).toHaveBeenCalledWith(
+      expect.not.objectContaining({ credentials: expect.anything() }),
+    );
+    expect(client.createIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        display_name: "Handle Dev - Vercel",
+        provider: "vercel",
+        unique_key: "handle-dev-vercel",
+      }),
+    );
+    expect(client.createConnectSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowed_integrations: ["handle-dev-vercel"],
+      }),
+    );
+  });
+
+  it("rejects OAuth app saves for API-token connectors", async () => {
+    const service = createNangoService({
+      keychain: {
+        deleteCredential: vi.fn(),
+        getCredential: vi.fn(),
+        setCredential: vi.fn(),
+      },
+      nangoClientFactory: () => ({}) as never,
+      prisma: {} as PrismaClient,
+    });
+
+    await expect(
+      service.saveConnectorOAuthApp({
+        clientId: "vercel-client-id-not-real",
+        clientSecret: "vercel-client-secret-not-real",
+        connectorId: "vercel",
+      }),
+    ).rejects.toThrow(
+      "Vercel uses API-token setup through Nango Connect, not OAuth client credentials.",
+    );
+  });
+
   it("finds completed connections using the same tags written to the Connect session", async () => {
     const client = {
       listConnections: vi.fn().mockResolvedValue({

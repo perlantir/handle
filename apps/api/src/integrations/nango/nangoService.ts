@@ -14,6 +14,8 @@ import {
   connectorMetadata,
   connectorOrder,
   connectorScopesString,
+  connectorUsesNango,
+  connectorUsesNangoOAuth,
   NANGO_REDIRECT_URI,
   type IntegrationConnectorMetadata,
 } from "./connectors";
@@ -151,23 +153,22 @@ export function createNangoService({
   }
 
   async function ensureConnectorSettings(connector: IntegrationConnectorMetadata) {
-    const setupStatus =
-      connector.authType === "local-vault" ? "local_vault" : "missing_credentials";
+    const setupStatus = defaultSetupStatus(connector);
     const args = {
       create: {
         connectorId: connector.prismaId,
         nangoIntegrationId: connector.nangoIntegrationId,
         nangoProviderId: connector.nangoProviderId,
-        redirectUri: connector.authType === "nango" ? NANGO_REDIRECT_URI : null,
+        redirectUri: connectorUsesNangoOAuth(connector) ? NANGO_REDIRECT_URI : null,
         requiredScopes: connector.requiredScopes,
         setupStatus,
       },
       update: {
         nangoIntegrationId: connector.nangoIntegrationId,
         nangoProviderId: connector.nangoProviderId,
-        redirectUri: connector.authType === "nango" ? NANGO_REDIRECT_URI : null,
+        redirectUri: connectorUsesNangoOAuth(connector) ? NANGO_REDIRECT_URI : null,
         requiredScopes: connector.requiredScopes,
-        ...(connector.authType === "local-vault" ? { setupStatus } : {}),
+        ...(!connectorUsesNangoOAuth(connector) ? { setupStatus } : {}),
       },
       where: { connectorId: connector.prismaId },
     };
@@ -316,11 +317,14 @@ export function createNangoService({
     connectorId,
   }: SaveConnectorOAuthAppInput) {
     const connector = requireConnector(connectorId);
-    if (connector.authType !== "nango") {
+    if (!connectorUsesNangoOAuth(connector)) {
       throw new IntegrationError({
         code: "validation_error",
         connectorId,
-        message: `${connector.displayName} does not use Nango OAuth credentials.`,
+        message:
+          connector.authType === "nango-api-key"
+            ? `${connector.displayName} uses API-token setup through Nango Connect, not OAuth client credentials.`
+            : `${connector.displayName} does not use Nango OAuth credentials.`,
       });
     }
 
@@ -390,21 +394,9 @@ export function createNangoService({
   }
 
   async function syncConnectorWithNango(connector: IntegrationConnectorMetadata) {
-    if (connector.authType !== "nango") {
+    if (!connectorUsesNango(connector)) {
       return { ok: true, skipped: true };
     }
-    const setting = await prisma.integrationConnectorSettings.findUnique({
-      where: { connectorId: connector.prismaId },
-    });
-    if (!setting?.oauthClientId || !setting.oauthClientSecretRef) {
-      throw new IntegrationError({
-        code: "settings_invalid",
-        connectorId: connector.connectorId,
-        message: `${connector.displayName} OAuth app credentials are missing.`,
-      });
-    }
-
-    const clientSecret = await keychain.getCredential(setting.oauthClientSecretRef);
     const client = await getClient();
     const integrationId = connector.nangoIntegrationId;
     if (!integrationId || !connector.nangoProviderId) {
@@ -415,31 +407,57 @@ export function createNangoService({
       });
     }
 
-    const credentials = {
-      client_id: setting.oauthClientId,
-      client_secret: clientSecret,
-      scopes: connectorScopesString(connector),
-      type: "OAUTH2" as const,
-    };
-    const createBody = {
-      credentials,
+    const baseCreateBody = {
       display_name: `Handle Dev - ${connector.displayName}`,
       provider: connector.nangoProviderId,
       unique_key: integrationId,
     };
-    const updateBody = {
-      credentials: {
-        ...credentials,
-      },
+    const baseUpdateBody = {
       display_name: `Handle Dev - ${connector.displayName}`,
     };
+    let createBody: typeof baseCreateBody | (typeof baseCreateBody & { credentials: unknown }) =
+      baseCreateBody;
+    let updateBody:
+      | typeof baseUpdateBody
+      | (typeof baseUpdateBody & { credentials: unknown }) = baseUpdateBody;
+
+    if (connectorUsesNangoOAuth(connector)) {
+      const setting = await prisma.integrationConnectorSettings.findUnique({
+        where: { connectorId: connector.prismaId },
+      });
+      if (!setting?.oauthClientId || !setting.oauthClientSecretRef) {
+        throw new IntegrationError({
+          code: "settings_invalid",
+          connectorId: connector.connectorId,
+          message: `${connector.displayName} OAuth app credentials are missing.`,
+        });
+      }
+
+      const clientSecret = await keychain.getCredential(setting.oauthClientSecretRef);
+      const credentials = {
+        client_id: setting.oauthClientId,
+        client_secret: clientSecret,
+        scopes: connectorScopesString(connector),
+        type: "OAUTH2" as const,
+      };
+      createBody = {
+        ...baseCreateBody,
+        credentials,
+      };
+      updateBody = {
+        ...baseUpdateBody,
+        credentials: {
+          ...credentials,
+        },
+      };
+    }
 
     try {
       await client.getIntegration({ uniqueKey: integrationId });
-      await client.updateIntegration({ uniqueKey: integrationId }, updateBody);
+      await client.updateIntegration({ uniqueKey: integrationId }, updateBody as never);
     } catch (err) {
       if (errorStatus(err) !== 404) throw err;
-      await client.createIntegration(createBody);
+      await client.createIntegration(createBody as never);
     }
 
     await prisma.integrationConnectorSettings.update({
@@ -461,7 +479,7 @@ export function createNangoService({
     userId,
   }: ConnectSessionInput) {
     const connector = requireConnector(connectorId);
-    if (connector.authType !== "nango") {
+    if (!connectorUsesNango(connector)) {
       throw new IntegrationError({
         code: "validation_error",
         connectorId,
@@ -525,7 +543,7 @@ export function createNangoService({
     userId,
   }: CompleteConnectionInput) {
     const connector = requireConnector(connectorId);
-    if (connector.authType !== "nango") {
+    if (!connectorUsesNango(connector)) {
       throw new IntegrationError({
         code: "validation_error",
         connectorId,
@@ -751,7 +769,7 @@ export function createNangoService({
     userId: string;
   }) {
     const connector = requireConnector(connectorId);
-    if (connector.authType !== "nango") {
+    if (!connectorUsesNango(connector)) {
       throw new IntegrationError({
         code: "provider_not_found",
         connectorId,
@@ -1083,6 +1101,12 @@ function requireConnector(connectorId: IntegrationConnectorId) {
     });
   }
   return connector;
+}
+
+function defaultSetupStatus(connector: IntegrationConnectorMetadata) {
+  if (connector.authType === "local-vault") return "local_vault";
+  if (connector.authType === "nango-api-key") return "ready";
+  return "missing_credentials";
 }
 
 function serializeConnector(connector: IntegrationConnectorMetadata) {

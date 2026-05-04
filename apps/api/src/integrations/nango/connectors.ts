@@ -1,7 +1,7 @@
 import type { IntegrationConnectorId } from "@handle/shared";
 import type { IntegrationConnectorId as PrismaConnectorId } from "@prisma/client";
 
-export type IntegrationAuthType = "local-vault" | "nango";
+export type IntegrationAuthType = "local-vault" | "nango" | "nango-api-key";
 
 export interface IntegrationConnectorMetadata {
   authType: IntegrationAuthType;
@@ -184,7 +184,7 @@ export const connectorMetadata: Record<
     tier: 1,
   },
   "cloudflare": {
-    authType: "nango",
+    authType: "nango-api-key",
     connectorId: "cloudflare",
     description: "Inspect and manage Cloudflare zones, DNS, and Pages.",
     displayName: "Cloudflare",
@@ -195,10 +195,10 @@ export const connectorMetadata: Record<
     prismaId: "CLOUDFLARE",
     requiredScopes: ["account:read", "zone:read", "dns:edit"],
     setupGuide: [
-      "Open Cloudflare API/OAuth settings.",
-      "Create an app named Handle Dev - Cloudflare.",
-      `Add redirect URI ${NANGO_REDIRECT_URI}.`,
-      "Paste the client ID and client secret here.",
+      "Open Cloudflare My Profile -> API Tokens.",
+      "Create a scoped API token named Handle Dev - Cloudflare.",
+      "Grant only the account, zone, DNS, and Pages permissions needed for this audit.",
+      "Paste the API token in the Nango Connect window. Handle never stores this token directly.",
     ],
     tier: 2,
   },
@@ -283,21 +283,21 @@ export const connectorMetadata: Record<
     tier: 1,
   },
   "vercel": {
-    authType: "nango",
+    authType: "nango-api-key",
     connectorId: "vercel",
     description: "Inspect projects and manage deployments.",
     displayName: "Vercel",
     docsUrl: "https://docs.nango.dev/integrations/all/vercel",
     nangoIntegrationId: "handle-dev-vercel",
     nangoProviderId: "vercel",
-    oauthAppUrl: "https://vercel.com/dashboard/integrations/console",
+    oauthAppUrl: "https://vercel.com/account/tokens",
     prismaId: "VERCEL",
     requiredScopes: [],
     setupGuide: [
-      "Open Vercel integration settings.",
-      "Create an integration named Handle Dev - Vercel.",
-      `Add redirect URI ${NANGO_REDIRECT_URI}.`,
-      "Paste the client ID and client secret here.",
+      "Open Vercel Account Settings -> Tokens.",
+      "Create an access token named Handle Dev - Vercel.",
+      "Scope it to the personal account or team Handle should access.",
+      "Paste the access token in the Nango Connect window. Handle never stores this token directly.",
     ],
     tier: 2,
   },
@@ -332,6 +332,14 @@ export function connectorByPrismaId(connectorId: PrismaConnectorId) {
       (connector) => connector.prismaId === connectorId,
     ) ?? null
   );
+}
+
+export function connectorUsesNango(connector: IntegrationConnectorMetadata) {
+  return connector.authType === "nango" || connector.authType === "nango-api-key";
+}
+
+export function connectorUsesNangoOAuth(connector: IntegrationConnectorMetadata) {
+  return connector.authType === "nango";
 }
 
 export function connectorScopesString(connector: IntegrationConnectorMetadata) {

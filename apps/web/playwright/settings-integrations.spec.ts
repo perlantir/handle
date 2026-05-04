@@ -37,6 +37,19 @@ function integrationFixture(): IntegrationSettingsResponse {
         setupStatus: "local_vault",
         updatedAt: null,
       },
+      {
+        clientIdConfigured: false,
+        connectorId: "vercel",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastValidatedAt: null,
+        nangoIntegrationId: "handle-dev-vercel",
+        nangoProviderId: "vercel",
+        redirectUri: null,
+        requiredScopes: [],
+        setupStatus: "ready",
+        updatedAt: null,
+      },
     ],
     connectors: [
       {
@@ -66,6 +79,21 @@ function integrationFixture(): IntegrationSettingsResponse {
           "Handle will deny path traversal outside that vault.",
         ],
         tier: 3,
+      },
+      {
+        authType: "nango-api-key",
+        connectorId: "vercel",
+        description: "Inspect projects and manage deployments.",
+        displayName: "Vercel",
+        docsUrl: "https://docs.nango.dev/integrations/all/vercel",
+        nangoProviderId: "vercel",
+        oauthAppUrl: "https://vercel.com/account/tokens",
+        requiredScopes: [],
+        setupGuide: [
+          "Open Vercel Account Settings -> Tokens.",
+          "Paste the access token in the Nango Connect window.",
+        ],
+        tier: 2,
       },
     ],
     nango: {
@@ -186,6 +214,17 @@ async function mockApi(page: Page) {
       return;
     }
 
+    if (method === "POST" && path === "/api/integrations/vercel/connect-session") {
+      await jsonRoute(route, 200, {
+        accountAlias: "default",
+        connectorId: "vercel",
+        connectLink: "https://connect.nango.dev/session-vercel",
+        expiresAt: "2026-05-03T12:10:00.000Z",
+        token: "connect-token-not-real",
+      });
+      return;
+    }
+
     if (method === "POST" && path === "/api/integrations/github/complete") {
       settings.connections = [
         {
@@ -207,6 +246,37 @@ async function mockApi(page: Page) {
         },
       ];
       await jsonRoute(route, 200, { integration: settings.connections[0] });
+      return;
+    }
+
+    if (method === "POST" && path === "/api/integrations/vercel/complete") {
+      settings.connections = [
+        ...settings.connections.filter(
+          (connection) => connection.connectorId !== "vercel",
+        ),
+        {
+          accountAlias: "default",
+          accountLabel: "Vercel",
+          connectorId: "vercel",
+          createdAt: "2026-05-03T12:00:00.000Z",
+          defaultAccount: true,
+          id: "integration-vercel",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastHealthCheckAt: null,
+          lastUsedAt: null,
+          memoryScope: "NONE",
+          nangoConnectionId: "conn-vercel",
+          nangoIntegrationId: "handle-dev-vercel",
+          status: "CONNECTED",
+          updatedAt: "2026-05-03T12:00:00.000Z",
+        },
+      ];
+      await jsonRoute(route, 200, {
+        integration: settings.connections.find(
+          (connection) => connection.connectorId === "vercel",
+        ),
+      });
       return;
     }
 
@@ -284,7 +354,11 @@ async function openSettingsSection(page: Page, section: string) {
   });
   await expect(navButton).toBeVisible();
   await navButton.click();
-  await expect(navButton).toHaveAttribute("aria-current", "page");
+  if (section === "Integrations") {
+    await expect(page.getByText("Nango", { exact: true }).first()).toBeVisible();
+  } else {
+    await expect(navButton).toHaveAttribute("aria-current", "page");
+  }
 }
 
 test.describe("Settings Integrations", () => {
@@ -320,7 +394,7 @@ test.describe("Settings Integrations", () => {
       .fill("github-client-secret-not-real");
     await page.getByRole("button", { name: "Save GitHub OAuth app" }).click();
     await expect(page.getByText("GitHub OAuth app saved")).toBeVisible();
-    await expect(page.getByText("Ready to connect")).toBeVisible();
+    await expect(page.getByText("Ready to connect").first()).toBeVisible();
 
     await page.getByRole("button", { name: "Connect GitHub" }).click();
     await expect(page.getByText("GitHub Connect session started")).toBeVisible();
@@ -381,5 +455,51 @@ test.describe("Settings Integrations", () => {
           request.path === "/api/integrations/obsidian/local-vault",
       )?.body,
     ).toMatchObject({ vaultPath: "/tmp/handle-vault" });
+  });
+
+  test("uses Nango API-token setup for Vercel without OAuth app fields", async ({
+    page,
+  }) => {
+    const { requests } = await mockApi(page);
+    page.on("popup", (popup) => {
+      void popup.close();
+    });
+
+    await openSettings(page);
+    await openSettingsSection(page, "Integrations");
+
+    await expect(page.getByRole("heading", { name: "Vercel" })).toBeVisible();
+    await expect(page.getByLabel("Vercel OAuth client ID")).toHaveCount(0);
+    await expect(page.getByLabel("Vercel OAuth client secret")).toHaveCount(0);
+    await expect(page.getByText("Redirect URI:")).toHaveCount(1);
+    await expect(page.getByText("API token setup")).toBeVisible();
+    await expect(
+      page.getByText("Handle stores only the Nango connection ID"),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Connect Vercel" }).click();
+    await expect(page.getByText("Vercel Connect session started")).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "https://connect.nango.dev/session-vercel" }),
+    ).toBeVisible();
+
+    await page.getByLabel("Vercel connection ID").fill("conn-vercel");
+    await page.getByRole("button", { name: "Finish Vercel connection" }).click();
+    await expect(page.getByText("Vercel account connected")).toBeVisible();
+
+    expect(
+      requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.path === "/api/settings/integrations/vercel/oauth-app",
+      ),
+    ).toBeUndefined();
+    expect(
+      requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.path === "/api/integrations/vercel/connect-session",
+      )?.body,
+    ).toMatchObject({ accountAlias: "default" });
   });
 });

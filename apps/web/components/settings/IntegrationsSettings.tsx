@@ -253,7 +253,7 @@ export function IntegrationsSettings() {
     } catch (error: unknown) {
       setStatus({
         message:
-          error instanceof Error ? error.message : "Failed to start OAuth flow",
+          error instanceof Error ? error.message : "Failed to start connection flow",
         tone: "error",
       });
     } finally {
@@ -280,7 +280,9 @@ export function IntegrationsSettings() {
     } catch (error: unknown) {
       setStatus({
         message:
-          error instanceof Error ? error.message : "Failed to complete OAuth flow",
+          error instanceof Error
+            ? error.message
+            : "Failed to complete connection flow",
         tone: "error",
       });
     } finally {
@@ -558,8 +560,10 @@ function ConnectorCard({
   ) => void;
   working: string | null;
 }) {
+  const isApiKeyConnector = connector.authType === "nango-api-key";
+  const isOAuthConnector = connector.authType === "nango";
   const canSave =
-    connector.authType === "nango" &&
+    isOAuthConnector &&
     draft.clientId.trim().length > 0 &&
     draft.clientSecret.trim().length > 0;
   const setupStatus = connectorSettings?.setupStatus ?? "missing_credentials";
@@ -595,7 +599,7 @@ function ConnectorCard({
         </div>
       </div>
 
-      {connector.authType === "nango" ? (
+      {isOAuthConnector ? (
         <div className="mt-4 grid gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="grid gap-1.5">
@@ -709,6 +713,92 @@ function ConnectorCard({
               >
                 <ExternalLink className="h-3.5 w-3.5" />
                 OAuth app setup
+              </a>
+            ) : null}
+          </div>
+
+          {connectLink ? (
+            <a
+              className="truncate text-[11.5px] font-medium text-accent"
+              href={connectLink}
+              rel="noreferrer"
+              target="_blank"
+            >
+              {connectLink}
+            </a>
+          ) : null}
+        </div>
+      ) : isApiKeyConnector ? (
+        <div className="mt-4 grid gap-3">
+          <SetupGuide steps={connector.setupGuide} />
+
+          <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
+            <label className="grid gap-1.5">
+              <span className="text-[12.5px] font-medium text-text-secondary">
+                Account alias
+              </span>
+              <TextInput
+                aria-label={`${connector.displayName} account alias`}
+                onChange={(event) =>
+                  onDraftChange({ accountAlias: event.target.value })
+                }
+                value={draft.accountAlias}
+              />
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-[12.5px] font-medium text-text-secondary">
+                Connection ID
+              </span>
+              <TextInput
+                aria-label={`${connector.displayName} connection ID`}
+                onChange={(event) =>
+                  onDraftChange({ connectionId: event.target.value })
+                }
+                placeholder="Optional after Nango Connect"
+                value={draft.connectionId}
+              />
+            </label>
+          </div>
+
+          <div className="rounded-lg border border-border-subtle bg-bg-canvas px-3 py-2 text-[11.5px] leading-[17px] text-text-tertiary">
+            {connector.displayName} uses an API token through Nango Connect.
+            Create the token in {connector.displayName}, then paste it in the
+            Nango Connect popup. Handle stores only the Nango connection ID.
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <PillButton
+              disabled={working === `${connector.connectorId}:connect`}
+              onClick={onConnect}
+              type="button"
+            >
+              {working === `${connector.connectorId}:connect` ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <PlugZap className="h-3.5 w-3.5" />
+              )}
+              Connect {connector.displayName}
+            </PillButton>
+            <PillButton
+              disabled={
+                working === `${connector.connectorId}:complete` ||
+                (!connectLink && !draft.connectionId.trim())
+              }
+              onClick={onComplete}
+              type="button"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Finish {connector.displayName} connection
+            </PillButton>
+            {connector.oauthAppUrl ? (
+              <a
+                className="inline-flex h-8 items-center gap-2 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12px] font-medium text-text-secondary hover:bg-bg-subtle"
+                href={connector.oauthAppUrl}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                API token setup
               </a>
             ) : null}
           </div>
