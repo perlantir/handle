@@ -314,7 +314,7 @@ function testFields(row: NotificationSettingsRow, channel: NotificationChannel) 
   };
 }
 
-function normalizeTestStatus(value: string | null | undefined) {
+function normalizeTestStatus(value: string | null | undefined): "FAILED" | "SENT" | null {
   return value === "SENT" || value === "FAILED" ? value : null;
 }
 
