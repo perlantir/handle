@@ -697,11 +697,15 @@ export function createAgentRunner({
       let recalledMemory: MemoryFact[] = [];
       const memoryProjectForRun = normalizeMemoryProjectContext(project);
       const memoryEnabledForRun = currentMessageMemoryEnabled(runContext, goal);
+      const memoryEnabledOverride =
+        memoryEnabledForRun === null ? undefined : memoryEnabledForRun;
       try {
         recalledMemory = await getRelevantMemoryForTask({
           conversationId: runContext.conversationId,
           goal,
-          memoryEnabled: memoryEnabledForRun,
+          ...(memoryEnabledOverride !== undefined
+            ? { memoryEnabled: memoryEnabledOverride }
+            : {}),
           project: memoryProjectForRun,
           taskId,
         });
@@ -734,7 +738,9 @@ export function createAgentRunner({
       await appendMessageToZep({
         content: goal,
         conversationId: runContext.conversationId,
-        memoryEnabled: currentMessageMemoryEnabled(runContext, goal),
+        ...(memoryEnabledOverride !== undefined
+          ? { memoryEnabled: memoryEnabledOverride }
+          : {}),
         project: memoryProjectForRun,
         role: "USER",
       }).catch((err) => {
@@ -861,7 +867,9 @@ export function createAgentRunner({
         ...(memoryProject && runContext.conversationId
           ? { conversationId: runContext.conversationId }
           : {}),
-        memoryEnabled: memoryEnabledForRun,
+        ...(memoryEnabledOverride !== undefined
+          ? { memoryEnabled: memoryEnabledOverride }
+          : {}),
         ...(memoryContext ? { memoryContext } : {}),
         ...(memoryProject ? { memoryProject } : {}),
         ...(project?.id ? { projectId: project.id } : {}),

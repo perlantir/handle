@@ -42,7 +42,7 @@ describe("agent prompts", () => {
     expect(prompt).toContain("answer directly without tools");
     expect(prompt).toContain("Do not use");
     expect(prompt).toContain("shell_exec for simple math");
-    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v17");
+    expect(SYSTEM_PROMPT_VERSION).toBe("system_prompt_v21");
   });
 
   it("tells the agent not to confabulate memory when recall is empty", () => {
