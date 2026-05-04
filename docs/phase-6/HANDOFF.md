@@ -1,7 +1,7 @@
 # Phase 6 Integrations Handoff
 
 Status: implementation complete through Stages 1-7 on
-`phase-6/integrations`; ready for user manual audit after final smoke pass.
+`phase-6/integrations`; ready for user manual audit.
 
 Do not treat this as SIGNOFF. The user manual audit gate is still required.
 
@@ -29,6 +29,45 @@ Do not treat this as SIGNOFF. The user manual audit gate is still required.
 - Stage 7 - Manual audit harness: PASS. Audit checklist added at
   `scripts/manual-audit/phase6-integrations.md`.
 
+## Codex Verification
+
+Final local verification completed on 2026-05-03:
+
+- `pnpm test`: PASS (web 8 tests, api 339 tests, shared no-test pass).
+- `pnpm build`: PASS.
+- `pnpm smoke:e2e-canonical`: PASS on alternate ports; produced 10 HN entries
+  and ended `STOPPED`.
+- `pnpm smoke:browser-tools`: PASS; extracted the HN first title and saved a
+  164842 byte screenshot artifact.
+- `NEXT_PUBLIC_HANDLE_API_BASE_URL=http://127.0.0.1:3013 HANDLE_API_BASE_URL=http://127.0.0.1:3013 HANDLE_API_PORT=3013 pnpm smoke:computer-use-agent`:
+  PASS; emitted a computer-use screenshot and a 3-sentence desktop
+  description.
+- `pnpm smoke:local-backend-basic`: PASS.
+- `pnpm smoke:memory-recall`: PASS.
+- `pnpm smoke:integrations-tier1-read`: PASS after applying local Prisma
+  migrations; verified live GitHub `/user` and issue read paths through the
+  connected Nango account.
+- `pnpm smoke:integrations-tier1-write-approval`: PASS.
+- `pnpm smoke:integrations-tier2`: PASS.
+- `pnpm smoke:integrations-tier3`: PASS.
+- `NEXT_PUBLIC_HANDLE_WEB_BASE_URL=http://127.0.0.1:3112 NEXT_PUBLIC_HANDLE_API_BASE_URL=http://127.0.0.1:3001 pnpm smoke:integrations-memory-toggle`:
+  PASS.
+- `NEXT_PUBLIC_HANDLE_WEB_BASE_URL=http://127.0.0.1:3113 NEXT_PUBLIC_HANDLE_API_BASE_URL=http://127.0.0.1:3001 pnpm smoke:approval-modal-types`:
+  PASS.
+- `NEXT_PUBLIC_HANDLE_WEB_BASE_URL=http://127.0.0.1:3114 NEXT_PUBLIC_HANDLE_API_BASE_URL=http://127.0.0.1:3001 pnpm smoke:integrations-nango-connect`:
+  PASS.
+
+Notes:
+
+- The default-port `computer-use-agent` smoke intentionally aborts when the
+  user's dev API is already running on 3001. Codex reran it on port 3013
+  instead of killing the user's open app.
+- The canonical E2E smoke initially exposed that URL-fetch coding tasks were
+  being routed to the desktop sandbox. That regression is fixed and covered by
+  `apps/api/src/agent/runAgent.test.ts`.
+- The working tree still has a pre-existing `AGENTS.md` typechange; it was not
+  staged or modified by this Phase 6 batch.
+
 ## Credential Status
 
 Verified live:
@@ -52,8 +91,7 @@ Run these before starting the manual audit if you want a fresh local baseline:
 
 ```bash
 pnpm test
-pnpm --filter @handle/api typecheck
-pnpm --filter @handle/web typecheck
+pnpm build
 pnpm smoke:integrations-tier1-read
 pnpm smoke:integrations-tier1-write-approval
 pnpm smoke:integrations-tier2
