@@ -496,6 +496,49 @@ describe("createAgentRunner", () => {
     expect(createDesktopSandbox).not.toHaveBeenCalled();
   });
 
+  it("keeps URL-fetch coding tasks on the standard E2B sandbox", async () => {
+    const headlessSandbox = sandbox();
+    const createBackend = vi.fn().mockReturnValue(backendForSandbox(headlessSandbox));
+    const createDesktopSandbox = vi.fn();
+    const selectedProvider = provider("openai", "gpt-4o");
+    const runner = createAgentRunner({
+      createAgent: vi.fn().mockResolvedValue({
+        streamEvents: vi.fn().mockReturnValue(successfulStream()),
+      }),
+      createBackend,
+      createDesktopSandbox,
+      emitEvent: vi.fn(),
+      emitPlan: vi.fn().mockResolvedValue(undefined),
+      isSmokeEnabled: () => false,
+      providerRegistry: {
+        getActiveModel: vi.fn().mockResolvedValue({
+          model: fakeModel,
+          provider: selectedProvider,
+        }),
+        initialize: vi.fn().mockResolvedValue(undefined),
+      },
+      store: {
+        message: {
+          create: vi.fn().mockResolvedValue({}),
+        },
+        task: {
+          findUnique: vi
+            .fn()
+            .mockResolvedValue({ backend: "e2b", providerOverride: null }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      },
+    });
+
+    await runner(
+      "task-url-fetch-test",
+      "Write a Python script that fetches https://news.ycombinator.com and saves the top 10 stories to /tmp/hn.json.",
+    );
+
+    expect(createBackend).toHaveBeenCalledWith();
+    expect(createDesktopSandbox).not.toHaveBeenCalled();
+  });
+
   it("uses the LocalBackend when the task backend is local", async () => {
     const backend = localBackend();
     const createBackend = vi.fn();

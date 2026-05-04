@@ -213,11 +213,11 @@ export interface RunAgentOptions {
 }
 
 const PHASE_3_DESKTOP_GOAL_PATTERN =
-  /\b(browser|browse|website|web page|webpage|navigate|url|https?:\/\/|click|selector|scroll|screenshot|screen|desktop|display|firefox|chrome|chromium|form|button|login|signin|checkout|payment)\b/i;
+  /\b(browser|browse|website|web page|webpage|navigate|click|selector|scroll|screenshot|screen|desktop|display|firefox|chrome|chromium|form|button|login|signin|checkout|payment)\b/i;
 const DIRECT_COMPUTER_USE_GOAL_PATTERN =
   /\b(screenshot|screen|desktop|display)\b/i;
 const BROWSER_GOAL_PATTERN =
-  /\b(browser|browse|website|web page|webpage|navigate|url|https?:\/\/|click|selector|scroll|firefox|chrome|chromium|form|button|login|signin|checkout|payment)\b/i;
+  /\b(browser|browse|website|web page|webpage|navigate|click|selector|scroll|firefox|chrome|chromium|form|button|login|signin|checkout|payment)\b/i;
 
 function shouldRunDirectComputerUse(goal: string) {
   return (
