@@ -43,11 +43,32 @@ Focused smokes run during implementation:
 - `pnpm smoke:saved-agents`
 - `pnpm --filter @handle/api typecheck`
 - `pnpm --filter @handle/web typecheck`
+- `pnpm --filter @handle/api exec vitest run src/search/searchProviderService.test.ts src/routes/searchSettings.test.ts src/routes/savedAgents.test.ts --no-file-parallelism`
 
 Final all-repo verification:
 
 - `pnpm test` - PASS. API: 57 files / 364 tests. Web: 2 files / 8 tests.
 - `pnpm build` - PASS. Shared, API, and Web built successfully.
+
+## Live Browser Walkthrough
+
+Codex applied local migrations with `pnpm --filter @handle/api prisma migrate deploy`
+before the browser walkthrough so the Phase 6.5 tables existed in the dev DB.
+
+- Settings -> Search loaded Tavily, Serper, and Brave provider cards after
+  fixing a StrictMode/concurrent-request bootstrap race in provider row
+  creation.
+- Settings -> Workflows: created `UI smoke release workflow`, saved it, clicked
+  Run now, and saw `Workflow run completed`.
+- Settings -> Saved Agents: created `UI smoke digest`, clicked Run now, and saw
+  `Saved agent queued`. A follow-up DB check found the inline fallback path could
+  leave `SavedAgentRun` stuck in `QUEUED`; the route now syncs terminal
+  inline-fallback status back to the saved-agent run record.
+- Tasks page was loaded again with matching frontend/backend auth-bypass
+  settings and no Clerk-token or fetch errors. The previously queued saved-agent
+  run had been created under an earlier test server/session, so the user audit
+  should verify Tasks visibility on the normal `3000`/`3001` setup with one
+  consistent browser session.
 
 ## Audit Needs From User
 

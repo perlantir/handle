@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  listSearchSettings,
   queryProvider,
   webFetch,
   webSearch,
@@ -144,6 +145,72 @@ describe("queryProvider", () => {
 });
 
 describe("webSearch", () => {
+  it("recovers when concurrent settings requests create the same provider row", async () => {
+    const rows = new Map<string, SearchProviderConfigRow>();
+    let firstTavilyCreate = true;
+    const raceStore: SearchProviderStore = {
+      projectSearchSettings: {
+        findUnique: vi.fn(async () => null),
+        upsert: vi.fn(async (args: { create: unknown }) => args.create as never),
+      },
+      searchProviderConfig: {
+        findMany: vi.fn(async () => Array.from(rows.values())),
+        findUnique: vi.fn(
+          async (args: {
+            where: { userId_providerId: { providerId: string } };
+          }) => rows.get(args.where.userId_providerId.providerId) ?? null,
+        ),
+        update: vi.fn(async () => {
+          throw new Error("update not used");
+        }),
+        upsert: vi.fn(
+          async (args: {
+            create: SearchProviderConfigRow;
+            where: { userId_providerId: { providerId: string } };
+          }) => {
+            if (
+              args.where.userId_providerId.providerId === "TAVILY" &&
+              firstTavilyCreate
+            ) {
+              firstTavilyCreate = false;
+              rows.set("TAVILY", args.create);
+              const err = new Error("Unique constraint failed") as Error & {
+                code: string;
+              };
+              err.code = "P2002";
+              throw err;
+            }
+
+            const current = rows.get(args.where.userId_providerId.providerId);
+            if (current) return current;
+            rows.set(args.create.providerId, args.create);
+            return args.create;
+          },
+        ),
+      },
+    };
+
+    const settings = await listSearchSettings({
+      keychain: keychain({}),
+      store: raceStore,
+      userId: "user-test",
+    });
+
+    expect(settings.providers.map((provider) => provider.id)).toEqual([
+      "TAVILY",
+      "SERPER",
+      "BRAVE",
+    ]);
+    expect(raceStore.searchProviderConfig.findUnique).toHaveBeenCalledWith({
+      where: {
+        userId_providerId: {
+          providerId: "TAVILY",
+          userId: "user-test",
+        },
+      },
+    });
+  });
+
   it("falls back to the next enabled provider when the first configured provider rate limits", async () => {
     const fetchImpl = vi
       .fn()

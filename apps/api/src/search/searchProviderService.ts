@@ -178,21 +178,54 @@ function projectSettingsToSummary(row: ProjectSearchSettingsRow) {
   };
 }
 
-async function ensureProviderRows(store: SearchProviderStore, userId: string) {
-  const rows = await Promise.all(
-    SEARCH_PROVIDERS.map((definition) =>
-      store.searchProviderConfig.upsert({
-        create: {
-          enabled: false,
-          memoryScope: "NONE",
-          providerId: definition.id,
-          userId,
-        },
-        update: {},
-        where: { userId_providerId: { providerId: definition.id, userId } },
-      }),
-    ),
+function isUniqueConstraintRace(err: unknown) {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    (err as { code?: string }).code === "P2002"
   );
+}
+
+async function ensureProviderRow(
+  store: SearchProviderStore,
+  userId: string,
+  definition: SearchProviderDefinition,
+) {
+  const where = {
+    userId_providerId: { providerId: definition.id, userId },
+  };
+
+  try {
+    return await store.searchProviderConfig.upsert({
+      create: {
+        enabled: false,
+        memoryScope: "NONE",
+        providerId: definition.id,
+        userId,
+      },
+      update: {},
+      where,
+    });
+  } catch (err) {
+    if (!isUniqueConstraintRace(err)) throw err;
+
+    const existing = await store.searchProviderConfig.findUnique({ where });
+    if (existing) return existing;
+
+    logger.warn(
+      { err, providerId: definition.id, userId },
+      "Search provider row raced on create and was not found afterward",
+    );
+    throw err;
+  }
+}
+
+async function ensureProviderRows(store: SearchProviderStore, userId: string) {
+  const rows: SearchProviderConfigRow[] = [];
+  for (const definition of SEARCH_PROVIDERS) {
+    rows.push(await ensureProviderRow(store, userId, definition));
+  }
   return rows;
 }
 

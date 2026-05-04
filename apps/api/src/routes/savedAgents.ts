@@ -65,6 +65,13 @@ function agentIdParam(req: { params: { agentId?: string } }) {
   return agentId;
 }
 
+function savedAgentRunStatusFromAgentRun(status: string | null | undefined) {
+  if (status === "COMPLETED") return "COMPLETED";
+  if (status === "FAILED") return "FAILED";
+  if (status === "CANCELLED") return "CANCELLED";
+  return null;
+}
+
 async function ensureDefaultProject(store: typeof prisma) {
   return store.project.upsert({
     create: {
@@ -75,6 +82,63 @@ async function ensureDefaultProject(store: typeof prisma) {
     update: {},
     where: { id: "default-project" },
   });
+}
+
+async function syncInlineSavedAgentRun({
+  agentRunId,
+  savedAgentRunId,
+  store,
+}: {
+  agentRunId: string;
+  savedAgentRunId: string;
+  store: typeof prisma;
+}) {
+  const run = await store.agentRun.findUnique({
+    select: { completedAt: true, result: true, status: true },
+    where: { id: agentRunId },
+  });
+  const status = savedAgentRunStatusFromAgentRun(run?.status);
+  if (!run || !status) return;
+
+  await store.savedAgentRun.update({
+    data: {
+      completedAt: run.completedAt ?? new Date(),
+      error: status === "FAILED" ? (run.result ?? "Saved agent run failed") : null,
+      status,
+    },
+    where: { id: savedAgentRunId },
+  });
+}
+
+async function dispatchSavedAgentRunInBackground({
+  agentRunId,
+  dispatchAgentRun,
+  goal,
+  savedAgentRunId,
+  store,
+}: {
+  agentRunId: string;
+  dispatchAgentRun: typeof defaultDispatchAgentRun;
+  goal: string;
+  savedAgentRunId: string;
+  store: typeof prisma;
+}) {
+  try {
+    const result = await dispatchAgentRun(agentRunId, goal);
+    if (result.mode === "inline") {
+      await syncInlineSavedAgentRun({ agentRunId, savedAgentRunId, store });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await store.savedAgentRun.update({
+      data: {
+        completedAt: new Date(),
+        error: message,
+        status: "FAILED",
+      },
+      where: { id: savedAgentRunId },
+    });
+  }
 }
 
 export function createSavedAgentsRouter({
@@ -206,16 +270,12 @@ export function createSavedAgentsRouter({
         data: { lastRunAt: new Date() },
         where: { id: agent.id },
       });
-      dispatchAgentRun(run.id, agent.prompt).catch(async (err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        await store.savedAgentRun.update({
-          data: {
-            completedAt: new Date(),
-            error: message,
-            status: "FAILED",
-          },
-          where: { id: savedAgentRun.id },
-        });
+      void dispatchSavedAgentRunInBackground({
+        agentRunId: run.id,
+        dispatchAgentRun,
+        goal: agent.prompt,
+        savedAgentRunId: savedAgentRun.id,
+        store,
       });
       res.json({
         agentRunId: run.id,

@@ -18,6 +18,14 @@ function store() {
         agentRuns.set(run.id, run);
         return run;
       }),
+      findUnique: vi.fn(async (args) => {
+        return agentRuns.get(args.where.id) ?? null;
+      }),
+      update: vi.fn(async (args) => {
+        const run = { ...agentRuns.get(args.where.id), ...args.data };
+        agentRuns.set(args.where.id, run);
+        return run;
+      }),
     },
     conversation: {
       create: vi.fn(async (args) => {
@@ -89,6 +97,7 @@ function store() {
 function app(
   dispatchAgentRun = vi.fn(async () => ({ mode: "inline" as const })),
 ) {
+  const routeStore = store();
   const server = express();
   server.use(express.json());
   server.use(
@@ -96,10 +105,10 @@ function app(
     createSavedAgentsRouter({
       dispatchAgentRun,
       getUserId: () => "user-test",
-      store: store() as never,
+      store: routeStore as never,
     }),
   );
-  return { dispatchAgentRun, server };
+  return { dispatchAgentRun, routeStore, server };
 }
 
 describe("saved agents routes", () => {
@@ -137,5 +146,55 @@ describe("saved agents routes", () => {
       `/api/saved-agents/${create.body.agent.id}`,
     );
     expect(remove.status).toBe(204);
+  });
+
+  it("syncs saved-agent run status when Temporal falls back inline", async () => {
+    const routeStore = store();
+    const dispatchAgentRun = vi.fn(async (runId: string) => {
+      await routeStore.agentRun.update({
+        data: {
+          completedAt: new Date("2026-05-04T10:00:00.000Z"),
+          result: "Provider unavailable",
+          status: "FAILED",
+        },
+        where: { id: runId },
+      });
+      return { mode: "inline" as const };
+    });
+    const server = express();
+    server.use(express.json());
+    server.use(
+      "/api",
+      createSavedAgentsRouter({
+        dispatchAgentRun,
+        getUserId: () => "user-test",
+        store: routeStore as never,
+      }),
+    );
+
+    const create = await request(server)
+      .post("/api/saved-agents")
+      .send({
+        connectorAccess: [],
+        memoryScope: "NONE",
+        name: "Inline fallback",
+        outputTarget: { type: "chat" },
+        prompt: "Summarize my inbox.",
+        trigger: "manual",
+      });
+
+    const run = await request(server).post(
+      `/api/saved-agents/${create.body.agent.id}/run`,
+    );
+    expect(run.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(routeStore.savedAgentRun.update).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        error: "Provider unavailable",
+        status: "FAILED",
+      }),
+      where: { id: expect.stringMatching(/^saved-run-/) },
+    });
   });
 });
