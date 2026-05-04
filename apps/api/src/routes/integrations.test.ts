@@ -64,6 +64,17 @@ function createApp() {
     }),
     deleteIntegration: vi.fn().mockResolvedValue({ deleted: true }),
     listSettings: vi.fn().mockResolvedValue(settingsFixture),
+    saveLocalVault: vi.fn().mockResolvedValue({
+      integration: {
+        accountAlias: "default",
+        connectorId: "obsidian",
+        defaultAccount: true,
+        id: "integration-obsidian",
+        memoryScope: "NONE",
+        metadata: { vaultPath: "/tmp/handle-vault-test" },
+        status: "CONNECTED",
+      },
+    }),
     testIntegration: vi.fn().mockResolvedValue({
       integration: {
         accountAlias: "default",
@@ -145,6 +156,16 @@ describe("integrations routes", () => {
       integrationId: "integration-test",
       memoryScope: "PROJECT_ONLY",
       userId: "user-test",
+    });
+
+    await request(app)
+      .post("/api/integrations/obsidian/local-vault")
+      .send({ accountAlias: "default", vaultPath: "/tmp/handle-vault-test" })
+      .expect(200);
+    expect(nangoService.saveLocalVault).toHaveBeenCalledWith({
+      accountAlias: "default",
+      userId: "user-test",
+      vaultPath: "/tmp/handle-vault-test",
     });
 
     await request(app).delete("/api/integrations/integration-test").expect(200);

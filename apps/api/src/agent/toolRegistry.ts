@@ -17,6 +17,7 @@ export interface ToolExecutionContext {
   conversationId?: string;
   integrationRuntime?: IntegrationToolRuntime;
   memoryContext?: string;
+  memoryEnabled?: boolean;
   memoryProject?: MemoryProjectContext | null;
   obsidianVaultPath?: string;
   projectId?: string;

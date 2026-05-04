@@ -696,11 +696,12 @@ export function createAgentRunner({
       const trustedDomains = await loadTrustedDomains(store);
       let recalledMemory: MemoryFact[] = [];
       const memoryProjectForRun = normalizeMemoryProjectContext(project);
+      const memoryEnabledForRun = currentMessageMemoryEnabled(runContext, goal);
       try {
         recalledMemory = await getRelevantMemoryForTask({
           conversationId: runContext.conversationId,
           goal,
-          memoryEnabled: currentMessageMemoryEnabled(runContext, goal),
+          memoryEnabled: memoryEnabledForRun,
           project: memoryProjectForRun,
           taskId,
         });
@@ -860,6 +861,7 @@ export function createAgentRunner({
         ...(memoryProject && runContext.conversationId
           ? { conversationId: runContext.conversationId }
           : {}),
+        memoryEnabled: memoryEnabledForRun,
         ...(memoryContext ? { memoryContext } : {}),
         ...(memoryProject ? { memoryProject } : {}),
         ...(project?.id ? { projectId: project.id } : {}),

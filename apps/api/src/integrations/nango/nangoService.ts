@@ -5,6 +5,7 @@ import type {
   MemoryScope,
 } from "@handle/shared";
 import type { PrismaClient } from "@prisma/client";
+import { realpath, stat } from "node:fs/promises";
 import type { Logger } from "pino";
 import { logger as defaultLogger } from "../../lib/logger";
 import {
@@ -72,6 +73,13 @@ export interface CompleteConnectionInput {
   connectorId: IntegrationConnectorId;
   connectionId?: string;
   userId: string;
+}
+
+export interface SaveLocalVaultInput {
+  accountAlias?: string;
+  memoryScope?: MemoryScope;
+  userId: string;
+  vaultPath: string;
 }
 
 export interface UpdateIntegrationInput {
@@ -567,6 +575,68 @@ export function createNangoService({
     return { integration: serializeConnection(row) };
   }
 
+  async function saveLocalVault({
+    accountAlias,
+    memoryScope,
+    userId,
+    vaultPath,
+  }: SaveLocalVaultInput) {
+    const connector = requireConnector("obsidian");
+    const trimmedPath = vaultPath.trim();
+    if (!trimmedPath) {
+      throw new IntegrationError({
+        code: "validation_error",
+        connectorId: "obsidian",
+        message: "Obsidian vault path is required.",
+      });
+    }
+
+    const stats = await stat(trimmedPath).catch(() => null);
+    if (!stats?.isDirectory()) {
+      throw new IntegrationError({
+        code: "validation_error",
+        connectorId: "obsidian",
+        message: "Obsidian vault path must be an existing directory.",
+      });
+    }
+
+    const resolvedVaultPath = await realpath(trimmedPath);
+    const alias = sanitizeAlias(accountAlias?.trim() || "default");
+    const existingDefaults = await prisma.integration.count({
+      where: { connectorId: connector.prismaId, defaultAccount: true, userId },
+    });
+    const row = await prisma.integration.upsert({
+      create: {
+        accountAlias: alias,
+        accountLabel: alias,
+        connectorId: connector.prismaId,
+        defaultAccount: existingDefaults === 0,
+        memoryScope: memoryScope ?? "NONE",
+        metadata: { vaultPath: resolvedVaultPath },
+        scopes: [],
+        status: "CONNECTED",
+        userId,
+      },
+      update: {
+        accountLabel: alias,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        ...(memoryScope ? { memoryScope } : {}),
+        metadata: { vaultPath: resolvedVaultPath },
+        status: "CONNECTED",
+      },
+      where: {
+        userId_connectorId_accountAlias: {
+          accountAlias: alias,
+          connectorId: connector.prismaId,
+          userId,
+        },
+      },
+    });
+
+    return { integration: serializeConnection(row) };
+  }
+
   async function testIntegration(integrationId: string, userId: string) {
     const row = await prisma.integration.findFirst({
       where: { id: integrationId, userId },
@@ -585,6 +655,39 @@ export function createNangoService({
       });
     }
     if (!row.nangoConnectionId || !row.nangoIntegrationId) {
+      if (connector.connectorId === "obsidian") {
+        const metadata =
+          row.metadata && typeof row.metadata === "object"
+            ? (row.metadata as Record<string, unknown>)
+            : {};
+        const vaultPath =
+          typeof metadata.vaultPath === "string" ? metadata.vaultPath : null;
+        if (!vaultPath) {
+          throw new IntegrationError({
+            code: "not_connected",
+            connectorId: connector.connectorId,
+            message: "Obsidian vault path is not configured.",
+          });
+        }
+        const pathStats = await stat(vaultPath).catch(() => null);
+        const ok = Boolean(pathStats?.isDirectory());
+        const updated = await prisma.integration.update({
+          data: {
+            lastErrorCode: ok ? null : "not_connected",
+            lastErrorMessage: ok ? null : "Obsidian vault path is not reachable.",
+            lastHealthCheckAt: new Date(),
+            status: ok ? "CONNECTED" : "ERROR",
+          },
+          where: { id: row.id },
+        });
+        return {
+          ...(ok
+            ? { profilePreview: { vaultPath } }
+            : { error: "Obsidian vault path is not reachable." }),
+          integration: serializeConnection(updated),
+          ok,
+        };
+      }
       throw new IntegrationError({
         code: "not_connected",
         connectorId: connector.connectorId,
@@ -960,6 +1063,7 @@ export function createNangoService({
     listSettings,
     requestIntegration,
     resolveConnectedIntegration,
+    saveLocalVault,
     saveConnectorOAuthApp,
     saveNangoSecret,
     syncConnectorWithNango,

@@ -10,6 +10,7 @@ import {
   createDefaultIntegrationToolRuntime,
   type IntegrationToolRuntime,
 } from "../integrations/toolRuntime";
+import { maybeRecordIntegrationMemoryCandidate } from "../integrations/integrationMemory";
 import { SafetyGovernor } from "../execution/safetyGovernor";
 import { appendActionLog } from "../lib/actionLog";
 import { emitTaskEvent } from "../lib/eventBus";
@@ -712,6 +713,13 @@ function createWriteTool<T extends z.AnyZodObject>({
           target: target(parsed),
           timestamp: new Date().toISOString(),
         });
+        await maybeRecordIntegrationMemoryCandidate({
+          ...(accountAlias ? { accountAlias } : {}),
+          action,
+          connectorId,
+          context,
+          target: target(parsed),
+        });
         return output;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -1051,6 +1059,12 @@ function createObsidianWriteTool<T extends z.AnyZodObject>({
           reversible: false,
           target: target(parsed),
           timestamp: new Date().toISOString(),
+        });
+        await maybeRecordIntegrationMemoryCandidate({
+          action,
+          connectorId: "obsidian",
+          context,
+          target: target(parsed),
         });
         return output;
       } catch (err) {

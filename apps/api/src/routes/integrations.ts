@@ -38,6 +38,14 @@ const completeConnectionSchema = z
   })
   .strict();
 
+const localVaultSchema = z
+  .object({
+    accountAlias: z.string().trim().min(1).max(80).optional(),
+    memoryScope: z.enum(["GLOBAL_AND_PROJECT", "PROJECT_ONLY", "NONE"]).optional(),
+    vaultPath: z.string().trim().min(1).max(2000),
+  })
+  .strict();
+
 const updateIntegrationSchema = z
   .object({
     accountAlias: z.string().trim().min(1).max(80).optional(),
@@ -69,6 +77,12 @@ export interface CreateIntegrationsRouterOptions {
     deleteIntegration(integrationId: string, userId: string): Promise<unknown>;
     listSettings(userId: string): Promise<IntegrationSettingsResponse>;
     testIntegration(integrationId: string, userId: string): Promise<unknown>;
+    saveLocalVault(input: {
+      accountAlias?: string;
+      memoryScope?: MemoryScope;
+      userId: string;
+      vaultPath: string;
+    }): Promise<unknown>;
     updateIntegration(input: {
       accountAlias?: string;
       accountLabel?: string | null;
@@ -188,6 +202,37 @@ export function createIntegrationsRouter({
         };
         const result = await integrations.completeConnection(input);
         return res.json(result);
+      } catch (err) {
+        return res.status(integrationHttpStatus(err)).json(formatIntegrationError(err));
+      }
+    }),
+  );
+
+  router.post(
+    "/integrations/obsidian/local-vault",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+      const parsed = localVaultSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res
+          .status(400)
+          .json({ error: "Invalid request", details: parsed.error.flatten() });
+      }
+
+      try {
+        const input = {
+          userId,
+          vaultPath: parsed.data.vaultPath,
+          ...(parsed.data.accountAlias
+            ? { accountAlias: parsed.data.accountAlias }
+            : {}),
+          ...(parsed.data.memoryScope
+            ? { memoryScope: parsed.data.memoryScope }
+            : {}),
+        };
+        return res.json(await integrations.saveLocalVault(input));
       } catch (err) {
         return res.status(integrationHttpStatus(err)).json(formatIntegrationError(err));
       }
