@@ -103,6 +103,7 @@
     "smoke:settings-memory-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/settings-memory.spec.ts",
     "smoke:settings-notifications-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/settings-notifications.spec.ts",
     "smoke:settings-search-providers-ui": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/settings-search-providers.spec.ts",
+    "smoke:saved-agents": "pnpm --filter @handle/api exec vitest run src/routes/savedAgents.test.ts --no-file-parallelism && playwright test --config apps/web/playwright.config.ts apps/web/playwright/settings-saved-agents.spec.ts",
     "smoke:settings-providers-ui": "playwright test --config apps/web/playwright.config.ts --workers=1",
     "smoke:shared-memory-primitive": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/shared-memory-primitive.mjs",
     "smoke:workspace-backend-pill": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-backend-pill.spec.ts",

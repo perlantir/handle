@@ -37,6 +37,7 @@ import { IntegrationsSettings } from "./IntegrationsSettings";
 import { MemorySettings } from "./MemorySettings";
 import { NotificationsSettings } from "./NotificationsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
+import { SavedAgentsSettings } from "./SavedAgentsSettings";
 import { SearchProvidersSettings } from "./SearchProvidersSettings";
 import { WorkflowsSettings } from "./WorkflowsSettings";
 
@@ -101,6 +102,7 @@ type SettingsSection =
   | "Memory"
   | "Notifications"
   | "Providers"
+  | "Saved Agents"
   | "Search"
   | "Workflows";
 
@@ -117,6 +119,7 @@ const settingsNav: Array<{
   { label: "Integrations", section: "Integrations" },
   { label: "Search", section: "Search" },
   { label: "Workflows", section: "Workflows" },
+  { label: "Saved Agents", section: "Saved Agents" },
   { label: "Notifications", section: "Notifications" },
   { disabled: true, label: "Profile" },
   { disabled: true, label: "Approvals & trust" },
@@ -555,6 +558,7 @@ export function SettingsProvidersScreen() {
           {activeSection === "Notifications" ? <NotificationsSettings /> : null}
           {activeSection === "Search" ? <SearchProvidersSettings /> : null}
           {activeSection === "Workflows" ? <WorkflowsSettings /> : null}
+          {activeSection === "Saved Agents" ? <SavedAgentsSettings /> : null}
 
           {activeSection === "Providers" && loading ? (
             <div className="flex items-center gap-2 text-[12.5px] text-text-tertiary">

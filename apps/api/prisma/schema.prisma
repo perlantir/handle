@@ -236,6 +236,40 @@ model WorkflowRun {
   @@index([status])
 }
 
+model SavedAgent {
+  id              String          @id @default(cuid())
+  userId          String
+  name            String
+  prompt          String
+  connectorAccess String[]
+  trigger         String          @default("manual")
+  schedule        String?
+  outputTarget    Json            @default("{\"type\":\"chat\"}")
+  memoryScope     MemoryScope     @default(NONE)
+  enabled         Boolean         @default(true)
+  lastRunAt       DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  runs            SavedAgentRun[]
+
+  @@index([userId, enabled])
+  @@index([trigger])
+}
+
+model SavedAgentRun {
+  id           String     @id @default(cuid())
+  savedAgentId String
+  savedAgent   SavedAgent @relation(fields: [savedAgentId], references: [id], onDelete: Cascade)
+  status       String     @default("QUEUED")
+  taskRunId    String?
+  error        String?
+  ranAt        DateTime   @default(now())
+  completedAt  DateTime?
+
+  @@index([savedAgentId, ranAt])
+  @@index([taskRunId])
+}
+
 model SearchProviderConfig {
   id                 String           @id @default(cuid())
   userId             String

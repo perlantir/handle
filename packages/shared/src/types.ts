@@ -347,6 +347,31 @@ export interface WorkflowRunSummary {
   workflowId: string;
 }
 
+export interface SavedAgentSummary {
+  connectorAccess: string[];
+  createdAt?: string | null;
+  enabled: boolean;
+  id: string;
+  lastRunAt?: string | null;
+  memoryScope: MemoryScope;
+  name: string;
+  outputTarget: Record<string, unknown>;
+  prompt: string;
+  schedule?: string | null;
+  trigger: 'manual' | 'schedule' | string;
+  updatedAt?: string | null;
+}
+
+export interface SavedAgentRunSummary {
+  completedAt?: string | null;
+  error?: string | null;
+  id: string;
+  ranAt?: string | null;
+  savedAgentId: string;
+  status: string;
+  taskRunId?: string | null;
+}
+
 export type IntegrationConnectorId =
   | 'gmail'
   | 'slack'
