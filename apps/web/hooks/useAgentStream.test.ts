@@ -3,6 +3,7 @@ import { agentStreamReducer, type AgentStreamState } from './useAgentStream';
 
 const initialState: AgentStreamState = {
   browserScreenshots: [],
+  criticReviews: [],
   error: null,
   finalMessage: null,
   memoryFacts: [],
@@ -36,13 +37,64 @@ describe('agentStreamReducer', () => {
       type: 'event',
     });
 
-    expect(state.planSteps).toHaveLength(1);
+    expect(state.planSteps).toMatchObject([{ state: 'done', title: 'Write file' }]);
     expect(state.toolCalls[0]).toMatchObject({
       result: 'ok',
       status: 'done',
       streams: [{ channel: 'stdout', content: 'ok' }],
     });
     expect(state.finalMessage).toBe('Done');
+  });
+
+  it('marks the first plan step active until tools complete', () => {
+    let state = agentStreamReducer(initialState, {
+      event: {
+        steps: [
+          { id: '1', state: 'pending', title: 'Inspect project' },
+          { id: '2', state: 'pending', title: 'Run tests' },
+        ],
+        taskId: 'task-test',
+        type: 'plan_update',
+      },
+      type: 'event',
+    });
+
+    expect(state.planSteps.map((step) => step.state)).toEqual(['active', 'pending']);
+
+    state = agentStreamReducer(state, {
+      event: {
+        args: { command: 'ls' },
+        callId: 'call-1',
+        taskId: 'task-test',
+        toolName: 'shell.exec',
+        type: 'tool_call',
+      },
+      type: 'event',
+    });
+    state = agentStreamReducer(state, {
+      event: { callId: 'call-1', result: 'ok', taskId: 'task-test', type: 'tool_result' },
+      type: 'event',
+    });
+
+    expect(state.planSteps.map((step) => step.state)).toEqual(['done', 'active']);
+  });
+
+  it('dedupes critic reviews by id', () => {
+    const event = {
+      createdAt: '2026-05-01T00:00:00.000Z',
+      id: 'critic-1',
+      interventionPoint: 'post-plan-before-execute',
+      reasoning: 'Looks safe.',
+      taskId: 'task-test',
+      type: 'critic_review' as const,
+      verdict: 'APPROVE' as const,
+    };
+
+    let state = agentStreamReducer(initialState, { event, type: 'event' });
+    state = agentStreamReducer(state, { event, type: 'event' });
+
+    expect(state.criticReviews).toHaveLength(1);
+    expect(state.criticReviews[0]).toMatchObject({ verdict: 'APPROVE' });
   });
 
   it('clears a pending approval when the task leaves WAITING', () => {

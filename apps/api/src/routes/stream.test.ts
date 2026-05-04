@@ -52,6 +52,16 @@ describe("stream route", () => {
         }
 
         return {
+          criticReviews: [
+            {
+              createdAt: new Date("2026-05-01T00:00:01.000Z"),
+              id: "critic-review-1",
+              interventionPoint: "post-plan-before-execute",
+              metadata: { stage: "plan" },
+              reasoning: "Plan is reasonable.",
+              verdict: "APPROVE",
+            },
+          ],
           conversation: {
             messages: [
               {
@@ -63,6 +73,34 @@ describe("stream route", () => {
           },
           id: "task-test",
           status: "COMPLETED",
+          toolCalls: [
+            {
+              steps: [{ id: "step-1", state: "active", title: "Inspect" }],
+              taskId: "task-test",
+              type: "plan_update",
+            },
+            {
+              args: { command: "echo ok" },
+              callId: "call-1",
+              taskId: "task-test",
+              toolName: "shell.exec",
+              type: "tool_call",
+            },
+            {
+              callId: "call-1",
+              channel: "stdout",
+              content: "ok\n",
+              taskId: "task-test",
+              type: "tool_stream",
+            },
+            {
+              callId: "call-1",
+              exitCode: 0,
+              result: "ok",
+              taskId: "task-test",
+              type: "tool_result",
+            },
+          ],
         };
       }
 
@@ -86,6 +124,12 @@ describe("stream route", () => {
     expect(response.status).toBe(200);
     expect(body).toContain('"type":"message"');
     expect(body).toContain('"content":"Worker completed the task."');
+    expect(body).toContain('"type":"plan_update"');
+    expect(body).toContain('"type":"tool_call"');
+    expect(body).toContain('"type":"tool_stream"');
+    expect(body).toContain('"type":"tool_result"');
+    expect(body).toContain('"type":"critic_review"');
+    expect(body).toContain('"verdict":"APPROVE"');
     expect(body).toContain('"type":"status_update"');
     expect(body).toContain('"status":"QUEUED"');
     expect(body).toContain('"status":"RUNNING"');

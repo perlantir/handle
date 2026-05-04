@@ -22,7 +22,10 @@ export interface CriticProjectSettings {
 }
 
 export interface CriticReviewResult {
+  createdAt?: string;
+  id?: string;
   interventionPoint: CriticInterventionPoint;
+  metadata?: Record<string, unknown>;
   reasoning: string;
   verdict: CriticVerdict;
 }
@@ -139,13 +142,13 @@ export async function runCriticReview({
     typeof response.content === "string"
       ? response.content
       : JSON.stringify(response.content);
-  const review = {
+  const review: CriticReviewResult = {
     interventionPoint,
     reasoning: trimReasoning(content.replace(/\b(APPROVE|REVISE|REJECT)\b[:\s-]*/i, "")),
     verdict: parseVerdict(content),
   };
 
-  await store.criticReview?.create({
+  const persistedReview = await store.criticReview?.create({
     data: {
       agentRunId,
       interventionPoint,
@@ -155,6 +158,18 @@ export async function runCriticReview({
       verdict: review.verdict,
     },
   });
+  const persisted =
+    persistedReview && typeof persistedReview === "object"
+      ? (persistedReview as { createdAt?: Date | string; id?: string })
+      : null;
+  if (persisted?.id) review.id = persisted.id;
+  if (persisted?.createdAt) {
+    review.createdAt =
+      persisted.createdAt instanceof Date
+        ? persisted.createdAt.toISOString()
+        : persisted.createdAt;
+  }
+  review.metadata = redactUnknown(metadata) as Record<string, unknown>;
 
   await appendActionLog({
     conversationId,

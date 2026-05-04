@@ -221,4 +221,62 @@ describe("tasks route", () => {
 
     expect(response.body).toMatchObject({ id: "task-test", goal: "Goal" });
   });
+
+  it("hydrates persisted observability events for workspace reloads", async () => {
+    const store: TaskRouteStore = {
+      agentRun: {
+        async create() {
+          return { id: "unused" };
+        },
+        async findFirst() {
+          return {
+            backend: "LOCAL",
+            conversation: {
+              messages: [],
+              project: { id: "project-test", name: "Project" },
+              title: "Conversation",
+            },
+            conversationId: "conversation-test",
+            criticReviews: [
+              {
+                createdAt: new Date("2026-05-01T00:00:00.000Z"),
+                id: "critic-test",
+                interventionPoint: "post-plan-before-execute",
+                metadata: {},
+                reasoning: "Looks good.",
+                verdict: "APPROVE",
+              },
+            ],
+            goal: "Goal",
+            id: "run-test",
+            status: "COMPLETED",
+            toolCalls: [
+              {
+                steps: [{ id: "step-1", state: "pending", title: "Plan" }],
+                taskId: "run-test",
+                type: "plan_update",
+              },
+            ],
+          };
+        },
+      },
+      user: {
+        async upsert() {
+          return {};
+        },
+      },
+    };
+
+    const response = await request(createApp(store, async () => {}))
+      .get("/api/tasks/run-test")
+      .expect(200);
+
+    expect(response.body.observabilityEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "plan_update" }),
+        expect.objectContaining({ type: "critic_review", verdict: "APPROVE" }),
+        expect.objectContaining({ status: "STOPPED", type: "status_update" }),
+      ]),
+    );
+  });
 });

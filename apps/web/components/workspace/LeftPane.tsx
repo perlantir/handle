@@ -400,6 +400,14 @@ function PlanDot({ state }: { state: PlanStep["state"] }) {
 }
 
 function Plan({ steps }: { steps: PlanStep[] }) {
+  if (steps.length === 0) {
+    return (
+      <div className="px-5 py-3 text-[12.5px] leading-[18px] text-text-muted">
+        No plan has been generated for this run yet.
+      </div>
+    );
+  }
+
   return (
     <div className="px-3 pt-1">
       <div className="relative pl-[14px]">
@@ -440,7 +448,7 @@ function Plan({ steps }: { steps: PlanStep[] }) {
 
 function timelineEntries(state: AgentStreamState) {
   const entries: Array<{
-    kind: "plan" | "tool" | "browser" | "memory";
+    kind: "critic" | "plan" | "tool" | "browser" | "memory";
     state: "active" | "done" | "error";
     text: string;
   }> = [];
@@ -466,6 +474,22 @@ function timelineEntries(state: AgentStreamState) {
     });
   });
 
+  state.criticReviews.forEach((review) => {
+    entries.push({
+      kind: "critic",
+      state: review.verdict === "REJECT" ? "error" : review.verdict === "REVISE" ? "active" : "done",
+      text: `Critic ${review.verdict} · ${review.interventionPoint}`,
+    });
+  });
+
+  if (state.memoryFacts.length > 0) {
+    entries.push({
+      kind: "memory",
+      state: "done",
+      text: `Memory recalled · ${state.memoryFacts.length} facts`,
+    });
+  }
+
   if (state.finalMessage)
     entries.push({
       kind: "plan",
@@ -481,6 +505,7 @@ function timelineEntries(state: AgentStreamState) {
 function Timeline({ state }: { state: AgentStreamState }) {
   const colors = {
     browser: "bg-agent-browser",
+    critic: "bg-status-waiting",
     memory: "bg-agent-memory",
     plan: "bg-accent",
     tool: "bg-agent-tool",
@@ -489,34 +514,40 @@ function Timeline({ state }: { state: AgentStreamState }) {
 
   return (
     <div className="flex flex-col gap-px px-5 pt-1">
-      {entries.map((entry, index) => (
-        <div
-          key={`${entry.text}-${index}`}
-          className="flex items-baseline gap-2.5 px-1 py-2"
-        >
-          <span className="w-10 shrink-0 font-mono text-[10.5px] tabular-nums text-text-muted">
-            00:{String(Math.max(entries.length - index, 1)).padStart(2, "0")}
-          </span>
-          <span
-            className={cn(
-              "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-pill",
-              colors[entry.kind],
-            )}
-          />
-          <span
-            className={cn(
-              "min-w-0 flex-1 truncate text-[12px] leading-[17px] tracking-[-0.005em]",
-              entry.kind === "tool" && "font-mono text-[11.5px]",
-              entry.state === "active"
-                ? "font-medium text-text-primary"
-                : "text-text-secondary",
-              entry.state === "error" && "text-status-error",
-            )}
-          >
-            {entry.text}
-          </span>
+      {entries.length === 0 ? (
+        <div className="px-1 py-3 text-[12.5px] leading-[18px] text-text-muted">
+          No timeline events have streamed for this run yet.
         </div>
-      ))}
+      ) : (
+        entries.map((entry, index) => (
+          <div
+            key={`${entry.text}-${index}`}
+            className="flex items-baseline gap-2.5 px-1 py-2"
+          >
+            <span className="w-10 shrink-0 font-mono text-[10.5px] tabular-nums text-text-muted">
+              00:{String(Math.max(entries.length - index, 1)).padStart(2, "0")}
+            </span>
+            <span
+              className={cn(
+                "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-pill",
+                colors[entry.kind],
+              )}
+            />
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-[12px] leading-[17px] tracking-[-0.005em]",
+                entry.kind === "tool" && "font-mono text-[11.5px]",
+                entry.state === "active"
+                  ? "font-medium text-text-primary"
+                  : "text-text-secondary",
+                entry.state === "error" && "text-status-error",
+              )}
+            >
+              {entry.text}
+            </span>
+          </div>
+        ))
+      )}
     </div>
   );
 }

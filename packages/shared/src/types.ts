@@ -123,6 +123,17 @@ export interface MemoryRecallEvent {
   timestamp: string;
 }
 
+export interface CriticReviewEvent {
+  type: 'critic_review';
+  taskId: string;
+  id: string;
+  interventionPoint: string;
+  verdict: CriticVerdict;
+  reasoning: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface MemoryFactSummary {
   id: string;
   confidence: number;
@@ -192,6 +203,7 @@ export type SSEEvent =
   | AgentRunCancelledEvent
   | ApprovalRequestEvent
   | BrowserScreenshotEvent
+  | CriticReviewEvent
   | MemoryRecallEvent
   | MemoryStatusEvent
   | PlanUpdateEvent
@@ -259,6 +271,7 @@ export interface TaskDetailResponse {
   projectName?: string;
   providerId?: string | null;
   providerModel?: string | null;
+  observabilityEvents?: SSEEvent[];
   status: TaskStatus;
   updatedAt?: string;
 }
@@ -280,6 +293,17 @@ export type ProjectPermissionMode = 'FULL_ACCESS' | 'ASK' | 'PLAN';
 export type CriticInterventionScope = 'all' | 'writes-only' | 'risky-only';
 
 export type CriticVerdict = 'APPROVE' | 'REVISE' | 'REJECT';
+
+export interface CriticReviewSummary {
+  id: string;
+  agentRunId: string;
+  projectId?: string | null;
+  interventionPoint: string;
+  verdict: CriticVerdict;
+  reasoning: string;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+}
 
 export type BackendType = 'E2B' | 'LOCAL';
 

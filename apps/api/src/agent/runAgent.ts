@@ -9,7 +9,8 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { emitTaskEvent } from "../lib/eventBus";
+import type { SSEEvent } from "@handle/shared";
+import { emitTaskEvent, registerTaskEventRecorder } from "../lib/eventBus";
 import { appendActionLog, recentActionLogContext } from "../lib/actionLog";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
@@ -52,6 +53,7 @@ import { createComputerUseToolDefinitions } from "./computerUseTools";
 import {
   CriticRejectedError,
   criticEnabled,
+  type CriticReviewResult,
   formatCriticFeedback,
   isCriticRejectedError,
   runCriticReview,
@@ -261,6 +263,20 @@ const DIRECT_COMPUTER_USE_GOAL_PATTERN =
 const BROWSER_GOAL_PATTERN =
   /\b(browser|browse|website|web page|webpage|navigate|click|selector|scroll|firefox|chrome|chromium|form|button|login|signin|checkout|payment)\b/i;
 
+const PERSISTED_OBSERVABILITY_EVENT_TYPES = new Set<SSEEvent["type"]>([
+  "critic_review",
+  "error",
+  "memory_recall",
+  "plan_update",
+  "provider_fallback",
+  "tool_call",
+  "tool_result",
+  "tool_stream",
+]);
+
+const MAX_PERSISTED_OBSERVABILITY_EVENTS = 300;
+const MAX_PERSISTED_STREAM_CHARS = 8_000;
+
 function shouldRunDirectComputerUse(goal: string) {
   return (
     DIRECT_COMPUTER_USE_GOAL_PATTERN.test(goal) &&
@@ -289,6 +305,117 @@ function runStatusToDb(
   if (status === "PAUSED") return "PAUSED";
   if (status === "CANCELLED") return "CANCELLED";
   return status;
+}
+
+function normalizeStoredObservabilityEvents(value: unknown): SSEEvent[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.filter((event): event is SSEEvent => {
+    return (
+      typeof event === "object" &&
+      event !== null &&
+      "type" in event &&
+      typeof event.type === "string" &&
+      "taskId" in event &&
+      typeof event.taskId === "string"
+    );
+  });
+}
+
+function redactedEvent(event: SSEEvent): SSEEvent {
+  try {
+    return JSON.parse(redactSecrets(JSON.stringify(event))) as SSEEvent;
+  } catch {
+    return event;
+  }
+}
+
+function compactStoredObservabilityEvents(events: SSEEvent[], event: SSEEvent) {
+  const nextEvent = redactedEvent(event);
+
+  if (nextEvent.type === "tool_stream") {
+    const last = events.at(-1);
+    if (
+      last?.type === "tool_stream" &&
+      last.callId === nextEvent.callId &&
+      last.channel === nextEvent.channel
+    ) {
+      return [
+        ...events.slice(0, -1),
+        {
+          ...last,
+          content: `${last.content}${nextEvent.content}`.slice(
+            -MAX_PERSISTED_STREAM_CHARS,
+          ),
+        },
+      ];
+    }
+  }
+
+  return [...events, nextEvent].slice(-MAX_PERSISTED_OBSERVABILITY_EVENTS);
+}
+
+async function persistObservabilityEvent(store: TaskStore, event: SSEEvent) {
+  if (!PERSISTED_OBSERVABILITY_EVENT_TYPES.has(event.type)) return;
+
+  const agentRunStore = store.agentRun as
+    | {
+        findUnique(args: unknown): Promise<{ toolCalls?: unknown } | null>;
+        update(args: unknown): Promise<unknown>;
+      }
+    | undefined;
+  if (!agentRunStore) return;
+
+  const run = await agentRunStore.findUnique({
+    select: { toolCalls: true },
+    where: { id: event.taskId },
+  });
+  const events = normalizeStoredObservabilityEvents(run?.toolCalls);
+  await agentRunStore.update({
+    data: { toolCalls: compactStoredObservabilityEvents(events, event) },
+    where: { id: event.taskId },
+  });
+}
+
+function registerRunObservabilityPersistence(store: TaskStore, taskId: string) {
+  let queue = Promise.resolve();
+  const unregister = registerTaskEventRecorder(taskId, (event) => {
+    queue = queue
+      .then(() => persistObservabilityEvent(store, event))
+      .catch((err) => {
+        logger.warn(
+          { err, taskId, type: event.type },
+          "Failed to persist task observability event",
+        );
+      });
+    return queue;
+  });
+
+  return {
+    async flush() {
+      await queue.catch(() => undefined);
+    },
+    unregister,
+  };
+}
+
+function emitCriticReviewEvent(
+  emitEvent: typeof emitTaskEvent,
+  taskId: string,
+  review: CriticReviewResult,
+) {
+  emitEvent({
+    createdAt: review.createdAt ?? new Date().toISOString(),
+    id:
+      review.id ??
+      `${taskId}:${review.interventionPoint}:${review.verdict}:${Date.now()}`,
+    interventionPoint: review.interventionPoint,
+    ...(review.metadata ? { metadata: review.metadata } : {}),
+    reasoning: review.reasoning,
+    taskId,
+    type: "critic_review",
+    verdict: review.verdict,
+  });
 }
 
 async function loadRunContext(store: TaskStore, taskId: string) {
@@ -625,6 +752,7 @@ export function createAgentRunner({
     options: RunAgentOptions = {},
   ) {
     const runControl = beginAgentRun(taskId);
+    const observability = registerRunObservabilityPersistence(store, taskId);
 
     if (isSmokeEnabled()) {
       try {
@@ -644,6 +772,8 @@ export function createAgentRunner({
         }
         throw err;
       } finally {
+        observability.unregister();
+        await observability.flush();
         runControl.unregister();
       }
       return;
@@ -790,6 +920,7 @@ export function createAgentRunner({
           project,
           store,
         });
+        emitCriticReviewEvent(emitEvent, taskId, review);
         emitEvent({
           content: `Critic ${review.verdict}: ${review.reasoning || "No concerns."}`,
           taskId,
@@ -1110,6 +1241,7 @@ export function createAgentRunner({
             project,
             store,
           });
+          emitCriticReviewEvent(emitEvent, taskId, review);
           emitEvent({
             content: `Critic ${review.verdict}: ${review.reasoning || "No concerns."}`,
             taskId,
@@ -1374,6 +1506,8 @@ export function createAgentRunner({
           logger.warn({ err, taskId }, "Failed to shut down execution backend");
         });
       }
+      observability.unregister();
+      await observability.flush();
       runControl.unregister();
     }
   };

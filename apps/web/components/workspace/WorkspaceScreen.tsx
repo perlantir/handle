@@ -27,8 +27,8 @@ function dedupeApprovals(approvals: PendingApproval[]) {
 
 export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
   const { getToken, isLoaded } = useHandleAuth();
-  const state = useAgentStream(taskId);
   const [task, setTask] = useState<TaskDetailResponse | null>(initialTask);
+  const state = useAgentStream(taskId, task?.observabilityEvents);
   const [listedApprovals, setListedApprovals] = useState<PendingApproval[]>([]);
   const [selectedApproval, setSelectedApproval] =
     useState<PendingApproval | null>(null);
@@ -212,6 +212,7 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
             approvals={approvals}
             onReviewApproval={setSelectedApproval}
             state={state}
+            task={task}
           />
         </div>
       </div>

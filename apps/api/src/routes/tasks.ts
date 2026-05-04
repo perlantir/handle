@@ -6,6 +6,7 @@ import { dispatchAgentRun as defaultRunAgent } from "../temporal/dispatcher";
 import { asyncHandler } from "../lib/http";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
+import { replayEventsForRun } from "../lib/runObservability";
 import { isProviderId, type ProviderId } from "../providers/types";
 
 const createTaskSchema = z.object({
@@ -207,6 +208,7 @@ export function createTasksRouter({
                     project: true,
                   },
                 },
+                criticReviews: { orderBy: { createdAt: "asc" } },
               },
               where: { id: req.params.id },
             })
@@ -239,8 +241,11 @@ export function createTasksRouter({
           providerId?: string | null;
           status?: string;
           startedAt?: Date;
+          toolCalls?: unknown;
           updatedAt?: Date;
+          criticReviews?: unknown[];
         };
+        const status = taskStatusFromRun(run.status);
         return res.json({
           backend: backendFromRun(run.backend),
           conversationId:
@@ -268,7 +273,14 @@ export function createTasksRouter({
             run.conversation &&
             "project" in run.conversation &&
             (run.conversation as { project?: { name?: string } }).project?.name,
-          status: taskStatusFromRun(run.status),
+          observabilityEvents: replayEventsForRun({
+            criticReviews: run.criticReviews,
+            includeStatus: true,
+            status,
+            taskId: run.id,
+            toolCalls: run.toolCalls,
+          }),
+          status,
           updatedAt: run.updatedAt?.toISOString(),
         });
       }

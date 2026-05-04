@@ -10,6 +10,7 @@ import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
 import { asyncHandler } from "../lib/http";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
+import { replayEventsForRun } from "../lib/runObservability";
 import { subscribeToTask } from "../lib/eventBus";
 
 interface StreamRouteStore {
@@ -32,6 +33,7 @@ interface PersistedAssistantMessage {
 
 interface PersistedTaskSnapshot {
   messages: PersistedAssistantMessage[];
+  observabilityEvents: SSEEvent[];
   status: TaskStatus;
 }
 
@@ -85,7 +87,13 @@ function normalizeMessages(value: unknown): PersistedAssistantMessage[] {
 function normalizeSnapshot(run: unknown): PersistedTaskSnapshot | null {
   if (!run || typeof run !== "object") return null;
 
+  const taskId = "id" in run && typeof run.id === "string" ? run.id : "";
   const status = taskStatusFromRun("status" in run ? run.status : undefined);
+  const observabilityEvents = replayEventsForRun({
+    criticReviews: "criticReviews" in run ? run.criticReviews : undefined,
+    taskId,
+    toolCalls: "toolCalls" in run ? run.toolCalls : undefined,
+  });
   const conversation =
     "conversation" in run &&
     typeof run.conversation === "object" &&
@@ -99,7 +107,7 @@ function normalizeSnapshot(run: unknown): PersistedTaskSnapshot | null {
         )
       : [];
 
-  return { messages, status };
+  return { messages, observabilityEvents, status };
 }
 
 async function loadPersistedSnapshot(store: StreamRouteStore, taskId: string) {
@@ -113,6 +121,7 @@ async function loadPersistedSnapshot(store: StreamRouteStore, taskId: string) {
           },
         },
       },
+      criticReviews: { orderBy: { createdAt: "asc" } },
     },
     where: { id: taskId },
   });
@@ -151,8 +160,36 @@ export function createStreamRouter({
       let closed = false;
       let lastStatus: TaskStatus | null = null;
       const emittedMessageIds = new Set<string>();
+      const emittedObservabilityKeys = new Set<string>();
+      const liveToolStreamChannels = new Set<string>();
+
+      function observabilityKey(event: SSEEvent) {
+        if (event.type === "critic_review") return `critic_review:${event.id}`;
+        if (event.type === "tool_call") return `tool_call:${event.callId}`;
+        if (event.type === "tool_result") return `tool_result:${event.callId}`;
+        if (event.type === "tool_stream") {
+          return `tool_stream:${event.callId}:${event.channel}:${event.content}`;
+        }
+        return `${event.type}:${JSON.stringify(event)}`;
+      }
+
+      function emitObservabilityEvent(event: SSEEvent) {
+        if (event.type === "tool_stream") {
+          const channelKey = `${event.callId}:${event.channel}`;
+          if (liveToolStreamChannels.has(channelKey)) return;
+        }
+
+        const key = observabilityKey(event);
+        if (emittedObservabilityKeys.has(key)) return;
+        emittedObservabilityKeys.add(key);
+        writeSse(res, event);
+      }
 
       function emitPersistedSnapshot(snapshot: PersistedTaskSnapshot) {
+        snapshot.observabilityEvents.forEach((event) => {
+          emitObservabilityEvent(event);
+        });
+
         snapshot.messages.forEach((message) => {
           if (emittedMessageIds.has(message.id)) return;
           emittedMessageIds.add(message.id);
@@ -184,7 +221,9 @@ export function createStreamRouter({
           clearInterval(heartbeat);
           clearInterval(pollPersistedState);
           unsubscribe();
-          res.end();
+          setTimeout(() => {
+            if (!res.writableEnded) res.end();
+          }, 250);
         }
       }
 
@@ -205,6 +244,10 @@ export function createStreamRouter({
         res.write(":\n\n");
       }, 15_000);
       const unsubscribe = subscribeToTask(taskId, (event) => {
+        if (event.type === "tool_stream") {
+          liveToolStreamChannels.add(`${event.callId}:${event.channel}`);
+        }
+        emittedObservabilityKeys.add(observabilityKey(event));
         writeSse(res, event);
       });
       const pollPersistedState = setInterval(() => {

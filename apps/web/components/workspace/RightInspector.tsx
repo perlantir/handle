@@ -1,7 +1,7 @@
 'use client';
 
-import { Brain, FileText, Globe, Shield } from 'lucide-react';
-import type { PendingApproval } from '@handle/shared';
+import { Brain, FileText, Globe, Scale, Shield } from 'lucide-react';
+import type { PendingApproval, TaskDetailResponse } from '@handle/shared';
 import type { AgentStreamState, ToolCallState } from '@/hooks/useAgentStream';
 import { InspectorBlock, PillButton } from '@/components/design-system';
 import { cn } from '@/lib/utils';
@@ -10,6 +10,7 @@ interface RightInspectorProps {
   approvals: PendingApproval[];
   onReviewApproval: (approval: PendingApproval) => void;
   state: AgentStreamState;
+  task: TaskDetailResponse | null;
 }
 
 function latestToolCall(toolCalls: ToolCallState[]) {
@@ -52,6 +53,10 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCallState }) {
   );
 }
 
+function EmptyState({ children }: { children: string }) {
+  return <div className="text-[12px] leading-[18px] text-text-muted">{children}</div>;
+}
+
 function ApprovalRow({ approval, onReview }: { approval: PendingApproval; onReview: (approval: PendingApproval) => void }) {
   return (
     <div className="flex items-center gap-2.5 rounded-[10px] border border-status-waiting/20 bg-status-waiting/5 px-3 py-2.5">
@@ -64,6 +69,40 @@ function ApprovalRow({ approval, onReview }: { approval: PendingApproval; onRevi
         <PillButton className="h-6 px-2.5 text-[11px]" onClick={() => onReview(approval)} size="sm" variant="primary">
           Review
         </PillButton>
+      )}
+    </div>
+  );
+}
+
+function CriticRow({
+  review,
+}: {
+  review: AgentStreamState['criticReviews'][number];
+}) {
+  return (
+    <div className="rounded-[10px] border border-border-subtle bg-bg-canvas px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <Scale className="h-[12px] w-[12px] shrink-0 text-status-waiting" />
+        <span
+          className={cn(
+            'text-[11px] font-semibold tracking-[0.02em]',
+            review.verdict === 'REJECT'
+              ? 'text-status-error'
+              : review.verdict === 'REVISE'
+                ? 'text-status-waiting'
+                : 'text-status-success',
+          )}
+        >
+          {review.verdict}
+        </span>
+        <span className="min-w-0 truncate text-[10.5px] text-text-tertiary">
+          {review.interventionPoint}
+        </span>
+      </div>
+      {review.reasoning && (
+        <div className="mt-1.5 line-clamp-3 text-[12px] leading-[17px] text-text-secondary">
+          {review.reasoning}
+        </div>
       )}
     </div>
   );
@@ -128,7 +167,32 @@ function MemoryRow({
   );
 }
 
-export function RightInspector({ approvals, onReviewApproval, state }: RightInspectorProps) {
+function sourceRows(toolCalls: ToolCallState[], task: TaskDetailResponse | null) {
+  const rows = new Map<string, { domain: string; sub: string }>();
+
+  toolCalls.forEach((toolCall) => {
+    if (toolCall.toolName === 'shell.exec') {
+      const backend = task?.backend === 'local' ? 'Local Mac' : 'E2B sandbox';
+      rows.set('shell.exec', { domain: backend, sub: 'shell execution' });
+    } else if (toolCall.toolName.startsWith('browser.')) {
+      rows.set('browser', { domain: 'Browser', sub: 'browser automation' });
+    } else if (toolCall.toolName.startsWith('web.')) {
+      rows.set('web', { domain: 'Web search', sub: toolCall.toolName });
+    } else {
+      const integration = toolCall.toolName.split('.')[0] ?? '';
+      if (['gmail', 'slack', 'notion', 'drive', 'github', 'calendar', 'cloudflare', 'vercel', 'linear', 'sheets', 'docs', 'zapier', 'obsidian'].includes(integration)) {
+        rows.set(integration, {
+          domain: integration.charAt(0).toUpperCase() + integration.slice(1),
+          sub: 'integration tool',
+        });
+      }
+    }
+  });
+
+  return Array.from(rows.values());
+}
+
+export function RightInspector({ approvals, onReviewApproval, state, task }: RightInspectorProps) {
   const latestTool = latestToolCall(state.toolCalls);
   const fileTools = state.toolCalls
     .filter((toolCall) => toolCall.toolName.startsWith('file.'))
@@ -137,7 +201,13 @@ export function RightInspector({ approvals, onReviewApproval, state }: RightInsp
       const rightPath = typeof right.args.path === 'string' ? right.args.path : '';
       return Number(rightPath.endsWith('.todo.md')) - Number(leftPath.endsWith('.todo.md'));
     });
-  const currentStep = state.planSteps.findIndex((step) => step.state === 'active') + 1;
+  const activeStepIndex = state.planSteps.findIndex((step) => step.state === 'active');
+  const completedSteps = state.planSteps.filter((step) => step.state === 'done').length;
+  const currentStep =
+    activeStepIndex >= 0
+      ? activeStepIndex + 1
+      : Math.min(completedSteps, state.planSteps.length);
+  const sources = sourceRows(state.toolCalls, task);
 
   return (
     <aside className="flex min-h-0 flex-col border-l border-border-subtle">
@@ -152,12 +222,29 @@ export function RightInspector({ approvals, onReviewApproval, state }: RightInsp
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-6 pb-6 pt-1">
-        <InspectorBlock title="Current tool call">{latestTool && <ToolCallCard toolCall={latestTool} />}</InspectorBlock>
+        <InspectorBlock title="Current tool call">
+          {latestTool ? <ToolCallCard toolCall={latestTool} /> : <EmptyState>No tool call has run for this task yet.</EmptyState>}
+        </InspectorBlock>
+
+        <InspectorBlock
+          {...(state.criticReviews.length > 0 ? { badge: String(state.criticReviews.length) } : {})}
+          title="Critic review"
+        >
+          {state.criticReviews.length === 0 ? (
+            <EmptyState>No critic interventions recorded for this run.</EmptyState>
+          ) : (
+            state.criticReviews.map((review) => <CriticRow key={review.id} review={review} />)
+          )}
+        </InspectorBlock>
 
         <InspectorBlock {...(approvals.length > 0 ? { badge: String(approvals.length) } : {})} title="Approvals">
-          {approvals.map((approval) => (
-            <ApprovalRow key={approval.approvalId} approval={approval} onReview={onReviewApproval} />
-          ))}
+          {approvals.length === 0 ? (
+            <EmptyState>No approval requests are pending.</EmptyState>
+          ) : (
+            approvals.map((approval) => (
+              <ApprovalRow key={approval.approvalId} approval={approval} onReview={onReviewApproval} />
+            ))
+          )}
         </InspectorBlock>
 
         <InspectorBlock
@@ -165,21 +252,29 @@ export function RightInspector({ approvals, onReviewApproval, state }: RightInsp
           title="Memory used"
         >
           {state.memoryFacts.length === 0 ? (
-            <div className="text-[12px] leading-[18px] text-text-muted">No memory recalled for this run.</div>
+            <EmptyState>No memory recalled for this run.</EmptyState>
           ) : (
             state.memoryFacts.map((fact) => <MemoryRow fact={fact} key={`${fact.source}:${fact.content}`} />)
           )}
         </InspectorBlock>
 
         <InspectorBlock title="Files touched">
-          {fileTools.map((toolCall) => (
-            <FileRow key={toolCall.callId} toolCall={toolCall} />
-          ))}
+          {fileTools.length === 0 ? (
+            <EmptyState>No file tools have run for this task.</EmptyState>
+          ) : (
+            fileTools.map((toolCall) => (
+              <FileRow key={toolCall.callId} toolCall={toolCall} />
+            ))
+          )}
         </InspectorBlock>
 
         <InspectorBlock title="Sources">
-          {state.toolCalls.some((toolCall) => toolCall.toolName === 'shell.exec') && (
-            <SourceRow domain="e2b.dev" sub="sandbox runtime" />
+          {sources.length === 0 ? (
+            <EmptyState>No external runtime or source was used yet.</EmptyState>
+          ) : (
+            sources.map((source) => (
+              <SourceRow domain={source.domain} key={`${source.domain}:${source.sub}`} sub={source.sub} />
+            ))
           )}
         </InspectorBlock>
       </div>
