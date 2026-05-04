@@ -44,8 +44,10 @@ Focused smokes run during implementation:
 - `pnpm --filter @handle/api typecheck`
 - `pnpm --filter @handle/web typecheck`
 
-Final all-repo verification status should be filled in after the final
-`pnpm test` and `pnpm build` runs complete.
+Final all-repo verification:
+
+- `pnpm test` - PASS. API: 57 files / 364 tests. Web: 2 files / 8 tests.
+- `pnpm build` - PASS. Shared, API, and Web built successfully.
 
 ## Audit Needs From User
 
