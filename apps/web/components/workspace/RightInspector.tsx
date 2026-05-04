@@ -72,21 +72,22 @@ function ApprovalRow({ approval, onReview }: { approval: PendingApproval; onRevi
 function FileRow({ toolCall }: { toolCall: ToolCallState }) {
   const path = typeof toolCall.args.path === 'string' ? toolCall.args.path : toolCall.toolName;
   const state = toolCall.status === 'running' ? 'active' : toolCall.status === 'error' ? 'error' : 'done';
+  const isTodo = path.endsWith('.todo.md');
 
   return (
     <div className="flex items-center gap-2.5 py-1">
       <div
         className={cn(
           'flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px]',
-          state === 'active' ? 'bg-accent/15 text-accent' : 'bg-bg-muted text-text-tertiary',
+          isTodo ? 'bg-agent-memory/15 text-agent-memory' : state === 'active' ? 'bg-accent/15 text-accent' : 'bg-bg-muted text-text-tertiary',
           state === 'error' && 'text-status-error',
         )}
       >
         <FileText className="h-[11px] w-[11px]" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate font-mono text-[12px] text-text-primary">{path}</div>
-        <div className="text-[10.5px] text-text-muted">{state}</div>
+        <div className="truncate font-mono text-[12px] text-text-primary">{isTodo ? `todo.md · ${path}` : path}</div>
+        <div className="text-[10.5px] text-text-muted">{isTodo ? 'sticky task plan' : state}</div>
       </div>
     </div>
   );
@@ -129,7 +130,13 @@ function MemoryRow({
 
 export function RightInspector({ approvals, onReviewApproval, state }: RightInspectorProps) {
   const latestTool = latestToolCall(state.toolCalls);
-  const fileTools = state.toolCalls.filter((toolCall) => toolCall.toolName.startsWith('file.'));
+  const fileTools = state.toolCalls
+    .filter((toolCall) => toolCall.toolName.startsWith('file.'))
+    .sort((left, right) => {
+      const leftPath = typeof left.args.path === 'string' ? left.args.path : '';
+      const rightPath = typeof right.args.path === 'string' ? right.args.path : '';
+      return Number(rightPath.endsWith('.todo.md')) - Number(leftPath.endsWith('.todo.md'));
+    });
   const currentStep = state.planSteps.findIndex((step) => step.state === 'active') + 1;
 
   return (

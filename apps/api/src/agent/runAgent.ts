@@ -3,10 +3,11 @@ import type { E2BSandboxLike, ExecutionBackend } from "../execution/types";
 import { createBrowserDesktopSandbox } from "../execution/browserSession";
 import { LocalBackend, type LocalBackendOptions } from "../execution/localBackend";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { emitTaskEvent } from "../lib/eventBus";
-import { recentActionLogContext } from "../lib/actionLog";
+import { appendActionLog, recentActionLogContext } from "../lib/actionLog";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
@@ -53,6 +54,7 @@ import {
   pauseReason,
 } from "./runControl";
 import { isSmokeAgentEnabled, runSmokeAgent } from "./smokeAgent";
+import { ensureTodoMd, formatTodoMdContext, type TodoMdResult } from "./todoMd";
 
 const PLAN_GENERATION_TIMEOUT_MS = Number.parseInt(
   process.env.HANDLE_PLAN_GENERATION_TIMEOUT_MS ?? "60000",
@@ -427,6 +429,63 @@ function localWorkspaceDirForProject(project: ProjectContext | null | undefined,
   return defaultProjectWorkspaceDir(project?.id, taskId);
 }
 
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+async function emitTodoMdFileEvent({
+  backend,
+  emitEvent,
+  project,
+  runContext,
+  taskId,
+  todo,
+}: {
+  backend: ExecutionBackend;
+  emitEvent: typeof emitTaskEvent;
+  project: ProjectContext | null;
+  runContext: AgentRunContext;
+  taskId: string;
+  todo: TodoMdResult;
+}) {
+  const callId = randomUUID();
+  emitEvent({
+    args: {
+      contentLength: todo.content.length,
+      path: todo.path,
+      reason: "Persistent task tracking",
+    },
+    callId,
+    taskId,
+    toolName: "file.write",
+    type: "tool_call",
+  });
+  emitEvent({
+    callId,
+    result: `${todo.created ? "Created" : "Loaded"} ${todo.path}`,
+    taskId,
+    type: "tool_result",
+  });
+  if (todo.created) {
+    await appendActionLog({
+      conversationId: runContext.conversationId,
+      description: `Created task todo file ${todo.path}`,
+      metadata: { byteCount: todo.content.length, kind: "todo_md" },
+      outcomeType: "file_created",
+      projectId: project?.id ?? "unknown",
+      reversible: backend.id === "local" && todo.path.startsWith(backend.getWorkspaceDir()),
+      target: todo.path,
+      taskId,
+      timestamp: new Date().toISOString(),
+      ...(backend.id === "local" && todo.path.startsWith(backend.getWorkspaceDir())
+        ? { undoCommand: `rm ${shellQuote(todo.path)}` }
+        : {}),
+    }).catch((err) => {
+      logger.warn({ err, path: todo.path, taskId }, "Failed to action-log todo.md creation");
+    });
+  }
+}
+
 function timeoutError(label: string, timeoutMs: number) {
   return new Error(`${label} timed out after ${timeoutMs}ms`);
 }
@@ -694,6 +753,25 @@ export function createAgentRunner({
       await updateRun(store, taskId, { sandboxId: sandbox.sandboxId });
       runControl.throwIfCancelled();
 
+      const todoMd = await ensureTodoMd({
+        backend,
+        conversationId: runContext.conversationId,
+        goal,
+      }).catch((err) => {
+        logger.warn({ err, taskId }, "Failed to prepare todo.md; continuing without it");
+        return null;
+      });
+      if (todoMd) {
+        await emitTodoMdFileEvent({
+          backend,
+          emitEvent,
+          project,
+          runContext,
+          taskId,
+          todo: todoMd,
+        });
+      }
+
       const trustedDomains = await loadTrustedDomains(store);
       let recalledMemory: MemoryFact[] = [];
       const memoryProjectForRun = normalizeMemoryProjectContext(project);
@@ -799,6 +877,7 @@ export function createAgentRunner({
         proceduralContext,
         failureMemoryContext,
         resumeContext,
+        formatTodoMdContext(todoMd),
         actionContext,
       ]
         .filter((item) => item.trim().length > 0)

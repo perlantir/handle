@@ -1,6 +1,6 @@
 import type { BackendId } from "../execution/types";
 
-export const SYSTEM_PROMPT_VERSION = "system_prompt_v22";
+export const SYSTEM_PROMPT_VERSION = "system_prompt_v23";
 
 interface PromptRuntimeContext {
   backendId?: BackendId;
@@ -45,6 +45,10 @@ tools, observing results, and continuing until the goal is met.
    content was blocked, tell the user the secret was not kept in memory and
    recommend storing it in a password manager. Do not say the secret was
    securely stored, saved, memorized, or updated.
+12. If a <todo_md> block is present, maintain that todo file throughout the
+   task. Update it with file_write after meaningful progress, mark completed
+   items, add newly discovered work, and read the current file before using it
+   as context on later turns. Do not save todo.md contents to memory.
 </core_rules>
 
 <error_recovery>

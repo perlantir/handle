@@ -109,6 +109,7 @@
     "smoke:sidebar-scroll": "playwright test --config apps/web/playwright.config.ts apps/web/playwright/workspace-ui-regression.spec.ts --grep \"long project lists\"",
     "smoke:trajectory-recording": "pnpm --filter @handle/api exec tsx ../../scripts/smoke/trajectory-recording.mjs",
     "smoke:temporal-dev-stack": "node scripts/smoke/temporal-dev-stack.mjs",
+    "smoke:todo-md-tracking": "pnpm --filter @handle/api exec vitest run src/agent/todoMd.test.ts src/agent/prompts.test.ts --no-file-parallelism",
     "smoke:trivial-question-no-tools": "node scripts/smoke/trivial-question-no-tools.mjs",
     "smoke:web-signin": "node scripts/smoke/web-signin.mjs",
     "smoke:web-search-routing": "pnpm --filter @handle/api exec vitest run src/search/searchProviderService.test.ts src/routes/searchSettings.test.ts src/agent/createAgent.test.ts src/agent/prompts.test.ts --no-file-parallelism",
