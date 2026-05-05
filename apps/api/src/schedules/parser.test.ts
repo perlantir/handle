@@ -38,18 +38,76 @@ describe("parseNaturalSchedule", () => {
       cronExpression: "9 16 * * *",
       explanation: "Every day at 4:09 PM",
       input: {
+        directMessage: true,
         goal: "Hello",
+        message: "Hello",
       },
       name: "Daily Hello email",
       outputTarget: {
         channel: "EMAIL",
       },
       targetRef: {
+        directMessage: true,
         goal: "Hello",
+        message: "Hello",
       },
       targetType: "TASK",
       timezone: "America/Chicago",
     });
     expect(parsed.nextRuns.slice(0, 3)).toHaveLength(3);
+  });
+
+  it("extracts the message body from email-me-at-time phrasing", () => {
+    const parsed = parseNaturalSchedule({
+      text: "email me at 4:43PM daily and say hello",
+      timezone: "America/Chicago",
+    });
+
+    expect(parsed).toMatchObject({
+      cronExpression: "43 16 * * *",
+      explanation: "Every day at 4:43 PM",
+      input: {
+        directMessage: true,
+        goal: "Hello",
+        message: "Hello",
+      },
+      name: "Daily Hello email",
+      outputTarget: {
+        channel: "EMAIL",
+      },
+      targetRef: {
+        directMessage: true,
+        goal: "Hello",
+        message: "Hello",
+      },
+      targetType: "TASK",
+      timezone: "America/Chicago",
+    });
+  });
+
+  it("extracts arbitrary literal messages without special-casing hello", () => {
+    const parsed = parseNaturalSchedule({
+      text: "email me daily at 4:59PM and say automated delivery test from handle",
+      timezone: "America/Chicago",
+    });
+
+    expect(parsed).toMatchObject({
+      cronExpression: "59 16 * * *",
+      input: {
+        directMessage: true,
+        goal: "Automated delivery test from handle",
+        message: "Automated delivery test from handle",
+      },
+      name: "Daily Automated delivery test from handle email",
+      outputTarget: {
+        channel: "EMAIL",
+      },
+      targetRef: {
+        directMessage: true,
+        goal: "Automated delivery test from handle",
+        message: "Automated delivery test from handle",
+      },
+      targetType: "TASK",
+    });
   });
 });

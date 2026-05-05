@@ -1076,17 +1076,32 @@ function buildCreateRequest(draft: ScheduleDraft) {
 }
 
 function targetRefForDraft(draft: ScheduleDraft) {
-  if (draft.targetType === "TASK") return { goal: draft.goal || draft.naturalLanguage };
+  if (draft.targetType === "TASK") return taskPayloadForDraft(draft);
   if (draft.targetType === "SKILL_WORKFLOW") return parseJson(draft.targetRefJson, { workflowId: "" });
   return { skillSlug: draft.targetSkillSlug || "research-company" };
 }
 
 function inputForDraft(draft: ScheduleDraft) {
-  if (draft.targetType === "TASK") return { goal: draft.goal || draft.naturalLanguage };
+  if (draft.targetType === "TASK") return taskPayloadForDraft(draft);
   if (draft.targetSkillSlug === "research-company" || draft.targetType === "WIDE_RESEARCH") {
     return { company: draft.company || "Company", depth: draft.depth || "standard" };
   }
   return parseJson(draft.inputJson, {});
+}
+
+function taskPayloadForDraft(draft: ScheduleDraft) {
+  const parsedInput = parseJson<Record<string, unknown>>(draft.inputJson, {});
+  const parsedTargetRef = parseJson<Record<string, unknown>>(draft.targetRefJson, {});
+  const goal = draft.goal || draft.naturalLanguage;
+  if (parsedInput.directMessage === true || parsedTargetRef.directMessage === true) {
+    const message = typeof parsedInput.message === "string"
+      ? parsedInput.message
+      : typeof parsedTargetRef.message === "string"
+        ? parsedTargetRef.message
+        : goal;
+    return { directMessage: true, goal, message };
+  }
+  return { goal };
 }
 
 function schedulePatchForFrequency(draft: ScheduleDraft): Partial<ScheduleDraft> {
@@ -1134,6 +1149,7 @@ function frequencyFromSchedule({ cronExpression, runAt }: { cronExpression: stri
   if (runAt) return "once";
   if (cronExpression === "0 * * * *") return "hourly";
   const parts = parseCronParts(cronExpression);
+  if (parts.dayOfMonthRaw === "*" && parts.weekday === "*") return "daily";
   if (parts.weekday === "1-5") return "weekdays";
   if (parts.dayOfMonthRaw !== "*") return "monthly";
   if (parts.weekday !== "*") return "weekly";

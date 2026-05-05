@@ -214,23 +214,39 @@ export async function updateSchedule({
     include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
     where: { id: scheduleId },
   });
+  const temporalScheduleId = await reconcileTemporalSchedule({
+    existing: {
+      cronExpression: existing.cronExpression,
+      temporalScheduleId: existing.temporalScheduleId,
+      timezone: existing.timezone,
+    },
+    schedule: row,
+    store,
+  });
+  const syncedRow = temporalScheduleId !== row.temporalScheduleId
+    ? await store.schedule.update({
+        data: { temporalScheduleId },
+        include: { runs: { orderBy: { createdAt: "desc" }, take: 1 } },
+        where: { id: row.id },
+      })
+    : row;
   await appendScheduleAudit({
     event: enabled ? "schedule_enabled" : "schedule_disabled",
-    projectId: row.projectId,
-    scheduleId: row.id,
-    status: row.status,
-    targetType: row.targetType,
+    projectId: syncedRow.projectId,
+    scheduleId: syncedRow.id,
+    status: syncedRow.status,
+    targetType: syncedRow.targetType,
     userId,
   });
   await appendScheduleAudit({
     event: "schedule_updated",
-    projectId: row.projectId,
-    scheduleId: row.id,
-    status: row.status,
-    targetType: row.targetType,
+    projectId: syncedRow.projectId,
+    scheduleId: syncedRow.id,
+    status: syncedRow.status,
+    targetType: syncedRow.targetType,
     userId,
   });
-  return serializeSchedule(row);
+  return serializeSchedule(syncedRow);
 }
 
 export async function archiveSchedule({
@@ -335,6 +351,7 @@ export async function runScheduleNow({
       });
       await dispatchScheduleNotifications({
         eventType: "SCHEDULE_INTEGRATION_WAIT",
+        notificationPolicy: schedule.notificationPolicy,
         outputSummary: updated.errorMessage,
         projectId: schedule.projectId,
         scheduleId: schedule.id,
@@ -372,6 +389,7 @@ export async function runScheduleNow({
       });
       await dispatchScheduleNotifications({
         eventType: "SCHEDULE_RUN_FAILED",
+        notificationPolicy: schedule.notificationPolicy,
         outputSummary: updated.errorMessage,
         projectId: schedule.projectId,
         scheduleId: schedule.id,
@@ -427,6 +445,7 @@ export async function runScheduleNow({
     if (mode !== "test") {
       await dispatchScheduleNotifications({
         eventType: updated.changeDetected ? "SCHEDULE_CHANGE_DETECTED" : "SCHEDULE_RUN_COMPLETED",
+        notificationPolicy: schedule.notificationPolicy,
         outputSummary: updated.outputSummary,
         projectId: schedule.projectId,
         scheduleId: schedule.id,
@@ -461,6 +480,7 @@ export async function runScheduleNow({
     });
     await dispatchScheduleNotifications({
       eventType: "SCHEDULE_RUN_FAILED",
+      notificationPolicy: schedule.notificationPolicy,
       outputSummary: updated.errorMessage,
       projectId: schedule.projectId,
       scheduleId: schedule.id,
@@ -668,6 +688,19 @@ async function executeScheduleTarget({
 
   const goal = String(targetRef.goal ?? input.goal ?? "");
   if (!goal) throw new Error("Schedule task target requires a goal");
+  const directMessage = typeof input.message === "string"
+    ? input.message
+    : typeof targetRef.message === "string"
+      ? targetRef.message
+      : null;
+  if ((input.directMessage === true || targetRef.directMessage === true) && directMessage?.trim()) {
+    return {
+      artifacts: jsonInput([]),
+      outputSummary: directMessage.trim(),
+      sources: jsonInput([]),
+      trace: jsonInput([...trace, { status: "completed", title: "Direct scheduled message prepared", type: "TASK" }]),
+    };
+  }
   const agentRun = await createAgentRunForSchedule({
     goal,
     ...(schedule.projectId ? { projectId: schedule.projectId } : {}),
@@ -826,6 +859,60 @@ async function registerTemporalSchedule({
     },
   });
   return temporalScheduleId;
+}
+
+async function reconcileTemporalSchedule({
+  existing,
+  schedule,
+  store,
+}: {
+  existing: {
+    cronExpression?: string | null;
+    temporalScheduleId?: string | null;
+    timezone: string;
+  };
+  schedule: {
+    cronExpression?: string | null;
+    enabled: boolean;
+    id: string;
+    temporalScheduleId?: string | null;
+    timezone: string;
+  };
+  store: ScheduleStore;
+}) {
+  const changedSpec =
+    existing.cronExpression !== schedule.cronExpression ||
+    existing.timezone !== schedule.timezone;
+
+  if (schedule.temporalScheduleId && (!schedule.enabled || !schedule.cronExpression || changedSpec)) {
+    await deleteTemporalSchedule(schedule.temporalScheduleId);
+    return schedule.enabled && schedule.cronExpression
+      ? registerTemporalSchedule({ schedule, store }).catch((err) => {
+          logger.warn({ err, scheduleId: schedule.id }, "Temporal schedule registration failed");
+          return null;
+        })
+      : null;
+  }
+
+  if (schedule.enabled && schedule.cronExpression && !schedule.temporalScheduleId) {
+    return registerTemporalSchedule({ schedule, store }).catch((err) => {
+      logger.warn({ err, scheduleId: schedule.id }, "Temporal schedule registration failed");
+      return null;
+    });
+  }
+
+  return schedule.temporalScheduleId ?? null;
+}
+
+async function deleteTemporalSchedule(temporalScheduleId: string) {
+  const settings = await loadTemporalSettings();
+  if (!settings.enabled) return;
+  try {
+    const client = await createTemporalClient(settings);
+    await client.schedule.getHandle(temporalScheduleId).delete();
+  } catch (err) {
+    logger.warn({ err, temporalScheduleId }, "Temporal schedule deletion failed");
+  }
 }
 
 async function validateTarget({

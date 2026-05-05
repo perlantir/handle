@@ -79,6 +79,13 @@ export async function startSkillRunActivity(input: SkillRunWorkflowInput) {
 export async function startScheduledRunActivity(input: ScheduledRunWorkflowInput) {
   const schedule = await prisma.schedule.findUnique({ where: { id: input.scheduleId } });
   if (!schedule) throw new Error("Schedule not found");
+  if (!schedule.enabled || schedule.status !== "ACTIVE") {
+    logger.info(
+      { scheduleId: schedule.id, status: schedule.status },
+      "Skipping Temporal scheduled run because schedule is not active",
+    );
+    return { completedAt: new Date().toISOString(), scheduleRunId: null, status: "SKIPPED" };
+  }
   const run = await runScheduleNow({
     scheduleId: schedule.id,
     userId: input.userId ?? schedule.userId,

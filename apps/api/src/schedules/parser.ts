@@ -191,24 +191,69 @@ function inferTarget(value: string): {
     };
   }
 
+  const directMessage = extractDirectMessage(value);
+  const goal = extractTaskGoal(value);
+  const taskPayload = {
+    ...(directMessage ? { directMessage: true, message: sentenceCase(directMessage) } : {}),
+    goal,
+  };
   return {
-    input: { goal: extractTaskGoal(value) },
-    label: extractTaskGoal(value) || "Scheduled task",
-    targetRef: { goal: extractTaskGoal(value) },
+    input: taskPayload,
+    label: goal || "Scheduled task",
+    targetRef: taskPayload,
     targetType: "TASK",
   };
 }
 
 function extractTaskGoal(value: string) {
-  const cleaned = value
+  const directMessage = extractDirectMessage(value);
+  if (directMessage) return sentenceCase(directMessage);
+
+  const cleaned = stripScheduleCommand(value);
+  return sentenceCase(cleaned || value);
+}
+
+function stripScheduleCommand(value: string) {
+  return value
     .replace(
       /^(?:every\s*day|everyday|daily|every weekday|weekdays?)\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:central standard time|central daylight time|central time|cst|cdt|ct|eastern standard time|eastern daylight time|eastern time|est|edt|et|mountain standard time|mountain daylight time|mountain time|mst|mdt|mt|pacific standard time|pacific daylight time|pacific time|pst|pdt|pt)?\s*[,;:-]?\s*/i,
       "",
     )
     .replace(/^(?:email|mail|send)\s+me\s+/i, "")
     .replace(/^(?:email|mail|send)\s+/i, "")
+    .replace(/\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/gi, "")
+    .replace(
+      /\b(?:central standard time|central daylight time|central time|cst|cdt|ct|eastern standard time|eastern daylight time|eastern time|est|edt|et|mountain standard time|mountain daylight time|mountain time|mst|mdt|mt|pacific standard time|pacific daylight time|pacific time|pst|pdt|pt)\b/gi,
+      "",
+    )
+    .replace(/\b(?:every\s*day|everyday|daily|every weekday|weekdays?)\b/gi, "")
+    .replace(/^(?:and\s+)?say\s+/i, "")
+    .replace(/^\s*(?:and|then|to)\s+/i, "")
     .trim();
-  return sentenceCase(cleaned || value);
+}
+
+function extractDirectMessage(value: string) {
+  return extractSaidMessage(value) ?? extractGreetingMessage(value);
+}
+
+function extractSaidMessage(value: string) {
+  const raw = value.match(/\b(?:and\s+)?(?:say|message)\s+["“]?(.+?)["”]?\s*$/i)?.[1]?.trim();
+  if (!raw) return null;
+  return cleanTaskMessage(raw);
+}
+
+function extractGreetingMessage(value: string) {
+  const cleaned = stripScheduleCommand(value);
+  if (/^(?:hello|hi|hey|good morning|good afternoon|good evening|good night)\b/i.test(cleaned)) {
+    return cleanTaskMessage(cleaned);
+  }
+  return null;
+}
+
+function cleanTaskMessage(value: string) {
+  return value
+    .replace(/[.!?]+$/g, "")
+    .trim();
 }
 
 function inferOutputTarget(value: string) {

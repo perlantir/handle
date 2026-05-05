@@ -9,6 +9,7 @@ type ScheduleStore = typeof prisma;
 
 interface ScheduleNotificationInput {
   eventType: NotificationEventType;
+  notificationPolicy?: unknown;
   outputSummary?: string | null;
   projectId?: string | null;
   scheduleId: string;
@@ -20,6 +21,7 @@ interface ScheduleNotificationInput {
 
 export async function dispatchScheduleNotifications({
   eventType,
+  notificationPolicy,
   outputSummary,
   projectId,
   scheduleId,
@@ -33,7 +35,9 @@ export async function dispatchScheduleNotifications({
     ...(projectId ? { projectId } : {}),
     store,
   });
-  if (!isEventEnabled(settings.eventTypes, eventType)) return [];
+  const requestedChannel = requestedOutputChannel(notificationPolicy);
+  if (requestedChannel === "IN_APP") return [];
+  if (!requestedChannel && !isEventEnabled(settings.eventTypes, eventType)) return [];
 
   const payload = {
     eventType,
@@ -45,7 +49,7 @@ export async function dispatchScheduleNotifications({
     status,
   };
   const deliveries = [];
-  if (settings.emailEnabled && settings.emailRecipient) {
+  if (shouldSendChannel("EMAIL", requestedChannel) && settings.emailRecipient && (settings.emailEnabled || requestedChannel === "EMAIL")) {
     deliveries.push(await sendDelivery({
       channel: "EMAIL",
       eventType,
@@ -57,7 +61,7 @@ export async function dispatchScheduleNotifications({
       userId,
     }));
   }
-  if (settings.slackEnabled && settings.slackChannelId) {
+  if (shouldSendChannel("SLACK", requestedChannel) && settings.slackChannelId && (settings.slackEnabled || requestedChannel === "SLACK")) {
     deliveries.push(await sendDelivery({
       channel: "SLACK",
       eventType,
@@ -69,7 +73,7 @@ export async function dispatchScheduleNotifications({
       userId,
     }));
   }
-  if (settings.webhookEnabled && settings.webhookUrl) {
+  if (shouldSendChannel("WEBHOOK", requestedChannel) && settings.webhookUrl && (settings.webhookEnabled || requestedChannel === "WEBHOOK")) {
     deliveries.push(await sendDelivery({
       channel: "WEBHOOK",
       eventType,
@@ -82,6 +86,18 @@ export async function dispatchScheduleNotifications({
     }));
   }
   return deliveries;
+}
+
+function shouldSendChannel(channel: NotificationChannel, requestedChannel: NotificationChannel | null) {
+  return !requestedChannel || requestedChannel === channel;
+}
+
+function requestedOutputChannel(policy: unknown): NotificationChannel | "IN_APP" | null {
+  if (!policy || typeof policy !== "object" || Array.isArray(policy)) return null;
+  const record = policy as Record<string, unknown>;
+  const raw = record.outputChannel ?? record.channel;
+  if (raw === "EMAIL" || raw === "SLACK" || raw === "WEBHOOK" || raw === "IN_APP") return raw;
+  return null;
 }
 
 async function resolveNotificationSettings({
