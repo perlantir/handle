@@ -233,6 +233,7 @@ export async function initializeMultiAgentRun({
   return {
     budget,
     contextSummary: contextFromReports(reports, synthesized),
+    ...(synthesized ? { finalResponse: synthesized } : {}),
     primaryRole: finalRoles[0] ?? roles[0] ?? "RESEARCHER",
     reports,
     roles: finalRoles.length > 0 ? finalRoles : roles,

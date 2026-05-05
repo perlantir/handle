@@ -214,6 +214,7 @@ export interface SpecialistExecutionContext extends MultiAgentRuntimeContext {
 export interface MultiAgentRunSummary {
   budget: AgentRunBudgets;
   contextSummary: string;
+  finalResponse?: string;
   primaryRole: AgentSpecialistRole;
   reports: SpecialistReport[];
   roles: AgentSpecialistRole[];

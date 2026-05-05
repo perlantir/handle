@@ -245,12 +245,38 @@ const DIRECT_COMPUTER_USE_GOAL_PATTERN =
   /\b(screenshot|screen|desktop|display)\b/i;
 const BROWSER_GOAL_PATTERN =
   /\b(browser|browse|website|web page|webpage|navigate|click|selector|scroll|firefox|chrome|chromium|form|button|login|signin|checkout|payment)\b/i;
+const OUTPUT_ONLY_MULTI_AGENT_GOAL_PATTERN =
+  /\b(research|compare|comparison|synthesize|analysis|analyze|report|brief|summary|summarize|review|critique|evaluate|recommend|citation|citations|cite|sources?|executive)\b/i;
+const SIDE_EFFECT_MULTI_AGENT_GOAL_PATTERN =
+  /\b(run|execute|shell|terminal|install|start|restart|stop|deploy|send|post|publish|delete|remove|update|modify|edit|commit|push|open|click|navigate|browser|webpage|website|form|login|copy|move|rename|write\s+(?:a\s+)?(?:python|script|code|file))\b/i;
 
 function shouldRunDirectComputerUse(goal: string) {
   return (
     DIRECT_COMPUTER_USE_GOAL_PATTERN.test(goal) &&
     !BROWSER_GOAL_PATTERN.test(goal)
   );
+}
+
+function shouldReturnDirectMultiAgentResponse({
+  goal,
+  multiAgentSummary,
+  requestedMode,
+}: {
+  goal: string;
+  multiAgentSummary: { finalResponse?: string; teamMode?: boolean } | null;
+  requestedMode?: string | null;
+}) {
+  if (!multiAgentSummary?.finalResponse) {
+    return false;
+  }
+
+  const normalizedMode = requestedMode?.toUpperCase() ?? "AUTO";
+  const explicitlyMultiAgent = normalizedMode === "MULTI_AGENT_TEAM";
+  const outputOnlyGoal =
+    OUTPUT_ONLY_MULTI_AGENT_GOAL_PATTERN.test(goal) &&
+    !SIDE_EFFECT_MULTI_AGENT_GOAL_PATTERN.test(goal);
+
+  return outputOnlyGoal && (explicitlyMultiAgent || multiAgentSummary.teamMode === true);
 }
 
 function normalizeProviderOverride(value: string | null | undefined) {
@@ -629,6 +655,54 @@ export function createAgentRunner({
         return null;
       });
       runControl.throwIfCancelled();
+
+      const shouldUseDirectMultiAgentResponse = shouldReturnDirectMultiAgentResponse({
+        goal,
+        multiAgentSummary,
+        requestedMode: options.agentExecutionMode ?? project?.agentExecutionMode ?? null,
+      });
+
+      if (shouldUseDirectMultiAgentResponse && multiAgentSummary?.finalResponse) {
+        const finalMessage = redactSecrets(multiAgentSummary.finalResponse);
+        await createAssistantMessage(store, taskId, runContext, finalMessage, provider);
+        await updateRun(store, taskId, {
+          result: finalMessage,
+          status: "STOPPED",
+        });
+        await completeTrajectory({
+          agentRunId: taskId,
+          outcome: "SUCCEEDED",
+          store,
+        });
+        await synthesizeProceduralTemplatesForRun({
+          projectId: project?.id ?? null,
+          store,
+          taskId,
+        });
+        if (multiAgentSummary.verifierRequired || project?.criticEnabled) {
+          await recordFinalVerifierReview({
+            emitEvent,
+            finalMessage,
+            goal,
+            modelOverride: provider.config.primaryModel,
+            project,
+            providerRegistry,
+            store,
+            taskId,
+            userId: runContext.userId ?? null,
+          }).catch((err) => {
+            logger.warn({ err, taskId }, "Verifier trace failed after direct multi-agent response");
+          });
+        }
+        emitEvent({
+          type: "message",
+          role: "assistant",
+          content: finalMessage,
+          taskId,
+        });
+        emitEvent({ type: "status_update", status: "STOPPED", taskId });
+        return;
+      }
 
       try {
         await withTimeout(
