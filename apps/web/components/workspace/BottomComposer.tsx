@@ -247,6 +247,21 @@ export function BottomComposer({
           const transcript = await transcribeVoice(audioBase64, blob.type || 'audio/webm');
           setVoiceStatus(`Heard: ${transcript.text}`);
           const parsed = await parseVoiceCommand(transcript.text, task?.id, task?.projectId);
+          if (
+            parsed.command.decision === 'NEEDS_CONFIRMATION' &&
+            voiceSettings?.requireConfirmationForVoiceCommands !== false
+          ) {
+            setVoiceStatus(
+              `Heard: ${transcript.text}. Confirm this command with the on-screen control before I act.`,
+            );
+            return;
+          }
+          if (parsed.command.decision === 'REJECTED') {
+            setVoiceStatus(
+              `Rejected: ${parsed.command.rejectionReason ?? 'voice command was not recognized'}`,
+            );
+            return;
+          }
           if (parsed.command.commandType === 'PAUSE_RUN' && onPauseRun) {
             onPauseRun();
           } else if (parsed.command.commandType === 'RESUME_RUN' && onResumeRun) {
