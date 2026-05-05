@@ -184,6 +184,84 @@ describe("createAgentRunner", () => {
     });
   });
 
+  it("dispatches a real task completion notification after successful agent execution", async () => {
+    const testSandbox = sandbox();
+    const backend = backendForSandbox(testSandbox);
+    const notifyTask = vi.fn().mockResolvedValue([]);
+    const store = {
+      message: {
+        create: vi.fn().mockResolvedValue({}),
+      },
+      task: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ backend: "e2b", providerOverride: null }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const runner = createAgentRunner({
+      createAgent: vi.fn().mockResolvedValue({
+        streamEvents: vi.fn().mockReturnValue(successfulStream()),
+      }),
+      createBackend: vi.fn().mockReturnValue(backend),
+      emitEvent: vi.fn(),
+      emitPlan: vi.fn().mockResolvedValue(undefined),
+      isSmokeEnabled: () => false,
+      notifyTask,
+      providerRegistry: {
+        getActiveModel: vi.fn().mockResolvedValue({
+          model: fakeModel,
+          provider: provider("openai", "gpt-4o"),
+        }),
+        initialize: vi.fn().mockResolvedValue(undefined),
+      },
+      store,
+    });
+
+    await runner("task-notify-test", "Do the thing");
+
+    expect(notifyTask).toHaveBeenCalledWith({
+      agentRunId: "task-notify-test",
+      eventType: "TASK_COMPLETED",
+    });
+    expect(store.task.update).toHaveBeenCalledWith({
+      data: { status: "STOPPED" },
+      where: { id: "task-notify-test" },
+    });
+  });
+
+  it("dispatches task completion notifications when smoke-agent mode completes", async () => {
+    const notifyTask = vi.fn().mockResolvedValue([]);
+    const runSmoke = vi.fn().mockResolvedValue(undefined);
+    const runner = createAgentRunner({
+      emitEvent: vi.fn(),
+      isSmokeEnabled: () => true,
+      notifyTask,
+      runSmoke,
+      store: {
+        message: {
+          create: vi.fn().mockResolvedValue({}),
+        },
+        task: {
+          findUnique: vi
+            .fn()
+            .mockResolvedValue({ backend: "e2b", providerOverride: null }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      },
+    });
+
+    await runner("task-smoke-notify-test", "Smoke test goal");
+
+    expect(runSmoke).toHaveBeenCalledWith("task-smoke-notify-test", "Smoke test goal", {
+      signal: expect.any(AbortSignal),
+    });
+    expect(notifyTask).toHaveBeenCalledWith({
+      agentRunId: "task-smoke-notify-test",
+      eventType: "TASK_COMPLETED",
+    });
+  });
+
   it("uses an explicit provider override before the stored task override", async () => {
     const testSandbox = sandbox();
     const createBackend = vi.fn().mockReturnValue(backendForSandbox(testSandbox));

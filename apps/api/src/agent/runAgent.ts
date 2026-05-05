@@ -42,7 +42,10 @@ import {
   type TrajectoryStore,
 } from "../memory/trajectoryMemory";
 import { providerRegistry as defaultProviderRegistry } from "../providers/registry";
-import { notifyTaskEvent } from "../notifications/notificationService";
+import {
+  notifyTaskEvent,
+  type NotifyTaskEventInput,
+} from "../notifications/notificationService";
 import {
   isProviderId,
   type ProviderId,
@@ -247,6 +250,7 @@ interface RunAgentDependencies {
   emitPlan?: typeof emitInitialPlan;
   isSmokeEnabled?: typeof isSmokeAgentEnabled;
   providerRegistry?: ProviderRegistryLike;
+  notifyTask?: typeof notifyTaskEvent;
   runSmoke?: typeof runSmokeAgent;
   store?: TaskStore;
 }
@@ -375,6 +379,24 @@ async function persistObservabilityEvent(store: TaskStore, event: SSEEvent) {
     data: { toolCalls: compactStoredObservabilityEvents(events, event) },
     where: { id: event.taskId },
   });
+}
+
+async function dispatchTaskLifecycleNotification({
+  input,
+  label,
+  notifyTask,
+  taskId,
+}: {
+  input: NotifyTaskEventInput;
+  label: string;
+  notifyTask: typeof notifyTaskEvent;
+  taskId: string;
+}) {
+  try {
+    await notifyTask(input);
+  } catch (err) {
+    logger.warn({ err, taskId }, label);
+  }
 }
 
 function registerRunObservabilityPersistence(store: TaskStore, taskId: string) {
@@ -742,6 +764,7 @@ export function createAgentRunner({
   emitEvent = emitTaskEvent,
   emitPlan = emitInitialPlan,
   isSmokeEnabled = isSmokeAgentEnabled,
+  notifyTask = notifyTaskEvent,
   providerRegistry = defaultProviderRegistry,
   runSmoke = runSmokeAgent,
   store = prisma,
@@ -753,10 +776,23 @@ export function createAgentRunner({
   ) {
     const runControl = beginAgentRun(taskId);
     const observability = registerRunObservabilityPersistence(store, taskId);
+    const shouldDispatchNotifications =
+      store === prisma || notifyTask !== notifyTaskEvent;
 
     if (isSmokeEnabled()) {
       try {
         await runSmoke(taskId, goal, { signal: runControl.signal });
+        if (shouldDispatchNotifications) {
+          await dispatchTaskLifecycleNotification({
+            input: {
+              agentRunId: taskId,
+              eventType: "TASK_COMPLETED",
+            },
+            label: "Smoke task completion notification failed",
+            notifyTask,
+            taskId,
+          });
+        }
       } catch (err) {
         if (runControl.signal.aborted || isAgentRunCancelledError(err)) {
           await updateRun(store, taskId, {
@@ -768,7 +804,33 @@ export function createAgentRunner({
               "Failed to mark smoke task as cancelled",
             );
           });
+          if (shouldDispatchNotifications) {
+            await dispatchTaskLifecycleNotification({
+              input: {
+                agentRunId: taskId,
+                detail: cancelReason(runControl.signal),
+                eventType: "TASK_FAILED",
+              },
+              label: "Smoke task cancellation notification failed",
+              notifyTask,
+              taskId,
+            });
+          }
           return;
+        }
+        if (shouldDispatchNotifications) {
+          const message =
+            err instanceof Error ? err.message : String(err);
+          await dispatchTaskLifecycleNotification({
+            input: {
+              agentRunId: taskId,
+              detail: message,
+              eventType: "TASK_FAILED",
+            },
+            label: "Smoke task failure notification failed",
+            notifyTask,
+            taskId,
+          });
         }
         throw err;
       } finally {
@@ -1178,12 +1240,15 @@ export function createAgentRunner({
           result: finalMessage,
           status: "STOPPED",
         });
-        if (store === prisma) {
-          void notifyTaskEvent({
-            agentRunId: taskId,
-            eventType: "TASK_COMPLETED",
-          }).catch((err) => {
-            logger.warn({ err, taskId }, "Task completion notification failed");
+        if (shouldDispatchNotifications) {
+          await dispatchTaskLifecycleNotification({
+            input: {
+              agentRunId: taskId,
+              eventType: "TASK_COMPLETED",
+            },
+            label: "Task completion notification failed",
+            notifyTask,
+            taskId,
           });
         }
         await completeTrajectory({
@@ -1319,14 +1384,17 @@ export function createAgentRunner({
         result: finalMessage,
         status: finalStatus,
       });
-      if (store === prisma) {
-        void notifyTaskEvent({
-          agentRunId: taskId,
-          eventType:
-            finalStatus === "STOPPED" ? "TASK_COMPLETED" : "TASK_FAILED",
-          ...(finalResult.reason ? { detail: finalResult.reason } : {}),
-        }).catch((err) => {
-          logger.warn({ err, taskId }, "Task final notification failed");
+      if (shouldDispatchNotifications) {
+        await dispatchTaskLifecycleNotification({
+          input: {
+            agentRunId: taskId,
+            eventType:
+              finalStatus === "STOPPED" ? "TASK_COMPLETED" : "TASK_FAILED",
+            ...(finalResult.reason ? { detail: finalResult.reason } : {}),
+          },
+          label: "Task final notification failed",
+          notifyTask,
+          taskId,
         });
       }
       await completeTrajectory({
@@ -1404,16 +1472,16 @@ export function createAgentRunner({
           outcomeReason: reason,
           store,
         });
-        if (store === prisma) {
-          void notifyTaskEvent({
-            agentRunId: taskId,
-            detail: reason,
-            eventType: "TASK_FAILED",
-          }).catch((err) => {
-            logger.warn(
-              { err, taskId },
-              "Task cancellation notification failed",
-            );
+        if (shouldDispatchNotifications) {
+          await dispatchTaskLifecycleNotification({
+            input: {
+              agentRunId: taskId,
+              detail: reason,
+              eventType: "TASK_FAILED",
+            },
+            label: "Task cancellation notification failed",
+            notifyTask,
+            taskId,
           });
         }
 
@@ -1450,16 +1518,16 @@ export function createAgentRunner({
           outcomeReason: message,
           store,
         });
-        if (store === prisma) {
-          void notifyTaskEvent({
-            agentRunId: taskId,
-            detail: message,
-            eventType: "CRITIC_FLAGGED",
-          }).catch((notifyErr) => {
-            logger.warn(
-              { err: notifyErr, taskId },
-              "Critic notification failed",
-            );
+        if (shouldDispatchNotifications) {
+          await dispatchTaskLifecycleNotification({
+            input: {
+              agentRunId: taskId,
+              detail: message,
+              eventType: "CRITIC_FLAGGED",
+            },
+            label: "Critic notification failed",
+            notifyTask,
+            taskId,
           });
         }
         emitEvent({ type: "error", message, taskId });
@@ -1479,16 +1547,16 @@ export function createAgentRunner({
         );
       });
       const failureReason = failureReasonFromError(err);
-      if (store === prisma) {
-        void notifyTaskEvent({
-          agentRunId: taskId,
-          detail: failureReason ?? message,
-          eventType: "TASK_FAILED",
-        }).catch((notifyErr) => {
-          logger.warn(
-            { err: notifyErr, taskId },
-            "Task failure notification failed",
-          );
+      if (shouldDispatchNotifications) {
+        await dispatchTaskLifecycleNotification({
+          input: {
+            agentRunId: taskId,
+            detail: failureReason ?? message,
+            eventType: "TASK_FAILED",
+          },
+          label: "Task failure notification failed",
+          notifyTask,
+          taskId,
         });
       }
       await completeTrajectory({

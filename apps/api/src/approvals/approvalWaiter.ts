@@ -90,7 +90,7 @@ export async function awaitApproval(taskId: string, request: ApprovalPayload, op
   emitEvent({ type: 'status_update', status: 'WAITING', detail: request.reason, taskId });
   emitEvent({ type: 'approval_request', approvalId: approval.id, request, taskId });
   if (store === prisma) {
-    void notifyTaskEvent({
+    await notifyTaskEvent({
       agentRunId: taskId,
       detail: request.reason,
       eventType: 'APPROVAL_NEEDED',
