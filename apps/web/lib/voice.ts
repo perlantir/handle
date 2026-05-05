@@ -34,6 +34,22 @@ export interface VoiceCommandResponse {
   transcriptStored: boolean;
 }
 
+export type VoiceSettingsUpdate = Partial<
+  Pick<
+    VoiceSettingsSummary,
+    | "elevenLabsVoiceId"
+    | "openAiVoice"
+    | "preferredSpeechToTextProvider"
+    | "preferredTextToSpeechProvider"
+    | "readAloudEnabled"
+    | "requireConfirmationForVoiceCommands"
+    | "storeTranscripts"
+    | "verbalApprovalEnabled"
+    | "voiceInputEnabled"
+    | "voiceOutputEnabled"
+  >
+>;
+
 async function parseApiError(response: Response, fallback: string) {
   const body = await response.json().catch(() => null);
   return typeof body?.error === "string" ? body.error : fallback;
@@ -61,9 +77,24 @@ export async function getVoiceSettings() {
   return body.settings;
 }
 
-export async function updateVoiceSettings(input: Partial<VoiceSettingsSummary>) {
+function voiceSettingsUpdatePayload(input: VoiceSettingsUpdate) {
+  return {
+    elevenLabsVoiceId: input.elevenLabsVoiceId,
+    openAiVoice: input.openAiVoice,
+    preferredSpeechToTextProvider: input.preferredSpeechToTextProvider,
+    preferredTextToSpeechProvider: input.preferredTextToSpeechProvider,
+    readAloudEnabled: input.readAloudEnabled,
+    requireConfirmationForVoiceCommands: input.requireConfirmationForVoiceCommands,
+    storeTranscripts: input.storeTranscripts,
+    verbalApprovalEnabled: input.verbalApprovalEnabled,
+    voiceInputEnabled: input.voiceInputEnabled,
+    voiceOutputEnabled: input.voiceOutputEnabled,
+  };
+}
+
+export async function updateVoiceSettings(input: VoiceSettingsUpdate) {
   const body = await requestJson<{ settings: VoiceSettingsSummary }>("/api/settings/voice", {
-    body: JSON.stringify(input),
+    body: JSON.stringify(voiceSettingsUpdatePayload(input)),
     method: "PUT",
   });
   return body.settings;
