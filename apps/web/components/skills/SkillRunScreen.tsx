@@ -315,6 +315,14 @@ function citationString(citation: Record<string, unknown>, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function citationHref(value: string | null) {
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith("//")) return `https:${value}`;
+  if (/^[a-z0-9.-]+\.[a-z]{2,}(?:[/:?#]|$)/i.test(value)) return `https://${value}`;
+  return value;
+}
+
 function CitationList({ citations }: { citations: Array<Record<string, unknown>> }) {
   return (
     <div className="mb-3 max-h-[220px] overflow-auto rounded-[8px] border border-border-subtle bg-bg-base p-2">
@@ -322,16 +330,17 @@ function CitationList({ citations }: { citations: Array<Record<string, unknown>>
         {citations.map((citation, index) => {
           const title = citationString(citation, "title") ?? `Citation ${index + 1}`;
           const url = citationString(citation, "url");
+          const href = citationHref(url);
           const domain = citationString(citation, "domain");
           const publishedAt = citationString(citation, "publishedAt");
           const accessedAt = citationString(citation, "accessedAt");
           const sourceId = citationString(citation, "sourceId");
           return (
             <div className="rounded-[8px] border border-border-subtle bg-bg-canvas px-2.5 py-2 text-[12px]" key={`${url ?? title}-${index}`}>
-              {url ? (
+              {href ? (
                 <a
                   className="inline-flex items-center gap-1.5 font-medium text-text-primary hover:text-accent"
-                  href={url}
+                  href={href}
                   rel="noreferrer"
                   target="_blank"
                 >

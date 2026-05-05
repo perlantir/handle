@@ -565,6 +565,7 @@ function createReadTool<T extends z.AnyZodObject>(
           ...(request.params ? { params: request.params } : {}),
           userId: requireUserId(context),
         });
+        assertProviderResponse(spec.connectorId, response.data);
         const output = formatProviderResponse(response.data);
         emitIntegrationToolResult(context, callId, output);
         return output;
@@ -702,6 +703,7 @@ function createWriteTool<T extends z.AnyZodObject>({
           ...(providerRequest.params ? { params: providerRequest.params } : {}),
           userId: requireUserId(context),
         });
+        assertProviderResponse(connectorId, response.data);
         const output = formatProviderResponse(response.data);
         emitIntegrationToolResult(context, callId, output);
         await appendActionLog({
@@ -759,6 +761,19 @@ function createExecuteTool(
 
 function formatProviderResponse(data: unknown) {
   return truncate(JSON.stringify(redactSecretsInUnknown(data), null, 2), 16_000);
+}
+
+function assertProviderResponse(connectorId: IntegrationConnectorId, data: unknown) {
+  if (connectorId !== "slack" || !data || typeof data !== "object") return;
+  const payload = data as Record<string, unknown>;
+  if (payload.ok === false) {
+    const error = typeof payload.error === "string" ? payload.error : "unknown_error";
+    throw new IntegrationError({
+      code: error === "not_in_channel" ? "validation_error" : "unknown_provider_error",
+      connectorId,
+      message: `Slack returned ${error}.`,
+    });
+  }
 }
 
 function truncate(value: string, maxLength: number) {

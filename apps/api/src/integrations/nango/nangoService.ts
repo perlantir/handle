@@ -95,6 +95,7 @@ export type IntegrationRequestMethod = "DELETE" | "GET" | "PATCH" | "POST" | "PU
 
 export interface IntegrationRequestInput {
   accountAlias?: string;
+  baseUrlOverride?: string;
   connectorId: IntegrationConnectorId;
   data?: unknown;
   endpoint: string;
@@ -770,7 +771,7 @@ export function createNangoService({
         })
       : await prisma.integration.findFirst({
           orderBy: [{ defaultAccount: "desc" }, { accountAlias: "asc" }],
-          where: { ...baseWhere, status: "CONNECTED" },
+          where: { ...baseWhere, status: { in: ["CONNECTED", "ERROR"] } },
         });
 
     if (!row) {
@@ -793,7 +794,7 @@ export function createNangoService({
       });
     }
 
-    if (row.status !== "CONNECTED") {
+    if (row.status !== "CONNECTED" && row.status !== "ERROR") {
       throw new IntegrationError({
         code: statusToIntegrationErrorCode(row.status),
         connectorId,
@@ -813,6 +814,7 @@ export function createNangoService({
 
   async function requestIntegration({
     accountAlias,
+    baseUrlOverride,
     connectorId,
     data,
     endpoint,
@@ -844,9 +846,14 @@ export function createNangoService({
         connectionId: row.nangoConnectionId,
         endpoint,
         providerConfigKey: row.nangoIntegrationId,
+        ...(baseUrlOverride ?? connectorBaseUrlOverride(connectorId)
+          ? { baseUrlOverride: baseUrlOverride ?? connectorBaseUrlOverride(connectorId) }
+          : {}),
         ...(params ? { params } : {}),
         ...(data !== undefined ? { data } : {}),
       });
+      const payload = responseDataPayload(response);
+      assertProviderPayloadSuccess(connectorId, payload);
       await prisma.integration.update({
         data: {
           lastErrorCode: null,
@@ -869,7 +876,7 @@ export function createNangoService({
       return {
         accountAlias: row.accountAlias,
         connectorId,
-        data: responseDataPayload(response),
+        data: payload,
         endpoint,
         method,
       };
@@ -904,6 +911,23 @@ export function createNangoService({
         ...(typeof status === "number" ? { status } : {}),
       });
     }
+  }
+
+  function connectorBaseUrlOverride(connectorId: IntegrationConnectorId) {
+    if (connectorId === "slack") return "https://slack.com";
+    return null;
+  }
+
+  function assertProviderPayloadSuccess(connectorId: IntegrationConnectorId, payload: unknown) {
+    if (connectorId !== "slack" || !payload || typeof payload !== "object") return;
+    const body = payload as Record<string, unknown>;
+    if (body.ok !== false) return;
+    const providerError = typeof body.error === "string" ? body.error : "unknown_error";
+    throw new IntegrationError({
+      code: providerError === "not_in_channel" ? "validation_error" : "unknown_provider_error",
+      connectorId,
+      message: `Slack returned ${providerError}.`,
+    });
   }
 
   async function deleteIntegration(integrationId: string, userId: string) {

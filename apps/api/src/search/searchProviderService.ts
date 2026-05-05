@@ -109,6 +109,15 @@ export class SearchProviderError extends Error {
   }
 }
 
+function normalizeResultUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith("//")) return `https:${trimmed}`;
+  if (/^[a-z0-9.-]+\.[a-z]{2,}(?:[/:?#]|$)/i.test(trimmed)) return `https://${trimmed}`;
+  return trimmed;
+}
+
 function isSearchProviderId(value: string): value is SearchProviderId {
   return value === "TAVILY" || value === "SERPER" || value === "BRAVE";
 }
@@ -424,7 +433,7 @@ function normalizeResults(providerId: SearchProviderId, payload: unknown): Norma
 
   for (const item of raw) {
       const title = asString(item.title);
-      const url = providerId === "SERPER" ? asString(item.link) : asString(item.url);
+      const url = normalizeResultUrl(providerId === "SERPER" ? asString(item.link) : asString(item.url));
       const snippet =
         providerId === "TAVILY"
           ? asString(item.content)
