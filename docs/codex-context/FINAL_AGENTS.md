@@ -681,6 +681,37 @@ When in doubt: pretend you're a paying customer who just used the feature. Would
 
 
 ==================================================
+RULE 37: HANDOFF INTEGRITY
+==================================================
+
+Before claiming a phase or stream complete, list shipped files
+explicitly.
+
+When writing handoff messages, you must:
+
+1. List every directory created or modified
+2. List specific filenames added, not just descriptions
+3. Confirm directory contents match the spec's required files
+4. State which spec sections were skipped or partially implemented,
+   and why
+5. State which audit smokes were run and verify by reading the
+   actual outputs per Rule 36
+
+Vague descriptions of capabilities are not handoffs. They are
+claims. Claims must be backed by listed files and verified outputs.
+
+If you cannot complete a phase fully, stop at a partial
+implementation, list what shipped and what did not, and surface the
+partial honestly. Better to surface "Phase 9: 40% built, missing
+Specialists/Synthesizer/UI, recommend continued cycle" than to ship
+a false 100% handoff.
+
+Rule 36 and Rule 37 work together: test outputs by reading them, and
+list shipped files explicitly. Both are required before any "done"
+claim.
+
+
+==================================================
 END OF STANDING RULES
 ==================================================
 
