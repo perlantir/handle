@@ -14,7 +14,7 @@ describe("parseNaturalSchedule", () => {
         company: "OpenAI",
         depth: "standard",
       },
-      name: "Research OpenAI weekday digest",
+      name: "Research OpenAI weekday digest email",
       outputTarget: {
         channel: "EMAIL",
       },
@@ -22,6 +22,32 @@ describe("parseNaturalSchedule", () => {
         skillSlug: "research-company",
       },
       targetType: "SKILL",
+      timezone: "America/Chicago",
+    });
+    expect(parsed.nextRuns.slice(0, 3)).toHaveLength(3);
+  });
+
+  it("parses everyday wall-clock email automations without falling back to monthly", () => {
+    const parsed = parseNaturalSchedule({
+      text: "everyday at 4:09PM Central standard time email me hello",
+      timezone: "America/Los_Angeles",
+    });
+
+    expect(parsed).toMatchObject({
+      confidence: 0.86,
+      cronExpression: "9 16 * * *",
+      explanation: "Every day at 4:09 PM",
+      input: {
+        goal: "Hello",
+      },
+      name: "Daily Hello email",
+      outputTarget: {
+        channel: "EMAIL",
+      },
+      targetRef: {
+        goal: "Hello",
+      },
+      targetType: "TASK",
       timezone: "America/Chicago",
     });
     expect(parsed.nextRuns.slice(0, 3)).toHaveLength(3);

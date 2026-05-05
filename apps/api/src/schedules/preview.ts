@@ -21,9 +21,9 @@ export function nextRunPreview({ cronExpression, runAt, timezone = "America/Chic
 
   const runs: string[] = [];
   const cursor = new Date();
-  cursor.setMinutes(0, 0, 0);
-  for (let i = 0; i < 730 && runs.length < 3; i += 1) {
-    const candidate = new Date(cursor.getTime() + i * 60 * 60 * 1000);
+  cursor.setSeconds(0, 0);
+  for (let i = 1; i < 60 * 24 * 370 && runs.length < 3; i += 1) {
+    const candidate = new Date(cursor.getTime() + i * 60 * 1000);
     if (!matchesCron(candidate, parsed)) continue;
     runs.push(candidate.toISOString());
   }
@@ -33,7 +33,7 @@ export function nextRunPreview({ cronExpression, runAt, timezone = "America/Chic
 export function humanCron(cronExpression: string | null | undefined) {
   const parsed = parseCron(cronExpression ?? "");
   if (!parsed) return cronExpression ?? "Custom schedule";
-  const time = `${String(parsed.hour).padStart(2, "0")}:${String(parsed.minute).padStart(2, "0")}`;
+  const time = formatClockTime({ hour: parsed.hour, minute: parsed.minute });
   if (parsed.weekday === "1-5") return `Weekdays at ${time}`;
   if (/^[0-6]$/.test(parsed.weekday)) {
     const name = Object.entries(DAY_ALIASES).find(([, value]) => String(value) === parsed.weekday)?.[0] ?? "day";
@@ -41,6 +41,12 @@ export function humanCron(cronExpression: string | null | undefined) {
   }
   if (parsed.day !== "*") return `Monthly on day ${parsed.day} at ${time}`;
   return `Daily at ${time}`;
+}
+
+function formatClockTime({ hour, minute }: { hour: number; minute: number }) {
+  const period = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}:${String(minute).padStart(2, "0")} ${period}`;
 }
 
 interface ParsedCron {
