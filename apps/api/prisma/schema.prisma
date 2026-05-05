@@ -159,7 +159,7 @@ model NotificationSettings {
   slackChannelId String?
   webhookEnabled Boolean  @default(false)
   webhookUrl     String?
-  eventTypes     Json     @default("[\"TASK_COMPLETED\",\"TASK_FAILED\",\"APPROVAL_NEEDED\",\"CRITIC_FLAGGED\"]")
+  eventTypes     Json     @default("[\"TASK_COMPLETED\",\"TASK_FAILED\",\"APPROVAL_NEEDED\",\"CRITIC_FLAGGED\",\"SCHEDULE_RUN_COMPLETED\",\"SCHEDULE_RUN_FAILED\",\"SCHEDULE_RUN_SKIPPED\",\"SCHEDULE_APPROVAL_NEEDED\",\"SCHEDULE_INTEGRATION_WAIT\"]")
   updatedAt      DateTime @default(now()) @updatedAt
 }
 
@@ -232,6 +232,12 @@ enum NotificationEventType {
   TASK_FAILED
   APPROVAL_NEEDED
   CRITIC_FLAGGED
+  SCHEDULE_RUN_COMPLETED
+  SCHEDULE_RUN_FAILED
+  SCHEDULE_RUN_SKIPPED
+  SCHEDULE_CHANGE_DETECTED
+  SCHEDULE_APPROVAL_NEEDED
+  SCHEDULE_INTEGRATION_WAIT
 }
 
 enum NotificationChannel {
@@ -508,7 +514,7 @@ enum SkillArtifactKind {
 }
 
 model Skill {
-  id                         String          @id @default(cuid())
+  id                         String              @id @default(cuid())
   slug                       String
   version                    String
   sourceType                 SkillSourceType
@@ -518,31 +524,31 @@ model Skill {
   name                       String
   description                String
   category                   String
-  icon                       Json            @default("{}")
-  packageMetadata            Json            @default("{}")
+  icon                       Json                @default("{}")
+  packageMetadata            Json                @default("{}")
   packagePath                String?
   skillMd                    String
-  activationExamples         Json            @default("[]")
-  negativeActivationExamples Json            @default("[]")
-  inputSlots                 Json            @default("[]")
-  requiredIntegrations       String[]        @default([])
-  optionalIntegrations       String[]        @default([])
-  runtimePolicy              Json            @default("{}")
-  toolPolicy                 Json            @default("{}")
-  approvalPolicy             Json            @default("{}")
-  outputArtifactContract     Json            @default("{}")
-  sourceCitationPolicy       Json            @default("{}")
-  uiTemplate                 String          @default("standard")
+  activationExamples         Json                @default("[]")
+  negativeActivationExamples Json                @default("[]")
+  inputSlots                 Json                @default("[]")
+  requiredIntegrations       String[]            @default([])
+  optionalIntegrations       String[]            @default([])
+  runtimePolicy              Json                @default("{}")
+  toolPolicy                 Json                @default("{}")
+  approvalPolicy             Json                @default("{}")
+  outputArtifactContract     Json                @default("{}")
+  sourceCitationPolicy       Json                @default("{}")
+  uiTemplate                 String              @default("standard")
   suggestedProvider          String?
   suggestedModel             String?
-  evalFixtures               Json            @default("[]")
-  reusableResources          Json            @default("[]")
-  schedulingConfig           Json            @default("{}")
-  customMetadata             Json            @default("{}")
-  enabled                    Boolean         @default(true)
+  evalFixtures               Json                @default("[]")
+  reusableResources          Json                @default("[]")
+  schedulingConfig           Json                @default("{}")
+  customMetadata             Json                @default("{}")
+  enabled                    Boolean             @default(true)
   archivedAt                 DateTime?
-  createdAt                  DateTime        @default(now())
-  updatedAt                  DateTime        @updatedAt
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
   runs                       SkillRun[]
   schedules                  SkillSchedule[]
   importRecords              SkillImportRecord[]
@@ -609,42 +615,179 @@ model SkillRunStep {
 }
 
 model SkillArtifact {
-  id             String            @id @default(cuid())
-  skillRunId     String
-  skillRun       SkillRun          @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
-  kind           SkillArtifactKind
-  title          String
-  mimeType       String
-  inlineContent  String?
-  contentRef     String?
-  metadata       Json              @default("{}")
-  citations      Json              @default("[]")
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  id            String            @id @default(cuid())
+  skillRunId    String
+  skillRun      SkillRun          @relation(fields: [skillRunId], references: [id], onDelete: Cascade)
+  kind          SkillArtifactKind
+  title         String
+  mimeType      String
+  inlineContent String?
+  contentRef    String?
+  metadata      Json              @default("{}")
+  citations     Json              @default("[]")
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
 
   @@index([skillRunId, kind])
 }
 
 model SkillSchedule {
-  id                 String         @id @default(cuid())
+  id                 String    @id @default(cuid())
   skillId            String
-  skill              Skill          @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skill              Skill     @relation(fields: [skillId], references: [id], onDelete: Cascade)
   userId             String
   projectId          String?
   name               String
-  enabled            Boolean        @default(false)
+  enabled            Boolean   @default(false)
   cronExpression     String?
   runAt              DateTime?
-  timezone           String         @default("America/Chicago")
-  inputs             Json           @default("{}")
+  timezone           String    @default("America/Chicago")
+  inputs             Json      @default("{}")
   temporalScheduleId String?
   lastRunAt          DateTime?
   nextRunAt          DateTime?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   @@index([userId, enabled])
   @@index([skillId])
+}
+
+enum ScheduleTargetType {
+  TASK
+  SKILL
+  SKILL_WORKFLOW
+  WIDE_RESEARCH
+}
+
+enum ScheduleStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+  WAITING_FOR_APPROVAL
+  WAITING_FOR_INTEGRATION
+  ERROR
+}
+
+enum ScheduleRunStatus {
+  QUEUED
+  RUNNING
+  WAITING_FOR_APPROVAL
+  WAITING_FOR_INTEGRATION
+  COMPLETED
+  COMPLETED_WITH_LIMIT
+  FAILED
+  CANCELLED
+  SKIPPED
+  TEST_PASSED
+}
+
+enum ScheduleOverlapPolicy {
+  SKIP
+  BUFFER_ONE
+  BUFFER_ALL
+  CANCEL_OTHER
+  TERMINATE_OTHER
+  ALLOW_ALL
+}
+
+enum ScheduleCatchupPolicy {
+  SKIP_MISSED
+  RUN_LATEST
+  RUN_ALL_WITH_LIMIT
+}
+
+model Schedule {
+  id                    String                @id @default(cuid())
+  userId                String
+  projectId             String?
+  name                  String
+  description           String?
+  targetType            ScheduleTargetType
+  targetRef             Json                  @default("{}")
+  input                 Json                  @default("{}")
+  naturalLanguage       String?
+  cronExpression        String?
+  runAt                 DateTime?
+  timezone              String                @default("America/Chicago")
+  status                ScheduleStatus        @default(PAUSED)
+  enabled               Boolean               @default(false)
+  temporalScheduleId    String?
+  overlapPolicy         ScheduleOverlapPolicy @default(SKIP)
+  catchupPolicy         ScheduleCatchupPolicy @default(SKIP_MISSED)
+  approvalPolicy        Json                  @default("{}")
+  quotaPolicy           Json                  @default("{}")
+  notificationPolicy    Json                  @default("{}")
+  changeDetectionPolicy Json                  @default("{}")
+  metadata              Json                  @default("{}")
+  legacySkillScheduleId String?               @unique
+  lastRunAt             DateTime?
+  nextRunAt             DateTime?
+  archivedAt            DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  runs                  ScheduleRun[]
+
+  @@index([userId, status, createdAt])
+  @@index([targetType, createdAt])
+  @@index([projectId, createdAt])
+  @@index([enabled])
+}
+
+model ScheduleRun {
+  id                 String            @id @default(cuid())
+  scheduleId         String
+  schedule           Schedule          @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  userId             String
+  projectId          String?
+  status             ScheduleRunStatus @default(QUEUED)
+  runMode            String            @default("normal")
+  scheduledFor       DateTime?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  temporalWorkflowId String?
+  agentRunId         String?
+  skillRunId         String?
+  skillWorkflowRunId String?
+  input              Json              @default("{}")
+  outputSummary      String?
+  artifacts          Json              @default("[]")
+  sources            Json              @default("[]")
+  trace              Json              @default("[]")
+  healthChecks       Json              @default("[]")
+  approvalState      Json              @default("{}")
+  quotaSnapshot      Json              @default("{}")
+  costUsd            Decimal?          @db.Decimal(10, 4)
+  changeDetected     Boolean           @default(false)
+  changeSummary      String?
+  errorCode          String?
+  errorMessage       String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([scheduleId, createdAt])
+  @@index([userId, status, createdAt])
+  @@index([agentRunId])
+  @@index([skillRunId])
+}
+
+model ScheduleTemplate {
+  id                 String             @id @default(cuid())
+  slug               String             @unique
+  name               String
+  description        String
+  category           String
+  targetType         ScheduleTargetType
+  targetRef          Json               @default("{}")
+  inputDefaults      Json               @default("{}")
+  scheduleDefaults   Json               @default("{}")
+  policyDefaults     Json               @default("{}")
+  requiredConnectors String[]           @default([])
+  enabled            Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([category, enabled])
 }
 
 model SkillWorkflow {
@@ -664,18 +807,18 @@ model SkillWorkflow {
 }
 
 model SkillWorkflowRun {
-  id                 String          @id @default(cuid())
+  id                 String         @id @default(cuid())
   workflowId         String
-  workflow           SkillWorkflow   @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflow           SkillWorkflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   userId             String
   projectId          String?
-  status             SkillRunStatus  @default(QUEUED)
+  status             SkillRunStatus @default(QUEUED)
   temporalWorkflowId String?
-  inputs             Json            @default("{}")
-  artifactMap        Json            @default("{}")
+  inputs             Json           @default("{}")
+  artifactMap        Json           @default("{}")
   errorCode          String?
   errorMessage       String?
-  createdAt          DateTime        @default(now())
+  createdAt          DateTime       @default(now())
   completedAt        DateTime?
 
   @@index([workflowId, createdAt])

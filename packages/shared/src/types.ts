@@ -477,7 +477,13 @@ export type NotificationEventType =
   | 'TASK_COMPLETED'
   | 'TASK_FAILED'
   | 'APPROVAL_NEEDED'
-  | 'CRITIC_FLAGGED';
+  | 'CRITIC_FLAGGED'
+  | 'SCHEDULE_RUN_COMPLETED'
+  | 'SCHEDULE_RUN_FAILED'
+  | 'SCHEDULE_RUN_SKIPPED'
+  | 'SCHEDULE_CHANGE_DETECTED'
+  | 'SCHEDULE_APPROVAL_NEEDED'
+  | 'SCHEDULE_INTEGRATION_WAIT';
 
 export type NotificationChannel = 'EMAIL' | 'SLACK' | 'WEBHOOK';
 
@@ -820,6 +826,146 @@ export interface SkillScheduleSummary {
   nextRunAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export type ScheduleTargetType = 'TASK' | 'SKILL' | 'SKILL_WORKFLOW' | 'WIDE_RESEARCH';
+export type ScheduleStatus =
+  | 'ACTIVE'
+  | 'PAUSED'
+  | 'ARCHIVED'
+  | 'WAITING_FOR_APPROVAL'
+  | 'WAITING_FOR_INTEGRATION'
+  | 'ERROR';
+export type ScheduleRunStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'WAITING_FOR_APPROVAL'
+  | 'WAITING_FOR_INTEGRATION'
+  | 'COMPLETED'
+  | 'COMPLETED_WITH_LIMIT'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'SKIPPED'
+  | 'TEST_PASSED';
+export type ScheduleOverlapPolicy =
+  | 'SKIP'
+  | 'BUFFER_ONE'
+  | 'BUFFER_ALL'
+  | 'CANCEL_OTHER'
+  | 'TERMINATE_OTHER'
+  | 'ALLOW_ALL';
+export type ScheduleCatchupPolicy = 'SKIP_MISSED' | 'RUN_LATEST' | 'RUN_ALL_WITH_LIMIT';
+
+export interface ScheduleSummary {
+  id: string;
+  userId?: string;
+  projectId?: string | null;
+  name: string;
+  description?: string | null;
+  targetType: ScheduleTargetType;
+  targetRef: Record<string, unknown>;
+  input: Record<string, unknown>;
+  naturalLanguage?: string | null;
+  cronExpression?: string | null;
+  runAt?: string | null;
+  timezone: string;
+  status: ScheduleStatus;
+  enabled: boolean;
+  temporalScheduleId?: string | null;
+  overlapPolicy: ScheduleOverlapPolicy;
+  catchupPolicy: ScheduleCatchupPolicy;
+  approvalPolicy: Record<string, unknown>;
+  quotaPolicy: Record<string, unknown>;
+  notificationPolicy: Record<string, unknown>;
+  changeDetectionPolicy: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  lastRunAt?: string | null;
+  nextRunAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  lastRun?: ScheduleRunSummary | null;
+}
+
+export interface ScheduleRunSummary {
+  id: string;
+  scheduleId: string;
+  userId?: string;
+  projectId?: string | null;
+  status: ScheduleRunStatus;
+  runMode: 'normal' | 'test' | 'backfill';
+  scheduledFor?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  agentRunId?: string | null;
+  skillRunId?: string | null;
+  skillWorkflowRunId?: string | null;
+  input: Record<string, unknown>;
+  outputSummary?: string | null;
+  artifacts: unknown[];
+  sources: unknown[];
+  trace: unknown[];
+  healthChecks: unknown[];
+  approvalState: Record<string, unknown>;
+  quotaSnapshot: Record<string, unknown>;
+  costUsd?: string | null;
+  changeDetected: boolean;
+  changeSummary?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ScheduleRunDetail extends ScheduleRunSummary {
+  schedule: ScheduleSummary;
+}
+
+export interface ScheduleTemplateSummary {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  category: string;
+  targetType: ScheduleTargetType;
+  targetRef: Record<string, unknown>;
+  inputDefaults: Record<string, unknown>;
+  scheduleDefaults: Record<string, unknown>;
+  policyDefaults: Record<string, unknown>;
+  requiredConnectors: string[];
+  enabled: boolean;
+}
+
+export interface ParsedSchedulePreview {
+  confidence: number;
+  cronExpression?: string | null;
+  explanation: string;
+  nextRuns: string[];
+  runAt?: string | null;
+  timezone: string;
+}
+
+export interface CreateScheduleRequest {
+  approvalPolicy?: Record<string, unknown>;
+  catchupPolicy?: ScheduleCatchupPolicy;
+  changeDetectionPolicy?: Record<string, unknown>;
+  cronExpression?: string | null;
+  description?: string;
+  enabled?: boolean;
+  input?: Record<string, unknown>;
+  name: string;
+  naturalLanguage?: string;
+  notificationPolicy?: Record<string, unknown>;
+  overlapPolicy?: ScheduleOverlapPolicy;
+  projectId?: string;
+  quotaPolicy?: Record<string, unknown>;
+  runAt?: string | null;
+  targetRef: Record<string, unknown>;
+  targetType: ScheduleTargetType;
+  timezone?: string;
+}
+
+export interface UpdateScheduleRequest extends Partial<CreateScheduleRequest> {
+  status?: ScheduleStatus;
 }
 
 export interface SkillWorkflowNode {
