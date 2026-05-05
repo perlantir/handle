@@ -26,18 +26,20 @@ function parseRoles(value: unknown) {
 
 export async function createSupervisorDecision({
   goal,
+  modelOverride,
   project,
   providerRegistry,
   taskId,
-}: Pick<MultiAgentRuntimeContext, "goal" | "project" | "providerRegistry" | "taskId">): Promise<SupervisorDecision> {
+}: Pick<MultiAgentRuntimeContext, "goal" | "modelOverride" | "project" | "providerRegistry" | "taskId">): Promise<SupervisorDecision> {
   const mode = normalizeExecutionMode(project?.agentExecutionMode);
   const deterministic = routeGoalToSpecialists(goal, mode);
 
   if (mode !== "AUTO") return deterministic;
 
   try {
+    const resolvedModelOverride = modelOverride ?? project?.defaultModel ?? undefined;
     const { model } = await providerRegistry.getActiveModel({
-      ...(project?.defaultModel ? { modelOverride: project.defaultModel } : {}),
+      ...(resolvedModelOverride ? { modelOverride: resolvedModelOverride } : {}),
       taskId,
     });
     const response = await model.invoke([

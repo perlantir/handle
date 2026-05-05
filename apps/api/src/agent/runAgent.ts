@@ -609,6 +609,7 @@ export function createAgentRunner({
         ...(options.agentExecutionMode ? { agentExecutionModeOverride: options.agentExecutionMode } : {}),
         emitEvent,
         goal,
+        modelOverride: provider.config.primaryModel,
         project,
         providerRegistry,
         store,

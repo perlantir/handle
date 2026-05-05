@@ -68,6 +68,7 @@ export async function initializeMultiAgentRun({
   agentExecutionModeOverride,
   emitEvent,
   goal,
+  modelOverride,
   project,
   providerRegistry = defaultProviderRegistry,
   store,
@@ -77,6 +78,7 @@ export async function initializeMultiAgentRun({
   agentExecutionModeOverride?: string;
   emitEvent: EmitEvent;
   goal: string;
+  modelOverride?: string;
   project?: MultiAgentProjectContext | null;
   providerRegistry?: MultiAgentRuntimeContext["providerRegistry"];
   store: MultiAgentStore;
@@ -140,6 +142,7 @@ export async function initializeMultiAgentRun({
   const runtime: MultiAgentRuntimeContext = {
     emitEvent,
     goal,
+    ...(modelOverride ? { modelOverride } : {}),
     ...(project !== undefined ? { project } : {}),
     providerRegistry,
     store,

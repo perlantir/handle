@@ -73,6 +73,27 @@ function failureReason(err: unknown) {
   return "Unknown provider error";
 }
 
+function canonicalModelOverride(
+  provider: ProviderInstance,
+  modelOverride: string | undefined,
+) {
+  if (!modelOverride) return undefined;
+
+  const trimmed = modelOverride.trim();
+  const displayName = provider.config.modelName?.trim();
+  const primaryModel = provider.config.primaryModel.trim();
+
+  if (displayName && trimmed.toLowerCase() === displayName.toLowerCase()) {
+    return provider.config.primaryModel;
+  }
+
+  if (trimmed.toLowerCase() === primaryModel.toLowerCase()) {
+    return provider.config.primaryModel;
+  }
+
+  return trimmed;
+}
+
 function unavailableReason(provider: ProviderInstance) {
   if (
     provider.id === "openai" &&
@@ -148,7 +169,9 @@ export class ProviderRegistryImpl implements ProviderRegistry {
           continue;
         }
 
-        const model = await provider.createModel(modelOverride);
+        const model = await provider.createModel(
+          canonicalModelOverride(provider, modelOverride),
+        );
 
         if (
           firstFailedProvider &&

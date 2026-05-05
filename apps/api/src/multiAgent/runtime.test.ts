@@ -78,4 +78,52 @@ describe("multi-agent runtime", () => {
     ]);
     expect(JSON.stringify(events)).not.toContain("chain-of-thought");
   });
+
+  it("marks specialist subruns failed when specialist execution fails", async () => {
+    const updates: unknown[] = [];
+    const store = {
+      agentSubRun: {
+        create: vi.fn(async () => ({ id: "subrun-failed" })),
+        update: vi.fn(async (args) => {
+          updates.push(args);
+          return undefined;
+        }),
+      },
+    };
+    const providerRegistry = {
+      getActiveModel: vi.fn(async () => ({
+        model: {
+          invoke: vi.fn(async () => {
+            throw new Error("model not found");
+          }),
+        },
+        provider: {
+          config: { enabled: true, fallbackOrder: 0, id: "openai", primaryModel: "gpt-test" },
+          description: "test",
+          id: "openai",
+          isAvailable: vi.fn(async () => true),
+          createModel: vi.fn(),
+        },
+      })),
+    } as unknown as MultiAgentRuntimeContext["providerRegistry"];
+
+    const summary = await initializeMultiAgentRun({
+      emitEvent: vi.fn(),
+      goal: "Research Stripe",
+      project: { agentExecutionMode: "RESEARCHER" },
+      providerRegistry,
+      store,
+      taskId: "run-test",
+    });
+
+    expect(summary.reports.some((report) => report.status === "failed")).toBe(true);
+    expect(updates).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "FAILED",
+        }),
+        where: { id: "subrun-failed" },
+      }),
+    );
+  });
 });

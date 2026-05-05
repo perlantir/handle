@@ -62,8 +62,9 @@ export async function resolveSpecialistContext(
     runtime.project?.defaultProvider && isProviderId(runtime.project.defaultProvider)
       ? runtime.project.defaultProvider
       : undefined;
+  const modelOverride = runtime.modelOverride ?? runtime.project?.defaultModel ?? undefined;
   const { model, provider } = await runtime.providerRegistry.getActiveModel({
-    ...(runtime.project?.defaultModel ? { modelOverride: runtime.project.defaultModel } : {}),
+    ...(modelOverride ? { modelOverride } : {}),
     taskId: runtime.taskId,
     ...(taskOverride ? { taskOverride } : {}),
   });
@@ -161,6 +162,51 @@ export async function completeSubRun({
     type: "multi_agent_trace",
     ...(subRunId ? { subRunId } : {}),
   });
+}
+
+function failureReportForError({
+  context,
+  err,
+}: {
+  context: SpecialistExecutionContext;
+  err: unknown;
+}): SpecialistReport {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    artifactIds: [],
+    artifacts: [],
+    blockers: [redactSecrets(message)],
+    costCents: 0,
+    findings: [],
+    recommendations: [],
+    role: context.definition.role,
+    safeSummary: `${context.definition.label} failed: ${redactSecrets(message).slice(0, 240)}`,
+    sources: [],
+    status: "failed",
+    toolCallCount: 0,
+  };
+}
+
+export async function failSubRun({
+  context,
+  err,
+  startedAt,
+  subRunId,
+}: {
+  context: SpecialistExecutionContext;
+  err: unknown;
+  startedAt: number;
+  subRunId: string | null;
+}) {
+  const report = failureReportForError({ context, err });
+  await completeSubRun({
+    context,
+    report,
+    startedAt,
+    subRunId,
+    trace: [{ at: new Date().toISOString(), error: report.blockers[0], summary: report.safeSummary }],
+  });
+  return report;
 }
 
 export async function gatherResearchSources({
@@ -289,33 +335,38 @@ export async function executeGenericSpecialist({
 }) {
   const startedAt = Date.now();
   const subRunId = await createSubRun({ context });
-  const prompt = await loadSpecialistPrompt(context.definition.id);
-  let sources: SourceReference[] = [];
-  let toolCallCount = 0;
-  if (searchQuery && context.effectiveRuntimePolicy.maxToolCalls > 0) {
-    const gathered = await gatherResearchSources({ context, query: searchQuery }).catch((err) => {
-      logger.warn({ err, role: context.definition.role, taskId: context.taskId }, "Specialist source gathering failed");
-      return { sources: [] as SourceReference[], toolCallCount: 0 };
+  try {
+    const prompt = await loadSpecialistPrompt(context.definition.id);
+    let sources: SourceReference[] = [];
+    let toolCallCount = 0;
+    if (searchQuery && context.effectiveRuntimePolicy.maxToolCalls > 0) {
+      const gathered = await gatherResearchSources({ context, query: searchQuery }).catch((err) => {
+        logger.warn({ err, role: context.definition.role, taskId: context.taskId }, "Specialist source gathering failed");
+        return { sources: [] as SourceReference[], toolCallCount: 0 };
+      });
+      sources = gathered.sources;
+      toolCallCount += gathered.toolCallCount;
+    }
+    const content = await runLlmReport({
+      context,
+      ...(extraContext !== undefined ? { extraContext } : {}),
+      prompt,
+      sources,
     });
-    sources = gathered.sources;
-    toolCallCount += gathered.toolCallCount;
+    const report = reportFromMarkdown({
+      artifactKind,
+      content,
+      context,
+      sources,
+      toolCallCount: toolCallCount + 1,
+    });
+    emitAndCheckBudget(context, { costCents: report.costCents, specialistSubRuns: 1, toolCalls: report.toolCallCount });
+    await completeSubRun({ context, report, startedAt, subRunId, trace: [{ at: new Date().toISOString(), content: report.safeSummary }] });
+    return report;
+  } catch (err) {
+    logger.warn({ err, role: context.definition.role, taskId: context.taskId }, "Specialist execution failed");
+    return failSubRun({ context, err, startedAt, subRunId });
   }
-  const content = await runLlmReport({
-    context,
-    ...(extraContext !== undefined ? { extraContext } : {}),
-    prompt,
-    sources,
-  });
-  const report = reportFromMarkdown({
-    artifactKind,
-    content,
-    context,
-    sources,
-    toolCallCount: toolCallCount + 1,
-  });
-  emitAndCheckBudget(context, { costCents: report.costCents, specialistSubRuns: 1, toolCalls: report.toolCallCount });
-  await completeSubRun({ context, report, startedAt, subRunId, trace: [{ at: new Date().toISOString(), content: report.safeSummary }] });
-  return report;
 }
 
 export function definitionFor(id: SpecialistId) {

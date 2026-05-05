@@ -212,4 +212,29 @@ describe("ProviderRegistryImpl", () => {
     expect(openrouter.createModel).toHaveBeenCalledWith("override");
     expect(openai.createModel).not.toHaveBeenCalled();
   });
+
+  it("canonicalizes display model names before creating provider models", async () => {
+    const openai = provider("openai", {
+      config: {
+        fallbackOrder: 1,
+        modelName: "GPT-5.2",
+        primaryModel: "gpt-5.2",
+      },
+    });
+    const registry = new ProviderRegistryImpl({
+      createProvider: () => openai,
+      store: store([
+        row({
+          id: "openai",
+          modelName: "GPT-5.2",
+          primaryModel: "gpt-5.2",
+        }),
+      ]),
+    });
+
+    await registry.initialize();
+    await registry.getActiveModel({ modelOverride: "GPT-5.2" });
+
+    expect(openai.createModel).toHaveBeenCalledWith("gpt-5.2");
+  });
 });

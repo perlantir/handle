@@ -39,8 +39,9 @@ export async function synthesizeFinalResponse({
   runtime: MultiAgentRuntimeContext;
 }) {
   if (reports.length === 0) return "";
+  const modelOverride = runtime.modelOverride ?? runtime.project?.defaultModel ?? undefined;
   const { model } = await runtime.providerRegistry.getActiveModel({
-    ...(runtime.project?.defaultModel ? { modelOverride: runtime.project.defaultModel } : {}),
+    ...(modelOverride ? { modelOverride } : {}),
     taskId: runtime.taskId,
   });
   const prompt = await loadSpecialistPrompt("synthesizer").catch(() => SPECIALIST_DEFINITIONS.synthesizer.description);
