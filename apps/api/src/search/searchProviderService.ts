@@ -85,6 +85,7 @@ export interface NormalizedSearchResult {
   publishedAt?: string | null;
   score?: number | null;
   snippet: string;
+  snippetTruncated?: boolean;
   sourceProvider: SearchProviderId;
   title: string;
   url: string;
@@ -420,6 +421,24 @@ function asNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+const SEARCH_RESULT_SNIPPET_MAX_CHARS = 1_200;
+const SEARCH_RESULT_TITLE_MAX_CHARS = 300;
+
+function collapseWhitespace(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function truncateText(value: string, maxChars: number) {
+  const normalized = collapseWhitespace(value);
+  if (normalized.length <= maxChars) {
+    return { text: normalized, truncated: false };
+  }
+  return {
+    text: `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`,
+    truncated: true,
+  };
+}
+
 function normalizeResults(providerId: SearchProviderId, payload: unknown): NormalizedSearchResult[] {
   const body = typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {};
   const raw =
@@ -432,20 +451,22 @@ function normalizeResults(providerId: SearchProviderId, payload: unknown): Norma
   const normalized: NormalizedSearchResult[] = [];
 
   for (const item of raw) {
-      const title = asString(item.title);
+      const title = truncateText(asString(item.title), SEARCH_RESULT_TITLE_MAX_CHARS).text;
       const url = normalizeResultUrl(providerId === "SERPER" ? asString(item.link) : asString(item.url));
-      const snippet =
+      const rawSnippet =
         providerId === "TAVILY"
           ? asString(item.content)
           : providerId === "BRAVE"
             ? asString(item.description)
             : asString(item.snippet);
+      const snippet = truncateText(rawSnippet, SEARCH_RESULT_SNIPPET_MAX_CHARS);
       if (!title || !url) continue;
       const publishedAt = asString(item.published_date) || asString(item.date) || asString(item.page_age) || null;
       normalized.push({
         ...(publishedAt ? { publishedAt } : {}),
         score: asNumber(item.score),
-        snippet,
+        snippet: snippet.text,
+        ...(snippet.truncated ? { snippetTruncated: true } : {}),
         sourceProvider: providerId,
         title,
         url,

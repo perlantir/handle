@@ -92,6 +92,35 @@ describe("queryProvider", () => {
     });
   });
 
+  it("bounds normalized result text so provider payloads cannot flood agent context", async () => {
+    const hugeSnippet = `Lead paragraph.\n\n${"x ".repeat(10_000)}`;
+    const fetchImpl = vi.fn(async () =>
+      response({
+        results: [
+          {
+            content: hugeSnippet,
+            score: 0.8,
+            title: "Very Long Result",
+            url: "https://example.com/huge",
+          },
+        ],
+      }),
+    ) as unknown as typeof fetch;
+
+    const result = await queryProvider({
+      apiKey: "test-key-not-real",
+      fetchImpl,
+      maxResults: 1,
+      providerId: "TAVILY",
+      query: "handle",
+    });
+
+    expect(result.results[0]?.snippet.length).toBeLessThanOrEqual(1_200);
+    expect(result.results[0]?.snippet).toContain("Lead paragraph.");
+    expect(result.results[0]?.snippet).not.toContain("\n");
+    expect(result.results[0]?.snippetTruncated).toBe(true);
+  });
+
   it("calls Serper with X-API-KEY", async () => {
     const fetchImpl = vi.fn(async () =>
       response({
