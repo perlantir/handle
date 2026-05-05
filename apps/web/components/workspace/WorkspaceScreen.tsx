@@ -5,6 +5,7 @@ import type { PendingApproval, TaskDetailResponse } from "@handle/shared";
 import { useAgentStream } from "@/hooks/useAgentStream";
 import { useHandleAuth } from "@/lib/handleAuth";
 import { cancelAgentRun, getTask, listPendingApprovals, pauseAgentRun, resumeAgentRun } from "@/lib/api";
+import { getVoiceSettings, textToSpeech } from "@/lib/voice";
 import { ApprovalModal } from "./ApprovalModal";
 import { BottomComposer } from "./BottomComposer";
 import { CenterPane } from "./CenterPane";
@@ -39,6 +40,7 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
   const [cancellingRun, setCancellingRun] = useState(false);
   const [pausingRun, setPausingRun] = useState(false);
   const [resumingRun, setResumingRun] = useState(false);
+  const [spokenMessage, setSpokenMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("handle.workspace.chatWidth");
@@ -109,6 +111,24 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
   const effectiveStatus = state.status === "IDLE" && task ? task.status : state.status;
   const isRunActive = effectiveStatus === "RUNNING" || effectiveStatus === "WAITING";
   const isRunPaused = effectiveStatus === "PAUSED";
+
+  useEffect(() => {
+    if (!state.finalMessage || spokenMessage === state.finalMessage) return;
+    let cancelled = false;
+    const finalMessage = state.finalMessage;
+    void (async () => {
+      const settings = await getVoiceSettings().catch(() => null);
+      if (!settings?.voiceOutputEnabled || !settings.readAloudEnabled) return;
+      const speech = await textToSpeech(finalMessage.slice(0, 1200));
+      if (cancelled) return;
+      const audio = new Audio(`data:${speech.mimeType};base64,${speech.audioBase64}`);
+      await audio.play();
+      setSpokenMessage(finalMessage);
+    })().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [spokenMessage, state.finalMessage]);
 
   async function handleCancelRun() {
     if (!taskId || cancellingRun) return;

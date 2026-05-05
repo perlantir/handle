@@ -96,6 +96,29 @@ export async function parseVoiceCommand(transcript: string, agentRunId?: string,
   });
 }
 
+export async function parseVoiceApproval(input: {
+  agentRunId?: string;
+  approvalId: string;
+  confirmationCode: string;
+  projectId?: string;
+  target: string;
+  transcript: string;
+}) {
+  return requestJson<{
+    approval: {
+      commandType: string;
+      confidence: number;
+      decision: "EXECUTED" | "REJECTED";
+      rejectionReason?: string;
+      riskLevel: "HIGH";
+    };
+    transcriptStored: true;
+  }>("/api/voice/approvals/parse", {
+    body: JSON.stringify(input),
+    method: "POST",
+  });
+}
+
 export async function textToSpeech(text: string) {
   return requestJson<{ audioBase64: string; mimeType: string; providerId: string }>("/api/voice/tts", {
     body: JSON.stringify({ text }),

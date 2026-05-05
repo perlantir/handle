@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { PendingApproval } from "@handle/shared";
 import {
   ApprovalPill,
@@ -10,6 +10,7 @@ import {
 } from "@/components/design-system";
 import { useHandleAuth } from "@/lib/handleAuth";
 import { respondToApproval } from "@/lib/api";
+import { parseVoiceApproval, transcribeVoice } from "@/lib/voice";
 import { cn } from "@/lib/utils";
 
 interface ApprovalModalProps {
@@ -80,8 +81,12 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
   const { getToken } = useHandleAuth();
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceResult, setVoiceResult] = useState<string | null>(null);
   const [understandsActualChromeRisk, setUnderstandsActualChromeRisk] = useState(false);
   const [alwaysApprove, setAlwaysApprove] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const [scope, action] = scopeLabels[approval.request.type];
   const isActualChromeApproval = approval.request.type === "browser_use_actual_chrome";
   const isHostAffectingApproval =
@@ -94,6 +99,14 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
   const approvalDisabled = isSubmitting || (isActualChromeApproval && !understandsActualChromeRisk);
   const usesDenyApproveLabels =
     isActualChromeApproval || isHostAffectingApproval || isRiskyBrowserAction;
+  const voiceConfirmationCode = useMemo(() => {
+    let hash = 0;
+    for (const char of approval.approvalId) {
+      hash = (hash * 31 + char.charCodeAt(0)) % 9000;
+    }
+    return String(hash + 1000).padStart(4, "0");
+  }, [approval.approvalId]);
+  const voiceTarget = approval.request.integration ?? approval.request.action ?? scope.toLowerCase();
 
   async function decide(decision: "approved" | "denied") {
     setIsSubmitting(true);
@@ -116,6 +129,64 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  async function blobToBase64(blob: Blob) {
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 1) {
+      binary += String.fromCharCode(bytes[index] ?? 0);
+    }
+    return window.btoa(binary);
+  }
+
+  async function handleVoiceApproval() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("Microphone recording is not available in this browser.");
+      return;
+    }
+    if (voiceRecording) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+    setError(null);
+    setVoiceResult(null);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const recorder = new MediaRecorder(stream);
+    chunksRef.current = [];
+    mediaRecorderRef.current = recorder;
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunksRef.current.push(event.data);
+    };
+    recorder.onstop = () => {
+      setVoiceRecording(false);
+      stream.getTracks().forEach((track) => track.stop());
+      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+      void (async () => {
+        try {
+          const audioBase64 = await blobToBase64(blob);
+          const transcript = await transcribeVoice(audioBase64, blob.type || "audio/webm");
+          const parsed = await parseVoiceApproval({
+            agentRunId: approval.taskId,
+            approvalId: approval.approvalId,
+            confirmationCode: voiceConfirmationCode,
+            target: voiceTarget,
+            transcript: transcript.text,
+          });
+          if (parsed.approval.decision !== "EXECUTED") {
+            setVoiceResult(`Rejected: ${parsed.approval.rejectionReason ?? "voice approval did not match"}`);
+            return;
+          }
+          setVoiceResult(`Accepted: ${transcript.text}`);
+          await decide(parsed.approval.commandType === "DENY_ACTION" ? "denied" : "approved");
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Voice approval failed");
+        }
+      })();
+    };
+    recorder.start();
+    setVoiceRecording(true);
   }
 
   return (
@@ -192,6 +263,19 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
         {error && (
           <div className="mt-4 rounded-[10px] border border-status-error/20 bg-status-error/5 px-3 py-2 text-[12px] text-status-error">
             {error}
+          </div>
+        )}
+        {isHostAffectingApproval && (
+          <div className="mt-4 rounded-[10px] border border-border-subtle bg-bg-canvas px-3 py-2">
+            <div className="text-[11px] font-medium uppercase tracking-[0.04em] text-text-muted">Voice approval code</div>
+            <div className="mt-1 font-mono text-[18px] font-semibold text-text-primary">{voiceConfirmationCode}</div>
+            <p className="mt-1 text-[12px] leading-[18px] text-text-secondary">
+              Say approve {voiceTarget} {voiceConfirmationCode} or deny {voiceTarget} {voiceConfirmationCode}.
+            </p>
+            {voiceResult && <p className="mt-2 text-[12px] text-text-secondary">{voiceResult}</p>}
+            <PillButton className="mt-3" onClick={() => void handleVoiceApproval()} type="button" variant="secondary">
+              {voiceRecording ? "Stop listening" : "Listen for voice approval"}
+            </PillButton>
           </div>
         )}
       </div>
