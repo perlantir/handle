@@ -9,6 +9,8 @@ import type {
   SavedAgentSummary,
 } from "@handle/shared";
 import { PillButton } from "@/components/design-system";
+import { FrequencyBuilder } from "./FrequencyBuilder";
+import { SlackChannelPicker } from "./SlackChannelPicker";
 import { getIntegrationSettings } from "@/lib/settingsIntegrations";
 import { cn } from "@/lib/utils";
 import {
@@ -38,6 +40,47 @@ const connectorLabels: Record<IntegrationConnectorId, string> = {
 };
 
 const fallbackConnectors = Object.keys(connectorLabels) as IntegrationConnectorId[];
+
+const promptTemplates = [
+  {
+    label: "Daily inbox digest",
+    prompt: "Every @today, read @inbox, summarize urgent emails, and send me a concise digest with suggested replies.",
+  },
+  {
+    label: "Weekly competitor research",
+    prompt: "Every @last_week, research competitor updates, cite sources, and post a short summary to the selected output target.",
+  },
+  {
+    label: "PR review summary",
+    prompt: "Review new GitHub pull requests from @selected_repositories, summarize risk, and draft follow-up issues for anything high severity.",
+  },
+  {
+    label: "Project status report",
+    prompt: "Summarize project activity from @last_week across connected tools and produce a status report with blockers, wins, and next actions.",
+  },
+];
+
+const variableTokens = ["@today", "@yesterday", "@last_week", "@inbox", "@selected_channels", "@selected_repositories"];
+
+const connectorCapabilities: Partial<Record<IntegrationConnectorId, string[]>> = {
+  gmail: ["read inbox", "search messages", "draft emails", "send with approval"],
+  github: ["list issues", "read pull requests", "summarize code changes", "comment with approval"],
+  notion: ["search pages", "read databases", "create pages with approval"],
+  slack: ["read channels", "search messages", "post with approval"],
+};
+
+function resolvedPromptPreview(prompt: string) {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  return prompt
+    .replaceAll("@today", today.toLocaleDateString())
+    .replaceAll("@yesterday", yesterday.toLocaleDateString())
+    .replaceAll("@last_week", "the last 7 days")
+    .replaceAll("@inbox", "Gmail inbox")
+    .replaceAll("@selected_channels", "selected Slack channels")
+    .replaceAll("@selected_repositories", "selected GitHub repositories");
+}
 
 function connectorOptions(settings: IntegrationSettingsResponse | null) {
   if (!settings) {
@@ -235,6 +278,56 @@ export function SavedAgentsSettings() {
             value={prompt}
           />
 
+          <section className="grid gap-3 rounded-[10px] border border-border-subtle bg-bg-canvas p-3">
+            <div>
+              <div className="text-[11.5px] font-medium text-text-secondary">Prompt starters</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {promptTemplates.map((template) => (
+                  <button
+                    className="rounded-pill border border-border-subtle bg-bg-surface px-2.5 py-1 text-[11.5px] text-text-secondary hover:border-accent hover:text-accent"
+                    key={template.label}
+                    onClick={() => setPrompt(template.prompt)}
+                    type="button"
+                  >
+                    {template.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11.5px] font-medium text-text-secondary">Insert variable</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {variableTokens.map((token) => (
+                  <button
+                    className="rounded-pill border border-border-subtle bg-bg-surface px-2.5 py-1 font-mono text-[11px] text-text-secondary hover:border-accent hover:text-accent"
+                    key={token}
+                    onClick={() => setPrompt((current) => `${current}${current.endsWith(" ") || !current ? "" : " "}${token}`)}
+                    type="button"
+                  >
+                    {token}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-md border border-border-subtle bg-bg-surface p-3">
+              <div className="text-[11.5px] font-medium text-text-secondary">Available connector capabilities</div>
+              <div className="mt-2 grid gap-1 text-[11.5px] text-text-tertiary">
+                {connectorAccess.map((connectorId) => (
+                  <div key={connectorId}>
+                    <span className="font-medium text-text-secondary">{connectorLabels[connectorId]}:</span>{" "}
+                    {(connectorCapabilities[connectorId] ?? ["read connected data", "act with approval"]).join(", ")}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-md border border-border-subtle bg-bg-surface p-3">
+              <div className="text-[11.5px] font-medium text-text-secondary">Resolved prompt preview</div>
+              <p className="m-0 mt-1 whitespace-pre-wrap text-[12px] leading-5 text-text-tertiary">
+                {resolvedPromptPreview(prompt)}
+              </p>
+            </div>
+          </section>
+
           <section className="rounded-[10px] border border-border-subtle bg-bg-canvas p-3">
             <div className="text-[11.5px] font-medium text-text-secondary">
               Connector access
@@ -290,19 +383,9 @@ export function SavedAgentsSettings() {
                 ))}
               </div>
               {trigger === "schedule" ? (
-                <label className="mt-3 grid gap-1 text-[11.5px] font-medium text-text-secondary">
-                  Cron schedule
-                  <input
-                    aria-label="Saved agent schedule"
-                    className="h-9 rounded-md border border-border-subtle bg-bg-surface px-3 font-mono text-[12.5px] text-text-primary outline-none"
-                    onChange={(event) => setSchedule(event.target.value)}
-                    placeholder="0 9 * * 1-5"
-                    value={schedule}
-                  />
-                  <span className="font-normal text-text-tertiary">
-                    Minute hour day month weekday, for example weekdays at 9:00.
-                  </span>
-                </label>
+                <div className="mt-3">
+                  <FrequencyBuilder label="Saved agent schedule" onChange={setSchedule} value={schedule} />
+                </div>
               ) : null}
             </fieldset>
 
@@ -322,11 +405,9 @@ export function SavedAgentsSettings() {
                 </select>
               </label>
               {outputTarget === "slack" ? (
-                <input
-                  aria-label="Saved agent Slack output channel"
-                  className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none"
-                  onChange={(event) => setSlackChannel(event.target.value)}
-                  placeholder="#updates"
+                <SlackChannelPicker
+                  label="Saved agent Slack output channel"
+                  onChange={setSlackChannel}
                   value={slackChannel}
                 />
               ) : null}
