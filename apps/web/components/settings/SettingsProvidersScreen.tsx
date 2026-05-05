@@ -37,7 +37,7 @@ import { IntegrationsSettings } from "./IntegrationsSettings";
 import { MemorySettings } from "./MemorySettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { SearchProvidersSettings } from "./SearchProvidersSettings";
-import { VoiceSettings } from "./VoiceSettings";
+import { VoiceSettings } from "@/components/voice/VoiceSettings";
 
 type OpenAIAuthChoice = "apiKey" | "both" | "chatgpt-oauth";
 

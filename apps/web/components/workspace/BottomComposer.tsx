@@ -1,10 +1,12 @@
 'use client';
 
-import { ArrowUp, Brain, Mic, Paperclip, Pause, Play, Sparkles, Square } from 'lucide-react';
+import { ArrowUp, Brain, Paperclip, Pause, Play, Sparkles, Square } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { ProjectSummary, TaskDetailResponse } from '@handle/shared';
 import { SpecialistPicker } from '@/components/multiAgent/SpecialistPicker';
+import { MicButton } from '@/components/voice/MicButton';
+import { VoiceBar } from '@/components/voice/VoiceBar';
 import { listProjects, pickProjectFolder, sendConversationMessage, updateProject } from '@/lib/api';
 import { useHandleAuth } from '@/lib/handleAuth';
 import { listSettingsProviders, type SettingsProvider } from '@/lib/settingsProviders';
@@ -65,6 +67,7 @@ export function BottomComposer({
   const [selectedModelKey, setSelectedModelKey] = useState('');
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettingsSummary | null>(null);
   const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const voiceChunksRef = useRef<Blob[]>([]);
   const memoryTouchedRef = useRef(false);
@@ -212,10 +215,12 @@ export function BottomComposer({
   async function startVoiceRecording() {
     if (!voiceSettings?.voiceInputEnabled) {
       setError('Voice input is disabled in Settings → Voice.');
+      setVoiceStatus(null);
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
       setError('Microphone recording is not available in this browser.');
+      setVoiceStatus(null);
       return;
     }
     if (voiceRecording) {
@@ -224,6 +229,7 @@ export function BottomComposer({
     }
 
     setError(null);
+    setVoiceStatus('Listening...');
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const recorder = new MediaRecorder(stream);
     voiceChunksRef.current = [];
@@ -239,6 +245,7 @@ export function BottomComposer({
         try {
           const audioBase64 = await blobToBase64(blob);
           const transcript = await transcribeVoice(audioBase64, blob.type || 'audio/webm');
+          setVoiceStatus(`Heard: ${transcript.text}`);
           const parsed = await parseVoiceCommand(transcript.text, task?.id, task?.projectId);
           if (parsed.command.commandType === 'PAUSE_RUN' && onPauseRun) {
             onPauseRun();
@@ -251,6 +258,7 @@ export function BottomComposer({
           }
         } catch (err) {
           setError(err instanceof Error ? err.message : 'Voice transcription failed');
+          setVoiceStatus(null);
         }
       })();
     };
@@ -414,15 +422,12 @@ export function BottomComposer({
         <IconButton label="Attach file">
           <Paperclip className="h-[13px] w-[13px]" />
         </IconButton>
-        <IconButton
-          label={voiceRecording ? "Stop voice recording" : "Voice input"}
+        <MicButton
+          recording={voiceRecording}
           onClick={() => {
             void startVoiceRecording().catch((err) => setError(err instanceof Error ? err.message : 'Could not start voice input'));
           }}
-          title={voiceRecording ? 'Stop recording' : 'Push to talk'}
-        >
-          <Mic className={cn("h-[13px] w-[13px]", voiceRecording && "text-accent")} />
-        </IconButton>
+        />
         {isRunActive ? (
           <button
             aria-label="Pause active run"
@@ -468,6 +473,7 @@ export function BottomComposer({
           <ArrowUp className="h-[14px] w-[14px]" />
         </button>
       </form>
+      {voiceStatus ? <VoiceBar message={voiceStatus} recording={voiceRecording} /> : null}
       {error && <p className="mt-2 text-[12px] text-status-error">{error}</p>}
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PendingApproval } from "@handle/shared";
 import {
   ApprovalPill,
@@ -10,7 +10,8 @@ import {
 } from "@/components/design-system";
 import { useHandleAuth } from "@/lib/handleAuth";
 import { respondToApproval } from "@/lib/api";
-import { parseVoiceApproval, transcribeVoice } from "@/lib/voice";
+import { VoiceApprovalPrompt } from "@/components/voice/VoiceApprovalPrompt";
+import { getVoiceSettings, parseVoiceApproval, transcribeVoice, type VoiceSettingsSummary } from "@/lib/voice";
 import { cn } from "@/lib/utils";
 
 interface ApprovalModalProps {
@@ -83,6 +84,7 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceResult, setVoiceResult] = useState<string | null>(null);
+  const [voiceSettings, setVoiceSettings] = useState<VoiceSettingsSummary | null>(null);
   const [understandsActualChromeRisk, setUnderstandsActualChromeRisk] = useState(false);
   const [alwaysApprove, setAlwaysApprove] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -107,6 +109,26 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
     return String(hash + 1000).padStart(4, "0");
   }, [approval.approvalId]);
   const voiceTarget = approval.request.integration ?? approval.request.action ?? scope.toLowerCase();
+  const voiceApprovalDisabledReason = !voiceSettings?.voiceInputEnabled
+    ? "Voice input is off in Settings → Voice."
+    : !voiceSettings?.verbalApprovalEnabled
+      ? "Verbal approvals are off in Settings → Voice."
+      : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    void getVoiceSettings()
+      .then((loaded) => {
+        if (!cancelled) setVoiceSettings(loaded);
+      })
+      .catch(() => {
+        if (!cancelled) setVoiceSettings(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function decide(decision: "approved" | "denied") {
     setIsSubmitting(true);
@@ -266,17 +288,14 @@ export function ApprovalModal({ approval, onResolved }: ApprovalModalProps) {
           </div>
         )}
         {isHostAffectingApproval && (
-          <div className="mt-4 rounded-[10px] border border-border-subtle bg-bg-canvas px-3 py-2">
-            <div className="text-[11px] font-medium uppercase tracking-[0.04em] text-text-muted">Voice approval code</div>
-            <div className="mt-1 font-mono text-[18px] font-semibold text-text-primary">{voiceConfirmationCode}</div>
-            <p className="mt-1 text-[12px] leading-[18px] text-text-secondary">
-              Say approve {voiceTarget} {voiceConfirmationCode} or deny {voiceTarget} {voiceConfirmationCode}.
-            </p>
-            {voiceResult && <p className="mt-2 text-[12px] text-text-secondary">{voiceResult}</p>}
-            <PillButton className="mt-3" onClick={() => void handleVoiceApproval()} type="button" variant="secondary">
-              {voiceRecording ? "Stop listening" : "Listen for voice approval"}
-            </PillButton>
-          </div>
+          <VoiceApprovalPrompt
+            confirmationCode={voiceConfirmationCode}
+            disabledReason={voiceApprovalDisabledReason ?? undefined}
+            onRecord={() => void handleVoiceApproval()}
+            recording={voiceRecording}
+            result={voiceResult}
+            target={voiceTarget}
+          />
         )}
       </div>
 
