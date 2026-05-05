@@ -28,8 +28,8 @@ function dedupeApprovals(approvals: PendingApproval[]) {
 
 export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
   const { getToken, isLoaded } = useHandleAuth();
-  const state = useAgentStream(taskId);
   const [task, setTask] = useState<TaskDetailResponse | null>(initialTask);
+  const state = useAgentStream(taskId, task?.multiAgentTrace ?? []);
   const [listedApprovals, setListedApprovals] = useState<PendingApproval[]>([]);
   const [selectedApproval, setSelectedApproval] =
     useState<PendingApproval | null>(null);

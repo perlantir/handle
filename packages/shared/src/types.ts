@@ -312,6 +312,7 @@ export interface TaskDetailResponse {
   id: string;
   messages: TaskMessage[];
   conversationTitle?: string | null;
+  multiAgentTrace?: MultiAgentTraceEvent[];
   projectId?: string;
   projectName?: string;
   providerId?: string | null;

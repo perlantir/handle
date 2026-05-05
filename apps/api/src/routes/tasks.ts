@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import type { CreateTaskResponse } from "@handle/shared";
+import type { AgentSpecialistRole, CreateTaskResponse, CriticVerdict, MultiAgentTraceEvent } from "@handle/shared";
 import { getAuthenticatedUserId } from "../auth/clerkMiddleware";
 import { runAgent as defaultRunAgent } from "../agent/runAgent";
 import { asyncHandler } from "../lib/http";
@@ -87,6 +87,94 @@ function backendFromRun(value: string | undefined) {
 
 function titleFromGoal(goal: string) {
   return goal.trim().slice(0, 80) || "New conversation";
+}
+
+function asSpecialistRole(role: string | undefined): AgentSpecialistRole | undefined {
+  const roles: AgentSpecialistRole[] = [
+    "SUPERVISOR",
+    "RESEARCHER",
+    "CODER",
+    "DESIGNER",
+    "OPERATOR",
+    "WRITER",
+    "ANALYST",
+    "VERIFIER",
+    "SYNTHESIZER",
+  ];
+  return roles.find((candidate) => candidate === role);
+}
+
+function multiAgentTraceFromRun(run: {
+  handoffs?: Array<{
+    createdAt?: Date;
+    fromRole?: string;
+    id: string;
+    reason?: string | null;
+    toRole?: string;
+  }>;
+  subRuns?: Array<{
+    completedAt?: Date | null;
+    createdAt?: Date;
+    id: string;
+    role?: string;
+    startedAt?: Date | null;
+    status?: string;
+    summary?: string | null;
+  }>;
+}): MultiAgentTraceEvent[] {
+  const events: MultiAgentTraceEvent[] = [];
+
+  for (const subRun of run.subRuns ?? []) {
+    const role = asSpecialistRole(subRun.role);
+    if (!role) continue;
+    const isVerifier = role === "VERIFIER";
+    const completed = subRun.status === "COMPLETED";
+    const timestamp =
+      (completed ? subRun.completedAt : subRun.startedAt)?.toISOString() ??
+      subRun.createdAt?.toISOString() ??
+      new Date().toISOString();
+    events.push({
+      event: isVerifier
+        ? completed
+          ? "verification_passed"
+          : "verification_started"
+        : completed
+          ? "specialist_completed"
+          : "specialist_started",
+      role,
+      subRunId: subRun.id,
+      summary:
+        subRun.summary ??
+        (isVerifier
+          ? completed
+            ? "Verifier approved the run output."
+            : "Verifier started output review."
+          : `${role.toLowerCase().replaceAll("_", " ")} ${completed ? "completed" : "started"}.`),
+      taskId: "",
+      timestamp,
+      type: "multi_agent_trace",
+      ...(isVerifier && completed ? { verdict: "APPROVE" as CriticVerdict } : {}),
+    });
+  }
+
+  for (const handoff of run.handoffs ?? []) {
+    const fromRole = asSpecialistRole(handoff.fromRole);
+    const toRole = asSpecialistRole(handoff.toRole);
+    if (!fromRole || !toRole) continue;
+    events.push({
+      event: "handoff_created",
+      fromRole,
+      handoffId: handoff.id,
+      summary: handoff.reason ?? `Handoff from ${fromRole} to ${toRole}.`,
+      taskId: "",
+      timestamp: handoff.createdAt?.toISOString() ?? new Date().toISOString(),
+      toRole,
+      type: "multi_agent_trace",
+      ...(handoff.reason ? { reason: handoff.reason } : {}),
+    });
+  }
+
+  return events.sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
 export function createTasksRouter({
@@ -206,6 +294,8 @@ export function createTasksRouter({
                     project: true,
                   },
                 },
+                handoffs: { orderBy: { createdAt: "asc" } },
+                subRuns: { orderBy: { startedAt: "asc" } },
               },
               where: { id: req.params.id },
             })
@@ -259,6 +349,16 @@ export function createTasksRouter({
             : null,
           providerId: run.providerId ?? null,
           providerModel: run.modelName ?? null,
+          multiAgentTrace: multiAgentTraceFromRun({
+            handoffs:
+              "handoffs" in run
+                ? ((run as { handoffs?: Parameters<typeof multiAgentTraceFromRun>[0]["handoffs"] }).handoffs ?? [])
+                : [],
+            subRuns:
+              "subRuns" in run
+                ? ((run as { subRuns?: Parameters<typeof multiAgentTraceFromRun>[0]["subRuns"] }).subRuns ?? [])
+                : [],
+          }).map((event) => ({ ...event, taskId: run.id })),
           projectId:
             run.conversation &&
             "project" in run.conversation &&

@@ -35,7 +35,10 @@ export interface AgentStreamState {
   toolCalls: ToolCallState[];
 }
 
-type Action = { type: 'event'; event: SSEEvent } | { type: 'reset' };
+type Action =
+  | { type: 'event'; event: SSEEvent }
+  | { type: 'reset' }
+  | { type: 'seed_multi_agent_trace'; events: MultiAgentTraceEvent[] };
 
 const initialState: AgentStreamState = {
   browserScreenshots: [],
@@ -52,6 +55,22 @@ const initialState: AgentStreamState = {
 
 export function agentStreamReducer(state: AgentStreamState, action: Action): AgentStreamState {
   if (action.type === 'reset') return initialState;
+  if (action.type === 'seed_multi_agent_trace') {
+    const keyed = new Map<string, MultiAgentTraceEvent>();
+    for (const event of [...state.multiAgentTrace, ...action.events]) {
+      const key = [
+        event.event,
+        event.role ?? '',
+        event.fromRole ?? '',
+        event.toRole ?? '',
+        event.subRunId ?? '',
+        event.handoffId ?? '',
+        event.timestamp,
+      ].join(':');
+      keyed.set(key, event);
+    }
+    return { ...state, multiAgentTrace: Array.from(keyed.values()).slice(-60) };
+  }
 
   const { event } = action;
 
@@ -142,8 +161,14 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
   }
 }
 
-export function useAgentStream(taskId: string | null) {
+export function useAgentStream(taskId: string | null, initialMultiAgentTrace: MultiAgentTraceEvent[] = []) {
   const [state, dispatch] = useReducer(agentStreamReducer, initialState);
+
+  useEffect(() => {
+    if (initialMultiAgentTrace.length > 0) {
+      dispatch({ events: initialMultiAgentTrace, type: 'seed_multi_agent_trace' });
+    }
+  }, [initialMultiAgentTrace]);
 
   useEffect(() => {
     if (!taskId) {
