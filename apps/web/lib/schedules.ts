@@ -79,6 +79,23 @@ export async function updateSchedule({
   return body.schedule;
 }
 
+export async function deleteSchedule({
+  scheduleId,
+  token,
+}: {
+  scheduleId: string;
+  token: string | null;
+}) {
+  const response = await fetch(`${apiBaseUrl}/api/schedules/${encodeURIComponent(scheduleId)}`, {
+    headers: authHeaders(token),
+    method: "DELETE",
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to delete schedule"));
+  const body = (await response.json()) as { schedule?: ScheduleSummary };
+  if (!body.schedule) throw new Error("Delete schedule response was empty");
+  return body.schedule;
+}
+
 export async function runScheduleNow({
   mode = "normal",
   scheduleId,

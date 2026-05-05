@@ -939,8 +939,13 @@ export interface ParsedSchedulePreview {
   confidence: number;
   cronExpression?: string | null;
   explanation: string;
+  input?: Record<string, unknown>;
+  name?: string;
   nextRuns: string[];
+  outputTarget?: Record<string, unknown>;
   runAt?: string | null;
+  targetRef?: Record<string, unknown>;
+  targetType?: ScheduleTargetType;
   timezone: string;
 }
 
