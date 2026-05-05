@@ -121,6 +121,15 @@ export function parseVoiceApproval({
       .some((part) => part.length > 2 && text.includes(part));
   const codeMatched = text.includes(confirmationCode);
 
+  if (!codeMatched) {
+    return {
+      commandType: approved ? "APPROVE_ACTION" : denied ? "DENY_ACTION" : "UNKNOWN",
+      confidence: approved || denied ? 0.65 : 0.2,
+      decision: "REJECTED",
+      rejectionReason: "missing confirmation code",
+      riskLevel: "HIGH",
+    };
+  }
   if (!approved && !denied) {
     return {
       commandType: "UNKNOWN",
@@ -136,15 +145,6 @@ export function parseVoiceApproval({
       confidence: 0.5,
       decision: "REJECTED",
       rejectionReason: "approval target did not match",
-      riskLevel: "HIGH",
-    };
-  }
-  if (!codeMatched) {
-    return {
-      commandType: approved ? "APPROVE_ACTION" : "DENY_ACTION",
-      confidence: 0.65,
-      decision: "REJECTED",
-      rejectionReason: "missing confirmation code",
       riskLevel: "HIGH",
     };
   }

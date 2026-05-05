@@ -10,7 +10,7 @@ describe("voice parser", () => {
     });
 
     expect(result.decision).toBe("REJECTED");
-    expect(result.rejectionReason).toBe("missing explicit approve or deny verb");
+    expect(result.rejectionReason).toBe("missing confirmation code");
   });
 
   it("rejects approval without exact confirmation code", () => {

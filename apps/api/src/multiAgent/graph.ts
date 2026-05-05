@@ -1,6 +1,6 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 import type { AgentExecutionMode } from "@handle/shared";
-import type { BudgetSnapshot, MultiAgentState, SpecialistAssignment, SpecialistReport } from "./types";
+import type { BudgetSnapshot, MultiAgentState, SpecialistAssignment, SpecialistReport, SupervisorDecision } from "./types";
 import { routeGoalToSpecialists } from "./router";
 
 export const MultiAgentGraphState = Annotation.Root({
@@ -35,5 +35,33 @@ export function buildMultiAgentPlanningGraph() {
     })
     .addEdge(START, "supervisor")
     .addEdge("supervisor", END)
+    .compile();
+}
+
+export interface MultiAgentGraphCallbacks {
+  decide?: (state: MultiAgentState) => Promise<SupervisorDecision> | SupervisorDecision;
+  executeAssignments?: (state: MultiAgentState) => Promise<Partial<MultiAgentState>> | Partial<MultiAgentState>;
+}
+
+export function buildMultiAgentExecutionGraph(callbacks: MultiAgentGraphCallbacks) {
+  return new StateGraph(MultiAgentGraphState)
+    .addNode("supervisor", async (state) => {
+      const decision = callbacks.decide
+        ? await callbacks.decide(state as MultiAgentState)
+        : routeGoalToSpecialists(state.originalGoal, state.mode);
+      return {
+        assignments: decision.assignments,
+        currentGoal: state.originalGoal,
+        plan: decision.assignments.map((assignment) => `${assignment.role}: ${assignment.goal}`),
+        status: "running" as const,
+      };
+    })
+    .addNode("specialists", async (state) => {
+      if (!callbacks.executeAssignments) return { status: "running" as const };
+      return callbacks.executeAssignments(state as MultiAgentState);
+    })
+    .addEdge(START, "supervisor")
+    .addEdge("supervisor", "specialists")
+    .addEdge("specialists", END)
     .compile();
 }

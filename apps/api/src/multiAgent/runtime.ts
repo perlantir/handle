@@ -2,12 +2,13 @@ import type { AgentSpecialistRole, CriticVerdict, MultiAgentTraceEvent } from "@
 import { logger } from "../lib/logger";
 import { providerRegistry as defaultProviderRegistry } from "../providers/registry";
 import { createBudgetSnapshot } from "./budgets";
-import { buildMultiAgentPlanningGraph } from "./graph";
+import { buildMultiAgentExecutionGraph } from "./graph";
 import { createSpecialistHandoff } from "./handoffs";
 import { normalizeExecutionMode } from "./planner";
 import { SPECIALIST_DEFINITIONS } from "./registry";
 import { resolveSpecialistContext } from "./specialists/common";
 import { specialistExecutors } from "./specialists";
+import { createSupervisorDecision } from "./supervisor";
 import { synthesizeFinalResponse } from "./synthesizer";
 import type {
   MultiAgentProjectContext,
@@ -106,7 +107,118 @@ export async function initializeMultiAgentRun({
 }): Promise<MultiAgentRunSummary> {
   const mode = normalizeExecutionMode(agentExecutionModeOverride ?? project?.agentExecutionMode);
   const budget = createBudgetSnapshot(project);
-  const graph = buildMultiAgentPlanningGraph();
+  const runtime: MultiAgentRuntimeContext = {
+    emitEvent,
+    goal,
+    ...(modelOverride ? { modelOverride } : {}),
+    ...(project !== undefined ? { project } : {}),
+    providerRegistry,
+    store,
+    taskId,
+    ...(userId !== undefined ? { userId } : {}),
+  };
+  const reports: SpecialistReport[] = [];
+  const graph = buildMultiAgentExecutionGraph({
+    decide: async (state) => createSupervisorDecision({
+      goal: state.originalGoal,
+      ...(modelOverride ? { modelOverride } : {}),
+      project: { ...(project ?? {}), agentExecutionMode: state.mode },
+      providerRegistry,
+      taskId,
+    }),
+    executeAssignments: async (state) => {
+      const assignments = state.assignments;
+      const roles = assignments.map((assignment) => assignment.role);
+      const teamMode = state.mode === "MULTI_AGENT_TEAM" || roles.length > 1;
+      const reason =
+        roles.length > 1
+          ? "Task spans multiple specialists or contains multi-step synthesis language."
+          : "Supervisor selected the best specialist for this task.";
+
+      emitEvent({
+        event: "supervisor_selected_specialist",
+        metadata: { assignments, mode: state.mode, roles },
+        reason,
+        role: roles[0] ?? "RESEARCHER",
+        summary: `Supervisor selected ${roles.map((role) => roleLabels[role]).join(", ")}.`,
+        taskId,
+        timestamp: new Date().toISOString(),
+        type: "multi_agent_trace",
+      });
+
+      if (teamMode) {
+        emitEvent({
+          event: "auto_escalated_to_multi_agent",
+          metadata: { assignments, mode: state.mode, roles },
+          reason,
+          summary:
+            state.mode === "MULTI_AGENT_TEAM"
+              ? "Multi-agent team mode started from the beginning."
+              : "Auto mode escalated this run to a multi-agent team.",
+          taskId,
+          timestamp: new Date().toISOString(),
+          type: "multi_agent_trace",
+        });
+      }
+
+      for (const assignment of assignments) {
+        const definition = SPECIALIST_DEFINITIONS[assignment.specialistId];
+        const executor =
+          assignment.specialistId === "analyst" ||
+          assignment.specialistId === "coder" ||
+          assignment.specialistId === "designer" ||
+          assignment.specialistId === "operator" ||
+          assignment.specialistId === "researcher" ||
+          assignment.specialistId === "verifier" ||
+          assignment.specialistId === "writer"
+            ? specialistExecutors[assignment.specialistId]
+            : null;
+        if (!definition || !executor) continue;
+        try {
+          const context = await resolveSpecialistContext(runtime, definition, budget);
+          const extraContext = contextFromReports(reports, "");
+          const report = await executor({ ...context, assignment }, extraContext);
+          reports.push(report);
+          const previous = reports.at(-2);
+          if (previous) {
+            await createSpecialistHandoff({
+              agentRunId: taskId,
+              artifactRefs: previous.artifactIds,
+              emitEvent,
+              fromRole: previous.role,
+              reason: "Sequential specialist context handoff for synthesis.",
+              store,
+              toRole: report.role,
+            }).catch((err) => {
+              logger.warn({ err, fromRole: previous.role, taskId, toRole: report.role }, "Failed to record specialist handoff");
+            });
+          }
+        } catch (err) {
+          logger.warn({ err, role: assignment.role, taskId }, "Specialist execution failed");
+          reports.push({
+            artifactIds: [],
+            artifacts: [],
+            blockers: [err instanceof Error ? err.message : "Unknown specialist failure"],
+            costCents: 0,
+            findings: [],
+            recommendations: [],
+            role: assignment.role,
+            safeSummary: `${roleLabels[assignment.role]} failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+            sources: [],
+            status: "failed",
+            toolCallCount: 0,
+          });
+        }
+      }
+
+      return {
+        artifactIds: reports.flatMap((report) => report.artifactIds),
+        completedReports: reports,
+        sourceIds: reports.flatMap((report) => report.sources.map((source) => source.url)),
+        status: reports.some((report) => report.status === "failed") ? "failed" : "running",
+      };
+    },
+  });
   const planned = await graph.invoke({
     agentRunId: taskId,
     approvalIds: [],
@@ -127,115 +239,23 @@ export async function initializeMultiAgentRun({
   const assignments = planned.assignments;
   const roles = assignments.map((assignment) => assignment.role);
   const teamMode = mode === "MULTI_AGENT_TEAM" || roles.length > 1;
-  const reason =
-    roles.length > 1
-      ? "Task spans multiple specialists or contains multi-step synthesis language."
-      : "Supervisor selected the best specialist for this task.";
+  const completedReports = planned.completedReports.length > 0 ? planned.completedReports : reports;
 
-  emitEvent({
-    event: "supervisor_selected_specialist",
-    metadata: { assignments, mode, roles },
-    reason,
-    role: roles[0] ?? "RESEARCHER",
-    summary: `Supervisor selected ${roles.map((role) => roleLabels[role]).join(", ")}.`,
-    taskId,
-    timestamp: new Date().toISOString(),
-    type: "multi_agent_trace",
-  });
-
-  if (teamMode) {
-    emitEvent({
-      event: "auto_escalated_to_multi_agent",
-      metadata: { assignments, mode, roles },
-      reason,
-      summary:
-        mode === "MULTI_AGENT_TEAM"
-          ? "Multi-agent team mode started from the beginning."
-          : "Auto mode escalated this run to a multi-agent team.",
-      taskId,
-      timestamp: new Date().toISOString(),
-      type: "multi_agent_trace",
-    });
-  }
-
-  const runtime: MultiAgentRuntimeContext = {
-    emitEvent,
-    goal,
-    ...(modelOverride ? { modelOverride } : {}),
-    ...(project !== undefined ? { project } : {}),
-    providerRegistry,
-    store,
-    taskId,
-    ...(userId !== undefined ? { userId } : {}),
-  };
-
-  const reports: SpecialistReport[] = [];
-
-  for (const assignment of assignments) {
-    const definition = SPECIALIST_DEFINITIONS[assignment.specialistId];
-    const executor =
-      assignment.specialistId === "analyst" ||
-      assignment.specialistId === "coder" ||
-      assignment.specialistId === "designer" ||
-      assignment.specialistId === "operator" ||
-      assignment.specialistId === "researcher" ||
-      assignment.specialistId === "verifier" ||
-      assignment.specialistId === "writer"
-        ? specialistExecutors[assignment.specialistId]
-        : null;
-    if (!definition || !executor) continue;
-    try {
-      const context = await resolveSpecialistContext(runtime, definition, budget);
-      const extraContext = contextFromReports(reports, "");
-      const report = await executor({ ...context, assignment }, extraContext);
-      reports.push(report);
-      const previous = reports.at(-2);
-      if (previous) {
-        await createSpecialistHandoff({
-          agentRunId: taskId,
-          artifactRefs: previous.artifactIds,
-          emitEvent,
-          fromRole: previous.role,
-          reason: "Sequential specialist context handoff for synthesis.",
-          store,
-          toRole: report.role,
-        }).catch((err) => {
-          logger.warn({ err, fromRole: previous.role, taskId, toRole: report.role }, "Failed to record specialist handoff");
-        });
-      }
-    } catch (err) {
-      logger.warn({ err, role: assignment.role, taskId }, "Specialist execution failed");
-      reports.push({
-        artifactIds: [],
-        artifacts: [],
-        blockers: [err instanceof Error ? err.message : "Unknown specialist failure"],
-        costCents: 0,
-        findings: [],
-        recommendations: [],
-        role: assignment.role,
-        safeSummary: `${roleLabels[assignment.role]} failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-        sources: [],
-        status: "failed",
-        toolCallCount: 0,
-      });
-    }
-  }
-
-  const synthesized = await synthesizeFinalResponse({ reports, runtime }).catch((err) => {
+  const synthesized = await synthesizeFinalResponse({ reports: completedReports, runtime }).catch((err) => {
     logger.warn({ err, taskId }, "Multi-agent synthesis failed");
     return "";
   });
 
-  const verifierRequired = shouldRunVerifier({ goal, reports, verifierRequired: teamMode || project?.criticEnabled === true });
+  const verifierRequired = shouldRunVerifier({ goal, reports: completedReports, verifierRequired: teamMode || project?.criticEnabled === true });
 
-  const finalRoles = rolesFromReports(reports);
+  const finalRoles = rolesFromReports(completedReports);
 
   return {
     budget,
-    contextSummary: contextFromReports(reports, synthesized),
+    contextSummary: contextFromReports(completedReports, synthesized),
     ...(synthesized ? { finalResponse: synthesized } : {}),
     primaryRole: finalRoles[0] ?? roles[0] ?? "RESEARCHER",
-    reports,
+    reports: completedReports,
     roles: finalRoles.length > 0 ? finalRoles : roles,
     teamMode,
     verifierRequired,

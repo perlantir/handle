@@ -2,7 +2,7 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { AgentExecutionMode } from "@handle/shared";
 import { redactSecrets } from "../lib/redact";
 import type { MultiAgentRuntimeContext, SupervisorDecision } from "./types";
-import { normalizeExecutionMode } from "./planner";
+import { createAssignments, normalizeExecutionMode } from "./planner";
 import { routeGoalToSpecialists } from "./router";
 
 const SUPERVISOR_PROMPT = `You are Handle's multi-agent Supervisor.
@@ -52,9 +52,10 @@ export async function createSupervisorDecision({
     const roles = parseRoles(parsed.preferredRoles);
     if (roles.length === 0) return deterministic;
     const routed = routeGoalToSpecialists(goal, mode);
+    const mergedRoles = Array.from(new Set([...routed.assignments.map((assignment) => assignment.role), ...roles]));
     return {
       ...routed,
-      assignments: routed.assignments.filter((assignment) => roles.includes(assignment.role)) || routed.assignments,
+      assignments: createAssignments(goal, mergedRoles),
       reason: typeof parsed.reason === "string" ? parsed.reason : routed.reason,
       verifierRequired: typeof parsed.verifierRequired === "boolean" ? parsed.verifierRequired : routed.verifierRequired,
     };
