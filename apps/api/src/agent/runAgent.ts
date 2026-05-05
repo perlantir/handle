@@ -18,6 +18,7 @@ import {
 } from "../memory/sessionMemory";
 import {
   initializeMultiAgentRun,
+  recordFinalVerifierReview,
   recordVerifierPass,
   type MultiAgentRunSummary,
 } from "../multiAgent/runtime";
@@ -1000,11 +1001,16 @@ export function createAgentRunner({
           taskId,
         });
         if (multiAgentSummary?.verifierRequired || project?.criticEnabled) {
-          await recordVerifierPass({
+          await recordFinalVerifierReview({
             emitEvent,
+            finalMessage,
+            goal,
+            modelOverride: provider.config.primaryModel,
+            project,
+            providerRegistry,
             store,
-            summary: "Verifier approved the final response for user delivery.",
             taskId,
+            userId: runContext.userId ?? null,
           }).catch((err) => {
             logger.warn({ err, taskId }, "Verifier trace failed after agent run");
           });

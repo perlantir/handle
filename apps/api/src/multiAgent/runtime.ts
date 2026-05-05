@@ -64,6 +64,25 @@ function contextFromReports(reports: SpecialistReport[], synthesized: string) {
   ].filter(Boolean).join("\n\n");
 }
 
+function sourceRefsFromText(text: string) {
+  const urls = Array.from(new Set(text.match(/https?:\/\/[^\s)]+/g) ?? []));
+  const accessedAt = new Date().toISOString();
+  return urls.slice(0, 20).map((url) => {
+    let domain = "unknown";
+    try {
+      domain = new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      // Keep the raw URL visible in the source record even if parsing fails.
+    }
+    return {
+      accessedAt,
+      domain,
+      title: domain,
+      url,
+    };
+  });
+}
+
 export async function initializeMultiAgentRun({
   agentExecutionModeOverride,
   emitEvent,
@@ -207,38 +226,7 @@ export async function initializeMultiAgentRun({
     return "";
   });
 
-  const reportsForVerification = synthesized
-    ? [
-        ...reports,
-        {
-          artifactIds: [`${taskId}-synthesized-output`],
-          artifacts: [
-            {
-              content: synthesized,
-              kind: "analysis" as const,
-              mimeType: "text/markdown" as const,
-              title: "Synthesized multi-agent output",
-            },
-          ],
-          blockers: [],
-          costCents: 0,
-          findings: [synthesized.slice(0, 500)],
-          recommendations: [],
-          role: "SYNTHESIZER" as const,
-          safeSummary: "Synthesizer produced final multi-agent context for user delivery.",
-          sources: reports.flatMap((report) => report.sources).slice(0, 20),
-          status: "completed" as const,
-          toolCallCount: 0,
-        },
-      ]
-    : reports;
-
-  const verifierRequired = shouldRunVerifier({ goal, reports: reportsForVerification, verifierRequired: teamMode || project?.criticEnabled === true });
-  if (verifierRequired) {
-    await runVerifier({ budget, reports: reportsForVerification, runtime }).catch((err) => {
-      logger.warn({ err, taskId }, "Verifier execution failed");
-    });
-  }
+  const verifierRequired = shouldRunVerifier({ goal, reports, verifierRequired: teamMode || project?.criticEnabled === true });
 
   const finalRoles = rolesFromReports(reports);
 
@@ -251,6 +239,64 @@ export async function initializeMultiAgentRun({
     teamMode,
     verifierRequired,
   };
+}
+
+export async function recordFinalVerifierReview({
+  emitEvent,
+  finalMessage,
+  goal,
+  modelOverride,
+  project,
+  providerRegistry = defaultProviderRegistry,
+  store,
+  taskId,
+  userId,
+}: {
+  emitEvent: EmitEvent;
+  finalMessage: string;
+  goal: string;
+  modelOverride?: string;
+  project?: MultiAgentProjectContext | null;
+  providerRegistry?: MultiAgentRuntimeContext["providerRegistry"];
+  store: MultiAgentStore;
+  taskId: string;
+  userId?: string | null;
+}) {
+  const runtime: MultiAgentRuntimeContext = {
+    emitEvent,
+    goal,
+    ...(modelOverride ? { modelOverride } : {}),
+    ...(project !== undefined ? { project } : {}),
+    providerRegistry,
+    store,
+    taskId,
+    ...(userId !== undefined ? { userId } : {}),
+  };
+  const report: SpecialistReport = {
+    artifactIds: [`${taskId}-final-response`],
+    artifacts: [
+      {
+        content: finalMessage,
+        kind: "analysis",
+        mimeType: "text/markdown",
+        title: "Final user response",
+      },
+    ],
+    blockers: [],
+    costCents: 0,
+    findings: [finalMessage],
+    recommendations: [],
+    role: "SYNTHESIZER",
+    safeSummary: "Final user-facing response ready for verifier review.",
+    sources: sourceRefsFromText(finalMessage),
+    status: "completed",
+    toolCallCount: 0,
+  };
+  return runVerifier({
+    budget: createBudgetSnapshot(project),
+    reports: [report],
+    runtime,
+  });
 }
 
 export async function recordVerifierPass({
