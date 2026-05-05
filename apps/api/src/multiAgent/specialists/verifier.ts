@@ -23,7 +23,12 @@ export async function verifyReports(
   try {
     const prompt = await loadSpecialistPrompt("verifier");
     const reportContext = reports
-      .map((report) => `${report.role}: ${report.safeSummary}\nSources: ${report.sources.length}\nFindings:\n${report.findings.join("\n")}`)
+      .map((report) => {
+        const artifactContext = report.artifacts
+          .map((artifact) => `${artifact.title} (${artifact.kind})\n${artifact.content.slice(0, 4_000)}`)
+          .join("\n\n");
+        return `${report.role}: ${report.safeSummary}\nSources: ${report.sources.length}\nFindings:\n${report.findings.join("\n")}\nArtifacts:\n${artifactContext || "None"}`;
+      })
       .join("\n\n");
     const response = await context.llm.invoke([
       new SystemMessage(`${prompt}\nReturn a verdict line exactly as VERDICT: APPROVE, VERDICT: REVISE, or VERDICT: REJECT.`),
