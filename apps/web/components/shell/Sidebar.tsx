@@ -27,6 +27,7 @@ const primaryNavItems = [
   { href: '/memory', icon: Brain, label: 'Memory' },
   { href: '/actions', icon: History, label: 'Actions' },
   { href: '/skills', icon: Sparkles, label: 'Skills' },
+  { href: '/automations', icon: Calendar, label: 'Automations' },
   { href: '/schedules', icon: Calendar, label: 'Schedules' },
   { href: '/integrations', icon: Plug, label: 'Integrations' },
 ];

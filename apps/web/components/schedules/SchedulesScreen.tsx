@@ -53,7 +53,8 @@ const skillOptions = [
   { label: "Summarize a Notion Workspace", value: "summarize-a-notion-workspace" },
 ];
 
-export function SchedulesScreen() {
+export function SchedulesScreen({ surface = "schedules" }: { surface?: "automations" | "schedules" }) {
+  const isAutomations = surface === "automations";
   const { getToken, isLoaded } = useHandleAuth();
   const [backfillFrom, setBackfillFrom] = useState("");
   const [backfillTo, setBackfillTo] = useState("");
@@ -318,9 +319,11 @@ export function SchedulesScreen() {
               <CalendarClock className="h-4 w-4" />
             </div>
             <div>
-              <h1 className="font-display text-[28px] font-semibold">Schedules</h1>
+              <h1 className="font-display text-[28px] font-semibold">{isAutomations ? "Automations" : "Schedules"}</h1>
               <p className="mt-1 text-[12px] text-text-secondary">
-                Durable Temporal-backed runs for tasks, Skills, workflows, and Wide Research.
+                {isAutomations
+                  ? "Tell Handle what to do and when. Automations run in the background and can email, post, or save the result."
+                  : "Durable Temporal-backed runs for tasks, Skills, workflows, and Wide Research."}
               </p>
             </div>
           </div>
@@ -331,7 +334,7 @@ export function SchedulesScreen() {
             </PillButton>
             <PillButton className="gap-2" onClick={startCreate} variant="primary">
               <Plus className="h-4 w-4" />
-              Create Schedule
+              {isAutomations ? "Create Automation" : "Create Schedule"}
             </PillButton>
           </div>
         </header>
@@ -348,13 +351,14 @@ export function SchedulesScreen() {
               busy={busy}
               draft={draft}
               editing={Boolean(editingId)}
+              surface={surface}
               onChange={updateDraft}
               onParse={handleParse}
               onSave={handleSave}
               preview={preview}
               previewRuns={previewRuns}
             />
-            <TemplateGrid onSelect={applyTemplate} templates={templates} />
+            <TemplateGrid onSelect={applyTemplate} surface={surface} templates={templates} />
           </div>
 
           <aside className="grid content-start gap-4">
@@ -402,6 +406,7 @@ export function SchedulesScreen() {
           onRun={handleRun}
           onSelect={setSelectedId}
           onToggle={handleToggle}
+          surface={surface}
           schedules={schedules}
           selectedId={selected?.id ?? null}
         />
@@ -414,6 +419,7 @@ function ScheduleBuilder({
   busy,
   draft,
   editing,
+  surface,
   onChange,
   onParse,
   onSave,
@@ -423,18 +429,26 @@ function ScheduleBuilder({
   busy: string | null;
   draft: ScheduleDraft;
   editing: boolean;
+  surface: "automations" | "schedules";
   onChange: (patch: Partial<ScheduleDraft>) => void;
   onParse: () => void;
   onSave: (enabled: boolean) => void;
   preview: ParsedSchedulePreview | null;
   previewRuns: string[];
 }) {
+  const isAutomations = surface === "automations";
   return (
     <section className="rounded-[8px] border border-border-subtle bg-bg-canvas p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-[15px] font-semibold">{editing ? "Edit Schedule" : "New Schedule"}</h2>
-          <p className="mt-1 text-[12px] text-text-secondary">Describe the automation. Handle fills the schedule, target, inputs, and output.</p>
+          <h2 className="text-[15px] font-semibold">
+            {editing ? (isAutomations ? "Edit Automation" : "Edit Schedule") : (isAutomations ? "New Automation" : "New Schedule")}
+          </h2>
+          <p className="mt-1 text-[12px] text-text-secondary">
+            {isAutomations
+              ? "Describe the outcome in plain English. Handle fills in the timing, task, and delivery method."
+              : "Describe the automation. Handle fills the schedule, target, inputs, and output."}
+          </p>
         </div>
         <PillButton className="gap-2" onClick={onParse} disabled={busy === "parse" || !draft.naturalLanguage.trim()} variant="secondary">
           <Wand2 className="h-4 w-4" />
@@ -442,11 +456,11 @@ function ScheduleBuilder({
         </PillButton>
       </div>
 
-      <Field className="mt-4" label="Describe what you want to schedule">
+      <Field className="mt-4" label={isAutomations ? "What should Handle do, and when?" : "Describe what you want to schedule"}>
         <textarea
           className={`${fieldClass} min-h-[104px] resize-y text-[14px]`}
           onChange={(event) => onChange({ naturalLanguage: event.target.value })}
-          placeholder="Every weekday at 9am, research OpenAI and email me the report"
+          placeholder={isAutomations ? "Every day at 9am, email me the top 5 AI news stories" : "Every weekday at 9am, research OpenAI and email me the report"}
           value={draft.naturalLanguage}
         />
       </Field>
@@ -649,10 +663,18 @@ function FrequencyBuilder({ draft, onChange }: { draft: ScheduleDraft; onChange:
   );
 }
 
-function TemplateGrid({ onSelect, templates }: { onSelect: (template: ScheduleTemplateSummary) => void; templates: ScheduleTemplateSummary[] }) {
+function TemplateGrid({
+  onSelect,
+  surface,
+  templates,
+}: {
+  onSelect: (template: ScheduleTemplateSummary) => void;
+  surface: "automations" | "schedules";
+  templates: ScheduleTemplateSummary[];
+}) {
   return (
     <section className="rounded-[8px] border border-border-subtle bg-bg-canvas p-4">
-      <h2 className="text-[15px] font-semibold">Built-in Templates</h2>
+      <h2 className="text-[15px] font-semibold">{surface === "automations" ? "Automation Starters" : "Built-in Templates"}</h2>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         {templates.map((template) => (
           <button className="rounded-[8px] border border-border-subtle bg-bg-base p-3 text-left transition hover:border-accent" key={template.slug} onClick={() => onSelect(template)}>
@@ -681,6 +703,7 @@ function ScheduleLibrary({
   onRun,
   onSelect,
   onToggle,
+  surface,
   schedules,
   selectedId,
 }: {
@@ -691,6 +714,7 @@ function ScheduleLibrary({
   onRun: (schedule: ScheduleSummary, mode: "normal" | "test") => void;
   onSelect: (id: string) => void;
   onToggle: (schedule: ScheduleSummary) => void;
+  surface: "automations" | "schedules";
   schedules: ScheduleSummary[];
   selectedId: string | null;
 }) {
@@ -698,14 +722,22 @@ function ScheduleLibrary({
     <section className="rounded-[8px] border border-border-subtle bg-bg-canvas">
       <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
         <div>
-          <h2 className="text-[15px] font-semibold">Schedule Library</h2>
-          <p className="mt-1 text-[12px] text-text-secondary">Inline controls are available on every saved schedule.</p>
+          <h2 className="text-[15px] font-semibold">{surface === "automations" ? "Automation Library" : "Schedule Library"}</h2>
+          <p className="mt-1 text-[12px] text-text-secondary">
+            {surface === "automations"
+              ? "Run, pause, edit, or delete any automation from one place."
+              : "Inline controls are available on every saved schedule."}
+          </p>
         </div>
         <RefreshCcw className={cn("h-4 w-4 text-text-muted", loading && "animate-spin")} />
       </div>
       <div className="divide-y divide-border-subtle">
         {schedules.length === 0 ? (
-          <div className="px-4 py-8 text-[13px] text-text-secondary">No schedules yet. Create one from natural language or a template.</div>
+          <div className="px-4 py-8 text-[13px] text-text-secondary">
+            {surface === "automations"
+              ? "No automations yet. Create one in plain English or start from a template."
+              : "No schedules yet. Create one from natural language or a template."}
+          </div>
         ) : schedules.map((schedule) => (
           <div
             className={cn(
@@ -1103,7 +1135,7 @@ function frequencyFromSchedule({ cronExpression, runAt }: { cronExpression: stri
   if (cronExpression === "0 * * * *") return "hourly";
   const parts = parseCronParts(cronExpression);
   if (parts.weekday === "1-5") return "weekdays";
-  if (parts.dayOfMonth !== "*") return "monthly";
+  if (parts.dayOfMonthRaw !== "*") return "monthly";
   if (parts.weekday !== "*") return "weekly";
   if (cronExpression) return "daily";
   return "weekdays";
@@ -1113,6 +1145,7 @@ function parseCronParts(cronExpression: string) {
   const [minute = "0", hour = "9", dayOfMonth = "*", , weekday = "*"] = cronExpression.trim().split(/\s+/);
   return {
     dayOfMonth: dayOfMonth === "*" ? "1" : dayOfMonth,
+    dayOfMonthRaw: dayOfMonth,
     dayOfWeek: weekday === "1-5" || weekday === "*" ? "1" : weekday,
     time: `${String(Number.parseInt(hour, 10) || 9).padStart(2, "0")}:${String(Number.parseInt(minute, 10) || 0).padStart(2, "0")}`,
     weekday,
@@ -1137,11 +1170,21 @@ function humanTarget(draft: ScheduleDraft) {
 function humanWhen(draft: ScheduleDraft) {
   if (draft.frequency === "once") return draft.runAt ? `Once at ${formatDate(new Date(draft.runAt).toISOString())}` : "One-time run";
   if (draft.frequency === "hourly") return "Hourly";
-  if (draft.frequency === "daily") return `Daily at ${draft.time}`;
-  if (draft.frequency === "weekdays") return `Every weekday at ${draft.time}`;
-  if (draft.frequency === "weekly") return `Weekly on ${dayName(draft.dayOfWeek)} at ${draft.time}`;
-  if (draft.frequency === "monthly") return `Monthly on day ${draft.dayOfMonth || "1"} at ${draft.time}`;
+  if (draft.frequency === "daily") return `Daily at ${formatTimeLabel(draft.time)}`;
+  if (draft.frequency === "weekdays") return `Every weekday at ${formatTimeLabel(draft.time)}`;
+  if (draft.frequency === "weekly") return `Weekly on ${dayName(draft.dayOfWeek)} at ${formatTimeLabel(draft.time)}`;
+  if (draft.frequency === "monthly") return `Monthly on day ${draft.dayOfMonth || "1"} at ${formatTimeLabel(draft.time)}`;
   return draft.cronExpression || "Custom cron";
+}
+
+function formatTimeLabel(value: string) {
+  const [hourRaw = "9", minuteRaw = "00"] = value.split(":");
+  const hour = Number.parseInt(hourRaw, 10);
+  const minute = Number.parseInt(minuteRaw, 10);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return value;
+  const period = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}:${String(minute).padStart(2, "0")} ${period}`;
 }
 
 function humanOutput(channel: OutputChannel) {

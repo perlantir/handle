@@ -78,6 +78,30 @@ async function mockSchedulesApi(page: Page) {
     const request = route.request();
     const url = new URL(request.url());
     if (request.method() === "POST" && url.pathname === "/api/schedules/parse") {
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = request.postDataJSON() as Record<string, unknown>;
+      } catch {
+        payload = {};
+      }
+      if (typeof payload.text === "string" && payload.text.includes("4:09PM")) {
+        await jsonRoute(route, 200, {
+          preview: {
+            confidence: 0.86,
+            cronExpression: "9 16 * * *",
+            explanation: "Every day at 4:09 PM",
+            input: { goal: "Hello" },
+            name: "Daily Hello email",
+            nextRuns: ["2026-05-06T21:09:00.000Z", "2026-05-07T21:09:00.000Z", "2026-05-08T21:09:00.000Z"],
+            outputTarget: { channel: "EMAIL", label: "Email via configured notification address" },
+            runAt: null,
+            targetRef: { goal: "Hello" },
+            targetType: "TASK",
+            timezone: "America/Chicago",
+          },
+        });
+        return;
+      }
       await jsonRoute(route, 200, {
         preview: {
           confidence: 0.9,
@@ -111,15 +135,33 @@ test("creates and test-runs a unified schedule from the browser UI", async ({ pa
   await page.goto("/schedules");
 
   await expect(page.getByRole("heading", { name: "Schedules" })).toBeVisible();
-  await page.getByRole("button", { name: "Parse" }).click();
+  await page.getByLabel("Describe what you want to schedule").fill("every weekday at 9am, research Anthropic");
+  await page.getByRole("button", { name: "Parse and preview" }).click();
   await expect(page.getByText("Parsed:")).toBeVisible();
   await expect(page.getByText("Every weekday at 09:00")).toBeVisible();
 
   await page.getByRole("button", { name: "Daily News Digest" }).click();
-  await page.getByRole("button", { name: "Create Schedule" }).click();
+  await page.getByRole("button", { name: "Save & Pause" }).click();
   await expect(page.getByRole("heading", { name: "Research Anthropic every weekday" })).toBeVisible();
 
   await page.getByRole("button", { name: "Test Run" }).click();
   await expect(page.getByText("test_passed", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Created cited research report for Anthropic.", { exact: true }).first()).toBeVisible();
+});
+
+test("parses simple daily email automations into a concise user-facing preview", async ({ page }) => {
+  await mockSchedulesApi(page);
+  await page.goto("/automations");
+
+  await expect(page.getByRole("heading", { name: "Automations" })).toBeVisible();
+  await page
+    .getByLabel("What should Handle do, and when?")
+    .fill("everyday at 4:09PM Central standard time email me hello");
+  await page.getByRole("button", { name: "Parse and preview" }).click();
+
+  await expect(page.getByText("Parsed: Every day at 4:09 PM")).toBeVisible();
+  await expect(page.getByText("Daily Hello email").first()).toBeVisible();
+  await expect(page.getByText("Hello", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Daily at 4:09 PM").first()).toBeVisible();
+  await expect(page.getByText("Email via configured notification address").first()).toBeVisible();
 });
