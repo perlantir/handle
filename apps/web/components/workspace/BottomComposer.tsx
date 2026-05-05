@@ -4,6 +4,7 @@ import { ArrowUp, Brain, Mic, Paperclip, Pause, Play, Sparkles, Square } from 'l
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { ProjectSummary, TaskDetailResponse } from '@handle/shared';
+import { SpecialistPicker } from '@/components/multiAgent/SpecialistPicker';
 import { listProjects, pickProjectFolder, sendConversationMessage, updateProject } from '@/lib/api';
 import { useHandleAuth } from '@/lib/handleAuth';
 import { listSettingsProviders, type SettingsProvider } from '@/lib/settingsProviders';
@@ -58,6 +59,8 @@ export function BottomComposer({
   const [pickingFolder, setPickingFolder] = useState(false);
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [memoryEnabled, setMemoryEnabled] = useState(true);
+  const [agentExecutionMode, setAgentExecutionMode] =
+    useState<ProjectSummary['agentExecutionMode']>('AUTO');
   const [providers, setProviders] = useState<SettingsProvider[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState('');
   const [voiceSettings, setVoiceSettings] = useState<VoiceSettingsSummary | null>(null);
@@ -92,6 +95,7 @@ export function BottomComposer({
       if (!memoryTouchedRef.current) {
         setMemoryEnabled(defaultMemoryEnabled(activeProject));
       }
+      setAgentExecutionMode(activeProject?.agentExecutionMode ?? 'AUTO');
       setCustomScopePath(activeProject?.customScopePath ?? '');
       if (activeProject?.defaultBackend) {
         setBackend(activeProject.defaultBackend === 'LOCAL' ? 'local' : 'e2b');
@@ -170,6 +174,7 @@ export function BottomComposer({
       const [providerId, ...modelParts] = selectedModelKey.split(':');
       const modelName = modelParts.join(':');
       const { agentRunId } = await sendConversationMessage({
+        agentExecutionMode,
         content,
         conversationId: task.conversationId,
         ...(backend ? { backend } : {}),
@@ -299,6 +304,17 @@ export function BottomComposer({
           <option value="PLAN">Plan</option>
           <option value="FULL_ACCESS">Full access</option>
         </select>
+        <SpecialistPicker
+          disabled={!project || submitting}
+          onChange={(nextMode) => {
+            setAgentExecutionMode(nextMode);
+            if (project) setProject({ ...project, agentExecutionMode: nextMode });
+            void saveProjectPatch({ agentExecutionMode: nextMode }).catch((err) =>
+              setError(err instanceof Error ? err.message : 'Could not update agent mode'),
+            );
+          }}
+          value={agentExecutionMode ?? 'AUTO'}
+        />
         <select
           aria-label="Task backend"
           className="h-8 rounded-pill border border-border-subtle bg-bg-canvas px-3 text-[11.5px] text-text-secondary outline-none"

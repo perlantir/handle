@@ -2,6 +2,10 @@ import type {
   ApprovalDecision,
   ActionLogSummary,
   ActionOutcomeType,
+  AgentRunDetail,
+  AgentRunSummary,
+  AgentSubRunSummary,
+  AgentHandoffSummary,
   ChatMessage,
   ConversationSummary,
   CreateTaskResponse,
@@ -11,7 +15,9 @@ import type {
   PendingApproval,
   ProjectSummary,
   SendConversationMessageResponse,
+  SpecialistDefinitionSummary,
   TaskDetailResponse,
+  MultiAgentTraceEvent,
 } from '@handle/shared';
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_HANDLE_API_BASE_URL ?? 'http://127.0.0.1:3001';
@@ -62,6 +68,7 @@ interface ProjectInput {
 }
 
 interface SendMessageInput {
+  agentExecutionMode?: ProjectSummary['agentExecutionMode'];
   backend?: 'e2b' | 'local';
   content: string;
   conversationId: string;
@@ -521,6 +528,7 @@ export async function listMessages({
 }
 
 export async function sendConversationMessage({
+  agentExecutionMode,
   backend,
   content,
   conversationId,
@@ -531,6 +539,7 @@ export async function sendConversationMessage({
 }: SendMessageInput): Promise<SendConversationMessageResponse> {
   const response = await fetch(`${apiBaseUrl}/api/conversations/${conversationId}/messages`, {
     body: JSON.stringify({
+      ...(agentExecutionMode ? { agentExecutionMode } : {}),
       ...(backend ? { backend } : {}),
       content,
       ...(memoryEnabled === undefined ? {} : { memoryEnabled }),
@@ -547,4 +556,105 @@ export async function sendConversationMessage({
   }
 
   return response.json() as Promise<SendConversationMessageResponse>;
+}
+
+export async function listSpecialists({
+  token,
+}: AuthenticatedRequestInput): Promise<{
+  selectable: SpecialistDefinitionSummary[];
+  specialists: SpecialistDefinitionSummary[];
+}> {
+  const response = await fetch(`${apiBaseUrl}/api/specialists`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load specialists');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as {
+    selectable?: SpecialistDefinitionSummary[];
+    specialists?: SpecialistDefinitionSummary[];
+  };
+  return { selectable: body.selectable ?? [], specialists: body.specialists ?? [] };
+}
+
+export async function getAgentRunDetail(
+  agentRunId: string,
+  { token }: AuthenticatedRequestInput,
+): Promise<AgentRunDetail> {
+  const response = await fetch(`${apiBaseUrl}/api/agent-runs/${agentRunId}`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load agent run');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { run?: AgentRunDetail };
+  if (!body.run) throw new Error('Agent run detail returned no run');
+  return body.run;
+}
+
+export async function listAgentRuns({
+  token,
+}: AuthenticatedRequestInput): Promise<AgentRunSummary[]> {
+  const response = await fetch(`${apiBaseUrl}/api/agent-runs`, {
+    headers: authHeaders(token),
+  });
+
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load agent runs');
+    throw new Error(message);
+  }
+
+  const body = (await response.json()) as { runs?: AgentRunSummary[] };
+  return body.runs ?? [];
+}
+
+export async function listAgentRunSubRuns(
+  agentRunId: string,
+  { token }: AuthenticatedRequestInput,
+): Promise<AgentSubRunSummary[]> {
+  const response = await fetch(`${apiBaseUrl}/api/agent-runs/${agentRunId}/subruns`, {
+    headers: authHeaders(token),
+  });
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load specialist runs');
+    throw new Error(message);
+  }
+  const body = (await response.json()) as { subRuns?: AgentSubRunSummary[] };
+  return body.subRuns ?? [];
+}
+
+export async function listAgentRunHandoffs(
+  agentRunId: string,
+  { token }: AuthenticatedRequestInput,
+): Promise<AgentHandoffSummary[]> {
+  const response = await fetch(`${apiBaseUrl}/api/agent-runs/${agentRunId}/handoffs`, {
+    headers: authHeaders(token),
+  });
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load handoffs');
+    throw new Error(message);
+  }
+  const body = (await response.json()) as { handoffs?: AgentHandoffSummary[] };
+  return body.handoffs ?? [];
+}
+
+export async function listAgentRunTrace(
+  agentRunId: string,
+  { token }: AuthenticatedRequestInput,
+): Promise<MultiAgentTraceEvent[]> {
+  const response = await fetch(`${apiBaseUrl}/api/agent-runs/${agentRunId}/trace`, {
+    headers: authHeaders(token),
+  });
+  if (!response.ok) {
+    const message = await parseApiError(response, 'Failed to load agent run trace');
+    throw new Error(message);
+  }
+  const body = (await response.json()) as { trace?: MultiAgentTraceEvent[] };
+  return body.trace ?? [];
 }

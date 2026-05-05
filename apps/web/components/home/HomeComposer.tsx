@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Brain, ChevronDown, ShieldAlert } from "lucide-react";
 import type { ProjectSummary } from "@handle/shared";
 import { Composer } from "@/components/design-system";
+import { SpecialistPicker } from "@/components/multiAgent/SpecialistPicker";
 import { useHandleAuth } from "@/lib/handleAuth";
 import {
   createConversation,
@@ -42,8 +43,11 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
   const [pickingFolder, setPickingFolder] = useState(false);
   const [selectedModelKey, setSelectedModelKey] = useState("");
   const [memoryEnabled, setMemoryEnabled] = useState(true);
+  const [agentExecutionMode, setAgentExecutionMode] =
+    useState<ProjectSummary["agentExecutionMode"]>("AUTO");
   const [submitting, setSubmitting] = useState(false);
   const memoryTouchedRef = useRef(false);
+  const pendingProjectPatchRef = useRef<Promise<ProjectSummary | null> | null>(null);
   const previousProjectIdRef = useRef<string | null>(null);
 
   const activeProject =
@@ -101,7 +105,9 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
     if (!memoryTouchedRef.current) {
       setMemoryEnabled(defaultMemoryEnabled(activeProject));
     }
+    setAgentExecutionMode(activeProject?.agentExecutionMode ?? "AUTO");
   }, [
+    activeProject?.agentExecutionMode,
     activeProject?.customScopePath,
     activeProject?.defaultBackend,
     activeProject?.id,
@@ -129,14 +135,24 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
 
   async function saveProjectPatch(input: Parameters<typeof updateProject>[0]["input"]) {
     if (!activeProject) return null;
-    const token = await getToken();
-    const updated = await updateProject({
-      input,
-      projectId: activeProject.id,
-      token,
-    });
-    updateProjectState(updated);
-    return updated;
+    const promise = (async () => {
+      const token = await getToken();
+      const updated = await updateProject({
+        input,
+        projectId: activeProject.id,
+        token,
+      });
+      updateProjectState(updated);
+      return updated;
+    })();
+    pendingProjectPatchRef.current = promise;
+    try {
+      return await promise;
+    } finally {
+      if (pendingProjectPatchRef.current === promise) {
+        pendingProjectPatchRef.current = null;
+      }
+    }
   }
 
   async function chooseSpecificFolder(project = activeProject) {
@@ -144,6 +160,9 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
     setPickingFolder(true);
     setError(null);
     try {
+      if (pendingProjectPatchRef.current) {
+        await pendingProjectPatchRef.current;
+      }
       const token = await getToken();
       const { path } = await pickProjectFolder({ token });
       const updated = await updateProject({
@@ -180,6 +199,7 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
         token,
       });
       const { agentRunId } = await sendConversationMessage({
+        agentExecutionMode,
         backend,
         content: goal,
         conversationId: conversation.id,
@@ -262,6 +282,17 @@ export function HomeComposer({ onValueChange, value }: HomeComposerProps) {
               Full access
             </span>
           )}
+          <SpecialistPicker
+            disabled={!activeProject || submitting}
+            onChange={(nextMode) => {
+              setAgentExecutionMode(nextMode);
+              if (activeProject) updateProjectState({ ...activeProject, agentExecutionMode: nextMode });
+              void saveProjectPatch({ agentExecutionMode: nextMode }).catch((err) => {
+                setError(err instanceof Error ? err.message : "Could not update agent mode");
+              });
+            }}
+            value={agentExecutionMode ?? "AUTO"}
+          />
         </div>
         <div
           aria-label="Task backend"

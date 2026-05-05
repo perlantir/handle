@@ -2,13 +2,16 @@
 
 import { Eye, FileText, RefreshCw, Terminal, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { AgentRunDetail } from "@handle/shared";
 import type { AgentStreamState, ToolCallState } from "@/hooks/useAgentStream";
+import { MultiAgentRunPanel } from "@/components/multiAgent/MultiAgentRunPanel";
 import { cn } from "@/lib/utils";
 import { BrowserPane } from "./BrowserPane";
 
 type SurfaceTab = 'terminal' | 'browser' | 'preview';
 
 interface CenterPaneProps {
+  agentRun?: AgentRunDetail | null;
   state: AgentStreamState;
   taskId: string;
 }
@@ -145,7 +148,7 @@ function PreviewSurface({ state }: { state: AgentStreamState }) {
   );
 }
 
-export function CenterPane({ state, taskId }: CenterPaneProps) {
+export function CenterPane({ agentRun, state, taskId }: CenterPaneProps) {
   const [tab, setTab] = useState<SurfaceTab>('terminal');
   const hasBrowserActivity = state.browserScreenshots.length > 0;
 
@@ -173,7 +176,18 @@ export function CenterPane({ state, taskId }: CenterPaneProps) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden p-4">
-        {tab === 'terminal' && <TerminalSurface state={state} />}
+        {tab === 'terminal' && (
+          <div className="flex h-full min-h-0 flex-col">
+            <MultiAgentRunPanel
+              handoffs={agentRun?.handoffs ?? []}
+              subRuns={agentRun?.subRuns ?? []}
+              trace={agentRun?.trace.length ? agentRun.trace : state.multiAgentTrace}
+            />
+            <div className="min-h-0 flex-1">
+              <TerminalSurface state={state} />
+            </div>
+          </div>
+        )}
         {tab === 'preview' && <PreviewSurface state={state} />}
         {tab === 'browser' && <BrowserPane state={state} taskId={taskId} />}
       </div>

@@ -1,10 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { PendingApproval, TaskDetailResponse } from "@handle/shared";
+import type { AgentRunDetail, PendingApproval, TaskDetailResponse } from "@handle/shared";
 import { useAgentStream } from "@/hooks/useAgentStream";
 import { useHandleAuth } from "@/lib/handleAuth";
-import { cancelAgentRun, getTask, listPendingApprovals, pauseAgentRun, resumeAgentRun } from "@/lib/api";
+import {
+  cancelAgentRun,
+  getAgentRunDetail,
+  getTask,
+  listPendingApprovals,
+  pauseAgentRun,
+  resumeAgentRun,
+} from "@/lib/api";
 import { getVoiceSettings, textToSpeech } from "@/lib/voice";
 import { ApprovalModal } from "./ApprovalModal";
 import { BottomComposer } from "./BottomComposer";
@@ -31,6 +38,7 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
   const [task, setTask] = useState<TaskDetailResponse | null>(initialTask);
   const state = useAgentStream(taskId, task?.multiAgentTrace ?? []);
   const [listedApprovals, setListedApprovals] = useState<PendingApproval[]>([]);
+  const [agentRun, setAgentRun] = useState<AgentRunDetail | null>(null);
   const [selectedApproval, setSelectedApproval] =
     useState<PendingApproval | null>(null);
   const [resolvedApprovalIds, setResolvedApprovalIds] = useState<Set<string>>(
@@ -111,6 +119,31 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
   const effectiveStatus = state.status === "IDLE" && task ? task.status : state.status;
   const isRunActive = effectiveStatus === "RUNNING" || effectiveStatus === "WAITING";
   const isRunPaused = effectiveStatus === "PAUSED";
+
+  useEffect(() => {
+    if (!isLoaded || !taskId) return;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    async function loadAgentRun() {
+      const token = await getToken();
+      const detail = await getAgentRunDetail(taskId, { token });
+      if (!cancelled) setAgentRun(detail);
+    }
+
+    void loadAgentRun().catch(() => {
+      if (!cancelled) setAgentRun(null);
+    });
+    if (isRunActive || state.multiAgentTrace.length > 0) {
+      timer = window.setInterval(() => {
+        void loadAgentRun().catch(() => undefined);
+      }, 2500);
+    }
+    return () => {
+      cancelled = true;
+      if (timer) window.clearInterval(timer);
+    };
+  }, [getToken, isLoaded, isRunActive, state.multiAgentTrace.length, taskId]);
 
   useEffect(() => {
     if (!state.finalMessage || spokenMessage === state.finalMessage) return;
@@ -224,7 +257,7 @@ export function WorkspaceScreen({ initialTask, taskId }: WorkspaceScreenProps) {
           type="button"
         />
         <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_300px] overflow-hidden">
-          <CenterPane state={state} taskId={taskId} />
+          <CenterPane agentRun={agentRun} state={state} taskId={taskId} />
           <RightInspector
             approvals={approvals}
             onReviewApproval={setSelectedApproval}
