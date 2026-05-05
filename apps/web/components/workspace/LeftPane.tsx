@@ -1,7 +1,10 @@
 'use client';
 
-import { Check } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Check, Copy } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Children, isValidElement, useMemo, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { PlanStep, TaskDetailResponse, TaskMessage } from '@handle/shared';
 import type { AgentStreamState, ToolCallState } from '@/hooks/useAgentStream';
 import { cn } from '@/lib/utils';
@@ -33,6 +36,96 @@ function TypingDots() {
   );
 }
 
+function nodeText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join('');
+  if (isValidElement<{ children?: ReactNode }>(node)) return nodeText(node.props.children);
+  return Children.toArray(node).map(nodeText).join('');
+}
+
+function CopyButton({ className, label = 'Copy text', text }: { className?: string; label?: string; text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <button
+      aria-label={label}
+      className={cn(
+        'inline-flex h-7 w-7 items-center justify-center rounded-[6px] border border-border-subtle bg-bg-surface text-text-muted transition-colors duration-fast hover:bg-bg-subtle hover:text-text-primary',
+        className,
+      )}
+      onClick={handleCopy}
+      title={copied ? 'Copied' : label}
+      type="button"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      components={{
+        a({ children, href }) {
+          return (
+            <a className="font-medium text-accent underline-offset-2 hover:underline" href={href} rel="noreferrer" target="_blank">
+              {children}
+            </a>
+          );
+        },
+        blockquote({ children }) {
+          return <blockquote className="border-l-2 border-border px-3 text-text-secondary">{children}</blockquote>;
+        },
+        code({ children, className }) {
+          const isBlock = Boolean(className) || nodeText(children).includes('\n');
+          if (isBlock) {
+            return <code className={cn('block whitespace-pre-wrap break-words font-mono', className)}>{children}</code>;
+          }
+          return <code className="rounded-[4px] border border-border-subtle bg-bg-subtle px-1 py-0.5 font-mono text-[12px] text-text-primary">{children}</code>;
+        },
+        li({ children }) {
+          return <li className="pl-1">{children}</li>;
+        },
+        ol({ children }) {
+          return <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>;
+        },
+        p({ children }) {
+          return <p className="my-0">{children}</p>;
+        },
+        pre({ children }) {
+          const text = nodeText(children).replace(/\n$/, '');
+          return (
+            <div className="relative my-3 overflow-hidden rounded-[8px] border border-border-subtle bg-bg-surface">
+              <CopyButton className="absolute right-2 top-2 bg-bg-canvas" label="Copy code" text={text} />
+              <pre className="overflow-x-auto p-4 pr-12 text-[12.5px] leading-5 text-text-primary">{children}</pre>
+            </div>
+          );
+        },
+        strong({ children }) {
+          return <strong className="font-semibold text-text-primary">{children}</strong>;
+        },
+        ul({ children }) {
+          return <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>;
+        },
+      }}
+      remarkPlugins={[remarkGfm]}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
 function Message({ message, working = false }: { message: Pick<TaskMessage, 'content' | 'role'>; working?: boolean }) {
   const isAgent = message.role === 'ASSISTANT' || message.role === 'SYSTEM';
 
@@ -47,17 +140,20 @@ function Message({ message, working = false }: { message: Pick<TaskMessage, 'con
         {isAgent ? 'H' : 'Y'}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="mb-[3px] text-[11px] tracking-[0.005em] text-text-muted">
-          {isAgent ? 'Handle' : 'You'}
-          {working && ' · working'}
+        <div className="mb-[3px] flex items-center gap-1.5 text-[11px] tracking-[0.005em] text-text-muted">
+          <span>
+            {isAgent ? 'Handle' : 'You'}
+            {working && ' · working'}
+          </span>
+          {!working && <CopyButton className="h-5 w-5 border-transparent bg-transparent" label="Copy message" text={message.content} />}
         </div>
         <div
           className={cn(
-            'text-[13px] leading-[19.5px] tracking-[-0.005em] text-text-primary',
+            'space-y-2 text-[13px] leading-[19.5px] tracking-[-0.005em] text-text-primary',
             working && 'text-text-secondary',
           )}
         >
-          {message.content}
+          <MarkdownContent content={message.content} />
           {working && (
             <span className="ml-1.5 inline-block">
               <TypingDots />
