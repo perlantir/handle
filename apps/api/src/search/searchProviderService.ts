@@ -623,10 +623,12 @@ export async function webSearch({
 export async function webFetch({
   fetchImpl = fetch,
   maxBytes = 120_000,
+  timeoutMs = 15_000,
   url,
 }: {
   fetchImpl?: typeof fetch;
   maxBytes?: number;
+  timeoutMs?: number;
   url: string;
 }) {
   const target = new URL(url);
@@ -640,6 +642,7 @@ export async function webFetch({
       Accept: "text/html, text/plain, application/json;q=0.9, */*;q=0.8",
       "User-Agent": "Handle/0.6.5 (+https://handle.local)",
     },
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const text = await response.text();
   if (!response.ok) {

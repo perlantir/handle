@@ -198,6 +198,10 @@ describe("webFetch", () => {
 
     expect(result.content).toBe("abc");
     expect(result.truncated).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      new URL("https://example.com"),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("rejects non-http URLs", async () => {
