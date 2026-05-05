@@ -118,6 +118,24 @@ export async function getSkillRun({
   return body.run;
 }
 
+export async function decideSkillRunSendApproval({
+  decision,
+  runId,
+  token,
+}: {
+  decision: "approved" | "denied";
+  runId: string;
+  token: string | null;
+}) {
+  const response = await fetch(`${apiBaseUrl}/api/skill-runs/${encodeURIComponent(runId)}/send-approval`, {
+    body: JSON.stringify({ decision }),
+    headers: authHeaders(token),
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(await parseApiError(response, "Failed to record send approval"));
+  return response.json() as Promise<{ decision: "approved" | "denied"; sentCount: number }>;
+}
+
 export async function createSkill({
   input,
   token,

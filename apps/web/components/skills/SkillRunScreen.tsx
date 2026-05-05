@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from "react";
 import type { SkillArtifactSummary, SkillRunDetail } from "@handle/shared";
-import { ArrowLeft, Box, CheckCircle2, ExternalLink, FileText, Loader2, XCircle } from "lucide-react";
+import { ArrowLeft, Box, CheckCircle2, ExternalLink, FileText, Loader2, Mail, ShieldAlert, XCircle } from "lucide-react";
+import { Modal } from "@/components/design-system";
 import { useHandleAuth } from "@/lib/handleAuth";
-import { getSkillRun } from "@/lib/skills";
+import { decideSkillRunSendApproval, getSkillRun } from "@/lib/skills";
 import { cn } from "@/lib/utils";
 
 export function SkillRunScreen({ runId }: { runId: string }) {
   const { getToken, isLoaded } = useHandleAuth();
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalResult, setApprovalResult] = useState<string | null>(null);
+  const [approvalSubmitting, setApprovalSubmitting] = useState<"approved" | "denied" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [run, setRun] = useState<SkillRunDetail | null>(null);
@@ -39,6 +44,34 @@ export function SkillRunScreen({ runId }: { runId: string }) {
     };
   }, [getToken, isLoaded, runId]);
 
+  async function reloadRun() {
+    const token = await getToken();
+    const loaded = await getSkillRun({ runId, token });
+    setRun(loaded);
+    setSelectedArtifact((current) => loaded.artifacts.find((artifact) => artifact.id === current?.id) ?? loaded.artifacts[0] ?? null);
+  }
+
+  async function handleSendApproval(decision: "approved" | "denied") {
+    setApprovalSubmitting(decision);
+    setApprovalError(null);
+    setApprovalResult(null);
+    try {
+      const token = await getToken();
+      const result = await decideSkillRunSendApproval({ decision, runId, token });
+      setApprovalResult(
+        result.decision === "denied"
+          ? "Denied. No emails were sent."
+          : `Approved. Sent ${result.sentCount} email draft(s).`,
+      );
+      setApprovalOpen(false);
+      await reloadRun();
+    } catch (err) {
+      setApprovalError(err instanceof Error ? err.message : "Could not record approval decision");
+    } finally {
+      setApprovalSubmitting(null);
+    }
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-bg-base px-8 py-8 text-[13px] text-text-secondary">
@@ -57,6 +90,11 @@ export function SkillRunScreen({ runId }: { runId: string }) {
       </main>
     );
   }
+
+  const emailDraftArtifact = run.skill?.slug === "email-outreach"
+    ? run.artifacts.find((artifact) => artifact.kind === "EMAIL_DRAFTS") ?? null
+    : null;
+  const emailDrafts = parseEmailDrafts(emailDraftArtifact?.inlineContent ?? null);
 
   return (
     <main className="min-h-screen bg-bg-base text-text-primary">
@@ -118,6 +156,30 @@ export function SkillRunScreen({ runId }: { runId: string }) {
             </div>
           </section>
 
+          {emailDraftArtifact ? (
+            <section className="rounded-[8px] border border-status-warning/20 bg-status-warning/5 p-5">
+              <h2 className="flex items-center gap-2 text-[14px] font-semibold text-text-primary">
+                <ShieldAlert className="h-4 w-4 text-status-warning" />
+                Send Approval
+              </h2>
+              <p className="mt-2 text-[12.5px] leading-5 text-text-secondary">
+                This Skill created {emailDrafts.length} draft(s). No email is sent unless you explicitly approve this batch here.
+              </p>
+              {approvalResult ? <p className="mt-2 text-[12px] text-status-success">{approvalResult}</p> : null}
+              <button
+                className="mt-3 inline-flex items-center gap-2 rounded-[8px] border border-border-subtle bg-bg-canvas px-3 py-2 text-[12.5px] font-medium text-text-primary hover:border-accent"
+                onClick={() => {
+                  setApprovalError(null);
+                  setApprovalOpen(true);
+                }}
+                type="button"
+              >
+                <Mail className="h-3.5 w-3.5" />
+                Review send approval
+              </button>
+            </section>
+          ) : null}
+
           <section className="rounded-[8px] border border-border-subtle bg-bg-canvas p-5">
             <h2 className="flex items-center gap-2 text-[14px] font-semibold"><FileText className="h-4 w-4" /> Artifact Preview</h2>
             {selectedArtifact ? (
@@ -136,7 +198,115 @@ export function SkillRunScreen({ runId }: { runId: string }) {
           </section>
         </aside>
       </div>
+      {approvalOpen ? (
+        <EmailSendApprovalModal
+          drafts={emailDrafts}
+          error={approvalError}
+          onClose={() => setApprovalOpen(false)}
+          onDecision={handleSendApproval}
+          submitting={approvalSubmitting}
+        />
+      ) : null}
     </main>
+  );
+}
+
+interface EmailDraftPreview {
+  body: string;
+  recipient: string;
+  subject: string;
+}
+
+function parseEmailDrafts(content: string | null): EmailDraftPreview[] {
+  if (!content) return [];
+  try {
+    const parsed = JSON.parse(content) as { drafts?: unknown };
+    const drafts = Array.isArray(parsed.drafts) ? parsed.drafts : [];
+    return drafts
+      .map((draft) => {
+        if (!draft || typeof draft !== "object") return null;
+        const record = draft as Record<string, unknown>;
+        const recipient = typeof record.recipient === "string" ? record.recipient : "";
+        const subject = typeof record.subject === "string" ? record.subject : "";
+        const body = typeof record.body === "string" ? record.body : "";
+        if (!recipient || !subject || !body) return null;
+        return { body, recipient, subject };
+      })
+      .filter((draft): draft is EmailDraftPreview => Boolean(draft));
+  } catch {
+    return [];
+  }
+}
+
+function EmailSendApprovalModal({
+  drafts,
+  error,
+  onClose,
+  onDecision,
+  submitting,
+}: {
+  drafts: EmailDraftPreview[];
+  error: string | null;
+  onClose: () => void;
+  onDecision: (decision: "approved" | "denied") => void;
+  submitting: "approved" | "denied" | null;
+}) {
+  return (
+    <Modal className="max-h-[86vh] w-full max-w-[760px] rounded-[8px] border border-border-subtle bg-bg-canvas">
+        <div className="border-b border-border-subtle px-5 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="flex items-center gap-2 text-[15px] font-semibold">
+                <ShieldAlert className="h-4 w-4 text-status-warning" />
+                Approve Email Send
+              </h2>
+              <p className="mt-1 text-[12.5px] leading-5 text-text-secondary">
+                Review every draft. Denying this approval records the decision and blocks all sends.
+              </p>
+            </div>
+            <button className="text-[12px] text-text-tertiary hover:text-text-primary" onClick={onClose} type="button">
+              Close
+            </button>
+          </div>
+        </div>
+        <div className="max-h-[52vh] overflow-auto px-5 py-4">
+          <div className="grid gap-3">
+            {drafts.map((draft, index) => (
+              <article className="rounded-[8px] border border-border-subtle bg-bg-base p-3" key={`${draft.recipient}-${index}`}>
+                <div className="text-[11px] uppercase tracking-[0.04em] text-text-muted">Draft {index + 1}</div>
+                <div className="mt-1 text-[12.5px] font-medium text-text-primary">{draft.recipient}</div>
+                <div className="mt-1 text-[12px] text-text-secondary">Subject: {draft.subject}</div>
+                <pre className="mt-2 max-h-[180px] overflow-auto whitespace-pre-wrap rounded-[8px] border border-border-subtle bg-bg-canvas p-2 text-[12px] leading-5 text-text-secondary">
+                  {draft.body}
+                </pre>
+              </article>
+            ))}
+          </div>
+        </div>
+        {error ? (
+          <div className="border-t border-status-error/20 bg-status-error/5 px-5 py-3 text-[12px] text-status-error">
+            {error}
+          </div>
+        ) : null}
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border-subtle px-5 py-4">
+          <button
+            className="rounded-[8px] border border-border-subtle px-3 py-2 text-[12.5px] text-text-primary hover:border-status-error/50 disabled:opacity-60"
+            disabled={Boolean(submitting)}
+            onClick={() => onDecision("denied")}
+            type="button"
+          >
+            {submitting === "denied" ? "Denying..." : "Deny send"}
+          </button>
+          <button
+            className="rounded-[8px] bg-status-warning px-3 py-2 text-[12.5px] font-medium text-bg-base disabled:opacity-60"
+            disabled={Boolean(submitting) || drafts.length === 0}
+            onClick={() => onDecision("approved")}
+            type="button"
+          >
+            {submitting === "approved" ? "Sending..." : `Approve and send ${drafts.length}`}
+          </button>
+        </div>
+    </Modal>
   );
 }
 
