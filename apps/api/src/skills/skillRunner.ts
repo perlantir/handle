@@ -8,6 +8,7 @@ import type {
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { Prisma } from "@prisma/client";
 import { createDefaultIntegrationToolRuntime } from "../integrations/toolRuntime";
+import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { redactSecrets } from "../lib/redact";
 import { providerRegistry } from "../providers/registry";
@@ -395,14 +396,14 @@ function sourceSetArtifact(title: string, sources: SourceRecord[]): SkillArtifac
   };
 }
 
-function sourceContext(sources: SourceRecord[], maxChars = 60_000) {
+function sourceContext(sources: SourceRecord[], maxChars = 45_000) {
   const chunks = sources.map((source) => [
     `[${source.id}] ${source.title}`,
     `URL: ${source.url}`,
     `Domain: ${source.domain}`,
     source.publishedAt ? `Published: ${source.publishedAt}` : "Published: unknown",
     `Snippet: ${source.snippet}`,
-    `Content: ${(source.content ?? "").slice(0, 4_500)}`,
+    `Content: ${(source.content ?? "").slice(0, 2_500)}`,
   ].join("\n"));
   return chunks.join("\n\n").slice(0, maxChars);
 }
@@ -430,6 +431,10 @@ async function gatherWebSources({
 }): Promise<SourceRecord[]> {
   const results: NormalizedSearchResult[] = [];
   const failures: string[] = [];
+  logger.info(
+    { maxSources, projectId: context.projectId ?? null, queryCount: queries.length, userId: context.userId },
+    "Skill live web source gathering started",
+  );
   for (const query of queries) {
     try {
       const response = await webSearch({
@@ -449,6 +454,10 @@ async function gatherWebSources({
   if (candidates.length === 0) {
     throw new Error(`No live web search results were available. ${failures.join("; ")}`);
   }
+  logger.info(
+    { candidateCount: candidates.length, maxSources, userId: context.userId },
+    "Skill live web search candidates collected",
+  );
 
   const datedSources: SourceRecord[] = [];
   const undatedSources: SourceRecord[] = [];
@@ -482,9 +491,18 @@ async function gatherWebSources({
     }
     if (datedSources.length >= maxSources) break;
   }
-  return [...datedSources, ...undatedSources]
+  const sources = [...datedSources, ...undatedSources]
     .slice(0, maxSources)
     .map((source, index) => ({ ...source, id: `S${index + 1}` }));
+  logger.info(
+    {
+      datedSourceCount: sources.filter((source) => source.publishedAt !== "unknown").length,
+      sourceCount: sources.length,
+      userId: context.userId,
+    },
+    "Skill live web source gathering completed",
+  );
+  return sources;
 }
 
 async function invokeSkillLlm({
@@ -512,11 +530,38 @@ async function invokeSkillLlm({
   let prompt = user;
   let text = "";
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    const response = await active.model.invoke([
-      new SystemMessage(system),
-      new HumanMessage(prompt),
-    ]);
+    const started = Date.now();
+    const promptChars = prompt.length + system.length;
+    logger.info(
+      {
+        attempt,
+        model: context.request.modelName ?? active.provider.config.primaryModel,
+        minWords,
+        promptChars,
+        providerId: active.provider.id,
+        userId: context.userId,
+      },
+      "Skill live LLM synthesis started",
+    );
+    const response = await active.model.invoke(
+      [
+        new SystemMessage(system),
+        new HumanMessage(prompt),
+      ],
+      { signal: AbortSignal.timeout(180_000) },
+    );
     text = redactSecrets(contentToString(response.content)).trim();
+    logger.info(
+      {
+        attempt,
+        durationMs: Date.now() - started,
+        model: context.request.modelName ?? active.provider.config.primaryModel,
+        providerId: active.provider.id,
+        userId: context.userId,
+        wordCount: wordCount(text),
+      },
+      "Skill live LLM synthesis completed",
+    );
     if (!minWords || wordCount(text) >= minWords) return text;
     prompt = `${user}\n\nYour previous draft was ${wordCount(text)} words. Expand it to at least ${minWords} words while preserving citations and specificity.`;
     active = await providerRegistry.getActiveModel({
