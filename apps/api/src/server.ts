@@ -26,6 +26,7 @@ import { sharedMemoryRouter } from "./routes/sharedMemory";
 import { skillsRouter } from "./routes/skills";
 import { streamRouter } from "./routes/stream";
 import { tasksRouter } from "./routes/tasks";
+import { voiceRouter } from "./routes/voice";
 
 export async function createServer() {
   const app = express();
@@ -67,6 +68,7 @@ export async function createServer() {
   app.use("/api", sharedMemoryRouter);
   app.use("/api", skillsRouter);
   app.use("/api/tasks", tasksRouter);
+  app.use("/api", voiceRouter);
   app.use("/api/tasks", streamRouter);
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "Not found" });

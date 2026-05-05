@@ -58,13 +58,23 @@ export function ProjectDefaultsSettings() {
     try {
       const token = await getToken();
       const input: Parameters<typeof updateProject>[0]["input"] = {};
+      if (draft.agentExecutionMode) input.agentExecutionMode = draft.agentExecutionMode;
       if (draft.browserMode) input.browserMode = draft.browserMode;
+      if (draft.criticEnabled !== undefined) input.criticEnabled = draft.criticEnabled;
+      if (draft.criticScope) input.criticScope = draft.criticScope;
       if (draft.customScopePath !== undefined) input.customScopePath = draft.customScopePath;
       if (draft.defaultBackend) input.defaultBackend = draft.defaultBackend;
       if (draft.defaultModel !== undefined) input.defaultModel = draft.defaultModel;
       if (draft.defaultProvider !== undefined) input.defaultProvider = draft.defaultProvider;
       if (draft.name) input.name = draft.name;
       if (draft.permissionMode) input.permissionMode = draft.permissionMode;
+      if (draft.maxRuntimeSeconds !== undefined) input.maxRuntimeSeconds = Number(draft.maxRuntimeSeconds);
+      if (draft.maxCostCents !== undefined) input.maxCostCents = Number(draft.maxCostCents);
+      if (draft.maxToolCalls !== undefined) input.maxToolCalls = Number(draft.maxToolCalls);
+      if (draft.maxSupervisorTurns !== undefined) input.maxSupervisorTurns = Number(draft.maxSupervisorTurns);
+      if (draft.maxSpecialistSubRuns !== undefined) input.maxSpecialistSubRuns = Number(draft.maxSpecialistSubRuns);
+      if (draft.maxParallelSubRuns !== undefined) input.maxParallelSubRuns = Number(draft.maxParallelSubRuns);
+      if (draft.maxRevisionLoops !== undefined) input.maxRevisionLoops = Number(draft.maxRevisionLoops);
       if (draft.workspaceScope) input.workspaceScope = draft.workspaceScope;
       const updated = await updateProject({
         input,
@@ -204,6 +214,89 @@ export function ProjectDefaultsSettings() {
               <option value="LOCAL">Local Mac</option>
             </select>
           </label>
+
+          <div className="grid gap-3 rounded-[8px] border border-border-subtle bg-bg-canvas p-3">
+            <label className="grid gap-1.5">
+              <span className="text-[12.5px] font-medium text-text-secondary">Agent mode</span>
+              <select
+                className="h-9 rounded-md border border-border-subtle bg-bg-surface px-3 text-[12.5px] text-text-primary outline-none"
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    agentExecutionMode: event.target.value as NonNullable<ProjectSummary["agentExecutionMode"]>,
+                  }))
+                }
+                value={draft.agentExecutionMode ?? "AUTO"}
+              >
+                <option value="AUTO">Auto</option>
+                <option value="RESEARCHER">Researcher</option>
+                <option value="CODER">Coder</option>
+                <option value="DESIGNER">Designer</option>
+                <option value="OPERATOR">Operator</option>
+                <option value="WRITER">Writer</option>
+                <option value="MULTI_AGENT_TEAM">Multi-agent team</option>
+              </select>
+            </label>
+
+            <label className="flex items-center justify-between gap-4">
+              <span>
+                <span className="block text-[12.5px] font-medium text-text-secondary">Enable critic review</span>
+                <span className="mt-1 block text-[11.5px] text-text-tertiary">Verifier intervenes for risky or artifact-producing work.</span>
+              </span>
+              <input
+                checked={Boolean(draft.criticEnabled)}
+                className="h-4 w-4"
+                onChange={(event) => setDraft((current) => ({ ...current, criticEnabled: event.target.checked }))}
+                type="checkbox"
+              />
+            </label>
+
+            <label className="grid gap-1.5">
+              <span className="text-[12.5px] font-medium text-text-secondary">Critic scope</span>
+              <select
+                className="h-9 rounded-md border border-border-subtle bg-bg-surface px-3 text-[12.5px] text-text-primary outline-none"
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    criticScope: event.target.value as NonNullable<ProjectSummary["criticScope"]>,
+                  }))
+                }
+                value={draft.criticScope ?? "RISKY_ONLY"}
+              >
+                <option value="RISKY_ONLY">Risky only</option>
+                <option value="WRITES_ONLY">Writes only</option>
+                <option value="ALL_DECISIONS">All decisions</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {([
+              ["maxRuntimeSeconds", "Runtime seconds", 1800],
+              ["maxCostCents", "Cost cents", 200],
+              ["maxToolCalls", "Tool calls", 100],
+              ["maxSupervisorTurns", "Supervisor turns", 15],
+              ["maxSpecialistSubRuns", "Specialist runs", 20],
+              ["maxParallelSubRuns", "Parallel runs", 3],
+              ["maxRevisionLoops", "Revision loops", 2],
+            ] as const).map(([key, label, fallback]) => (
+              <label className="grid gap-1.5" key={key}>
+                <span className="text-[12.5px] font-medium text-text-secondary">{label}</span>
+                <input
+                  className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none"
+                  min={0}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      [key]: Number(event.target.value),
+                    }))
+                  }
+                  type="number"
+                  value={Number(draft[key] ?? fallback)}
+                />
+              </label>
+            ))}
+          </div>
         </div>
 
         <div className="mt-5 flex items-center justify-between">

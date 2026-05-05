@@ -20,10 +20,24 @@ import { isProviderId, type ProviderId } from "../providers/types";
 
 const projectSchema = z.object({
   browserMode: z.enum(["SEPARATE_PROFILE", "ACTUAL_CHROME"]).optional(),
+  agentExecutionMode: z
+    .enum(["AUTO", "RESEARCHER", "CODER", "DESIGNER", "OPERATOR", "WRITER", "MULTI_AGENT_TEAM"])
+    .optional(),
+  criticEnabled: z.boolean().optional(),
+  criticModelName: z.string().min(1).max(200).nullable().optional(),
+  criticModelProvider: z.string().refine(isProviderId).nullable().optional(),
+  criticScope: z.enum(["ALL_DECISIONS", "WRITES_ONLY", "RISKY_ONLY"]).optional(),
   customScopePath: z.string().min(1).nullable().optional(),
   defaultBackend: z.enum(["E2B", "LOCAL"]).optional(),
   defaultModel: z.string().min(1).nullable().optional(),
   defaultProvider: z.string().refine(isProviderId).nullable().optional(),
+  maxCostCents: z.number().int().min(1).max(1000).optional(),
+  maxParallelSubRuns: z.number().int().min(1).max(3).optional(),
+  maxRevisionLoops: z.number().int().min(0).max(2).optional(),
+  maxRuntimeSeconds: z.number().int().min(30).max(14400).optional(),
+  maxSpecialistSubRuns: z.number().int().min(1).max(20).optional(),
+  maxSupervisorTurns: z.number().int().min(1).max(15).optional(),
+  maxToolCalls: z.number().int().min(1).max(100).optional(),
   memoryScope: z.enum(["GLOBAL_AND_PROJECT", "PROJECT_ONLY", "NONE"]).optional(),
   name: z.string().min(1).max(120).optional(),
   permissionMode: z.enum(["FULL_ACCESS", "ASK", "PLAN"]).optional(),

@@ -8,13 +8,15 @@ import { listProjects, pickProjectFolder, sendConversationMessage, updateProject
 import { useHandleAuth } from '@/lib/handleAuth';
 import { listSettingsProviders, type SettingsProvider } from '@/lib/settingsProviders';
 import { cn } from '@/lib/utils';
+import { getVoiceSettings, parseVoiceCommand, transcribeVoice, type VoiceSettingsSummary } from '@/lib/voice';
 
-function IconButton({ children, label }: { children: React.ReactNode; label: string }) {
+function IconButton({ children, label, ...props }: { children: React.ReactNode; label: string } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       aria-label={label}
       className="flex h-8 w-8 items-center justify-center rounded-pill border border-border-subtle bg-bg-surface text-text-secondary transition-colors duration-fast hover:bg-bg-subtle"
       type="button"
+      {...props}
     >
       {children}
     </button>
@@ -58,6 +60,10 @@ export function BottomComposer({
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [providers, setProviders] = useState<SettingsProvider[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState('');
+  const [voiceSettings, setVoiceSettings] = useState<VoiceSettingsSummary | null>(null);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceChunksRef = useRef<Blob[]>([]);
   const memoryTouchedRef = useRef(false);
   const pendingProjectPatchRef = useRef<Promise<ProjectSummary | null> | null>(null);
 
@@ -79,6 +85,7 @@ export function BottomComposer({
         listProjects({ token }),
         listSettingsProviders().catch(() => []),
       ]);
+      const loadedVoiceSettings = await getVoiceSettings().catch(() => null);
       if (cancelled) return;
       const activeProject = projects.find((item) => item.id === task?.projectId) ?? null;
       setProject(activeProject);
@@ -92,6 +99,7 @@ export function BottomComposer({
         setBackend(task?.backend ?? 'e2b');
       }
       setProviders(loadedProviders);
+      setVoiceSettings(loadedVoiceSettings);
       if (!selectedModelKey) {
         const current =
           loadedProviders.find((provider) => provider.enabled && provider.id === activeProject?.defaultProvider) ??
@@ -178,6 +186,71 @@ export function BottomComposer({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function blobToBase64(blob: Blob) {
+    const buffer = await blob.arrayBuffer();
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    for (let index = 0; index < bytes.length; index += 1) {
+      binary += String.fromCharCode(bytes[index] ?? 0);
+    }
+    return window.btoa(binary);
+  }
+
+  async function stopVoiceRecording() {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') return;
+    recorder.stop();
+  }
+
+  async function startVoiceRecording() {
+    if (!voiceSettings?.voiceInputEnabled) {
+      setError('Voice input is disabled in Settings → Voice.');
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('Microphone recording is not available in this browser.');
+      return;
+    }
+    if (voiceRecording) {
+      await stopVoiceRecording();
+      return;
+    }
+
+    setError(null);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const recorder = new MediaRecorder(stream);
+    voiceChunksRef.current = [];
+    mediaRecorderRef.current = recorder;
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) voiceChunksRef.current.push(event.data);
+    };
+    recorder.onstop = () => {
+      setVoiceRecording(false);
+      stream.getTracks().forEach((track) => track.stop());
+      const blob = new Blob(voiceChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+      void (async () => {
+        try {
+          const audioBase64 = await blobToBase64(blob);
+          const transcript = await transcribeVoice(audioBase64, blob.type || 'audio/webm');
+          const parsed = await parseVoiceCommand(transcript.text, task?.id, task?.projectId);
+          if (parsed.command.commandType === 'PAUSE_RUN' && onPauseRun) {
+            onPauseRun();
+          } else if (parsed.command.commandType === 'RESUME_RUN' && onResumeRun) {
+            onResumeRun();
+          } else if (parsed.command.commandType === 'STATUS_QUERY') {
+            setValue('What is the status of this run?');
+          } else {
+            setValue(transcript.text);
+          }
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Voice transcription failed');
+        }
+      })();
+    };
+    recorder.start();
+    setVoiceRecording(true);
   }
 
   return (
@@ -325,8 +398,14 @@ export function BottomComposer({
         <IconButton label="Attach file">
           <Paperclip className="h-[13px] w-[13px]" />
         </IconButton>
-        <IconButton label="Voice input">
-          <Mic className="h-[13px] w-[13px]" />
+        <IconButton
+          label={voiceRecording ? "Stop voice recording" : "Voice input"}
+          onClick={() => {
+            void startVoiceRecording().catch((err) => setError(err instanceof Error ? err.message : 'Could not start voice input'));
+          }}
+          title={voiceRecording ? 'Stop recording' : 'Push to talk'}
+        >
+          <Mic className={cn("h-[13px] w-[13px]", voiceRecording && "text-accent")} />
         </IconButton>
         {isRunActive ? (
           <button

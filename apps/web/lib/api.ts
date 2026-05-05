@@ -38,11 +38,23 @@ interface ApprovalResponse {
 }
 
 interface ProjectInput {
+  agentExecutionMode?: ProjectSummary['agentExecutionMode'];
   browserMode?: ProjectSummary['browserMode'];
+  criticEnabled?: boolean;
+  criticModelName?: string | null;
+  criticModelProvider?: string | null;
+  criticScope?: ProjectSummary['criticScope'];
   customScopePath?: string | null;
   defaultBackend?: ProjectSummary['defaultBackend'];
   defaultModel?: string | null;
   defaultProvider?: string | null;
+  maxCostCents?: number;
+  maxParallelSubRuns?: number;
+  maxRevisionLoops?: number;
+  maxRuntimeSeconds?: number;
+  maxSpecialistSubRuns?: number;
+  maxSupervisorTurns?: number;
+  maxToolCalls?: number;
   memoryScope?: ProjectSummary['memoryScope'];
   name?: string;
   permissionMode?: ProjectSummary['permissionMode'];
