@@ -140,6 +140,22 @@ export function createVoiceRouter({
     });
   }
 
+  async function resolveAgentRunLink(agentRunId: string | undefined, userId: string) {
+    if (!agentRunId) return undefined;
+    const agentRun = await store.agentRun.findFirst({
+      select: { id: true },
+      where: {
+        id: agentRunId,
+        OR: [{ userId }, { userId: null }],
+      },
+    });
+    if (!agentRun) {
+      logger.warn({ agentRunId, userId }, "Voice command referenced unknown agent run; storing audit row without link");
+      return undefined;
+    }
+    return agentRun.id;
+  }
+
   router.get(
     "/settings/voice",
     asyncHandler(async (req, res) => {
@@ -270,6 +286,7 @@ export function createVoiceRouter({
       if (!parsed.success) return res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
       const result = parseVoiceCommand(parsed.data.transcript);
       const storedTranscript = settings.storeTranscripts ? parsed.data.transcript : null;
+      const linkedAgentRunId = await resolveAgentRunLink(parsed.data.agentRunId, userId);
       await store.voiceCommand.create({
         data: {
           commandType: result.commandType,
@@ -280,12 +297,12 @@ export function createVoiceRouter({
           transcript: storedTranscript,
           transcriptStored: Boolean(storedTranscript),
           userId,
-          ...(parsed.data.agentRunId ? { agentRunId: parsed.data.agentRunId } : {}),
+          ...(linkedAgentRunId ? { agentRunId: linkedAgentRunId } : {}),
           ...(parsed.data.projectId ? { projectId: parsed.data.projectId } : {}),
           ...(result.rejectionReason ? { rejectionReason: result.rejectionReason } : {}),
         } as Prisma.VoiceCommandUncheckedCreateInput,
       });
-      return res.json({ command: result, transcriptStored: Boolean(storedTranscript) });
+      return res.json({ agentRunLinked: Boolean(linkedAgentRunId), command: result, transcriptStored: Boolean(storedTranscript) });
     }),
   );
 
@@ -301,6 +318,7 @@ export function createVoiceRouter({
       const parsed = approvalSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
       const result = parseVoiceApproval(parsed.data);
+      const linkedAgentRunId = await resolveAgentRunLink(parsed.data.agentRunId, userId);
       await store.voiceCommand.create({
         data: {
           approvalId: parsed.data.approvalId,
@@ -313,12 +331,12 @@ export function createVoiceRouter({
           transcript: parsed.data.transcript,
           transcriptStored: true,
           userId,
-          ...(parsed.data.agentRunId ? { agentRunId: parsed.data.agentRunId } : {}),
+          ...(linkedAgentRunId ? { agentRunId: linkedAgentRunId } : {}),
           ...(parsed.data.projectId ? { projectId: parsed.data.projectId } : {}),
           ...(result.rejectionReason ? { rejectionReason: result.rejectionReason } : {}),
         } as Prisma.VoiceCommandUncheckedCreateInput,
       });
-      return res.json({ approval: result, transcriptStored: true });
+      return res.json({ agentRunLinked: Boolean(linkedAgentRunId), approval: result, transcriptStored: true });
     }),
   );
 
