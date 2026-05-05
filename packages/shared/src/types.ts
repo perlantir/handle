@@ -89,6 +89,63 @@ export interface ProviderFallbackEvent {
   taskId: string;
 }
 
+export type AgentExecutionMode =
+  | 'AUTO'
+  | 'RESEARCHER'
+  | 'CODER'
+  | 'DESIGNER'
+  | 'OPERATOR'
+  | 'WRITER'
+  | 'MULTI_AGENT_TEAM';
+
+export type AgentSpecialistRole =
+  | 'SUPERVISOR'
+  | 'RESEARCHER'
+  | 'CODER'
+  | 'DESIGNER'
+  | 'OPERATOR'
+  | 'WRITER'
+  | 'ANALYST'
+  | 'VERIFIER'
+  | 'SYNTHESIZER';
+
+export type AgentSubRunStatus =
+  | 'QUEUED'
+  | 'RUNNING'
+  | 'COMPLETED'
+  | 'REVISED'
+  | 'REJECTED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export type CriticVerdict = 'APPROVE' | 'REVISE' | 'REJECT';
+
+export interface MultiAgentTraceEvent {
+  type: 'multi_agent_trace';
+  taskId: string;
+  event:
+    | 'supervisor_selected_specialist'
+    | 'auto_escalated_to_multi_agent'
+    | 'specialist_started'
+    | 'specialist_completed'
+    | 'handoff_created'
+    | 'verification_started'
+    | 'verification_passed'
+    | 'verification_revision_requested'
+    | 'budget_warning'
+    | 'budget_exhausted';
+  role?: AgentSpecialistRole;
+  fromRole?: AgentSpecialistRole;
+  toRole?: AgentSpecialistRole;
+  subRunId?: string;
+  handoffId?: string;
+  verdict?: CriticVerdict;
+  summary: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+  timestamp: string;
+}
+
 export interface BrowserScreenshotEvent {
   type: 'browser_screenshot';
   taskId: string;
@@ -194,7 +251,8 @@ export type SSEEvent =
   | MemoryRecallEvent
   | MemoryStatusEvent
   | PlanUpdateEvent
-  | ProviderFallbackEvent;
+  | ProviderFallbackEvent
+  | MultiAgentTraceEvent;
 
 export interface ApprovalPayload {
   type:
@@ -428,6 +486,18 @@ export interface ProjectSummary {
   defaultProvider?: string | null;
   defaultModel?: string | null;
   browserMode: BrowserMode;
+  agentExecutionMode?: AgentExecutionMode;
+  criticEnabled?: boolean;
+  criticScope?: 'ALL_DECISIONS' | 'WRITES_ONLY' | 'RISKY_ONLY';
+  criticModelProvider?: string | null;
+  criticModelName?: string | null;
+  maxRuntimeSeconds?: number;
+  maxCostCents?: number;
+  maxToolCalls?: number;
+  maxSupervisorTurns?: number;
+  maxSpecialistSubRuns?: number;
+  maxParallelSubRuns?: number;
+  maxRevisionLoops?: number;
   createdAt?: string;
   updatedAt?: string;
 }

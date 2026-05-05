@@ -155,6 +155,14 @@ function timelineEntries(state: AgentStreamState) {
     });
   });
 
+  state.multiAgentTrace.forEach((trace) => {
+    entries.push({
+      kind: trace.event.includes('verification') ? 'memory' : 'browser',
+      state: trace.event.endsWith('started') ? 'active' : 'done',
+      text: trace.summary,
+    });
+  });
+
   if (state.finalMessage) entries.push({ kind: 'plan', state: 'done', text: 'Final response received' });
   if (state.error) entries.push({ kind: 'tool', state: 'error', text: state.error });
 

@@ -27,6 +27,18 @@ model Project {
   defaultProvider      String?
   defaultModel         String?
   browserMode          BrowserMode                  @default(SEPARATE_PROFILE)
+  agentExecutionMode   AgentExecutionMode           @default(AUTO)
+  criticEnabled        Boolean                      @default(false)
+  criticScope          CriticInterventionScope      @default(RISKY_ONLY)
+  criticModelProvider  String?
+  criticModelName      String?
+  maxRuntimeSeconds    Int                          @default(1800)
+  maxCostCents         Int                          @default(200)
+  maxToolCalls         Int                          @default(100)
+  maxSupervisorTurns   Int                          @default(15)
+  maxSpecialistSubRuns Int                          @default(20)
+  maxParallelSubRuns   Int                          @default(3)
+  maxRevisionLoops     Int                          @default(2)
   createdAt            DateTime                     @default(now())
   updatedAt            DateTime                     @updatedAt
   conversations        Conversation[]
@@ -136,6 +148,87 @@ enum IntegrationConnectionStatus {
   REVOKED
   RATE_LIMITED
   ERROR
+}
+
+enum AgentExecutionMode {
+  AUTO
+  RESEARCHER
+  CODER
+  DESIGNER
+  OPERATOR
+  WRITER
+  MULTI_AGENT_TEAM
+}
+
+enum AgentSpecialistRole {
+  SUPERVISOR
+  RESEARCHER
+  CODER
+  DESIGNER
+  OPERATOR
+  WRITER
+  ANALYST
+  VERIFIER
+  SYNTHESIZER
+}
+
+enum AgentSubRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  REVISED
+  REJECTED
+  FAILED
+  CANCELLED
+}
+
+enum AgentHandoffStatus {
+  REQUESTED
+  ACCEPTED
+  COMPLETED
+  REJECTED
+}
+
+enum CriticInterventionScope {
+  ALL_DECISIONS
+  WRITES_ONLY
+  RISKY_ONLY
+}
+
+enum CriticVerdict {
+  APPROVE
+  REVISE
+  REJECT
+}
+
+enum VoiceProviderId {
+  DEEPGRAM
+  OPENAI
+  ELEVENLABS
+}
+
+enum VoiceCommandDecision {
+  EXECUTED
+  REJECTED
+  NEEDS_CONFIRMATION
+}
+
+enum VoiceCommandType {
+  SUBMIT_TASK
+  PAUSE_RUN
+  RESUME_RUN
+  CANCEL_RUN
+  STATUS_QUERY
+  APPROVE_ACTION
+  DENY_ACTION
+  READ_ALOUD
+  UNKNOWN
+}
+
+enum VoiceRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
 }
 
 model TemporalSettings {
@@ -371,11 +464,99 @@ model AgentRun {
   checkpoints            AgentRunCheckpoint[]
   trajectory             AgentRunTrajectory?
   sharedMemoryNamespaces SharedMemoryNamespace[]
+  subRuns                AgentSubRun[]
+  handoffs               AgentHandoff[]
+  voiceCommands          VoiceCommand[]
 
   @@index([conversationId, startedAt])
   @@index([status])
   @@index([userId])
   @@index([workflowRunId])
+}
+
+model AgentSubRun {
+  id             String              @id @default(cuid())
+  agentRunId     String
+  agentRun       AgentRun            @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  parentSubRunId String?
+  parentSubRun   AgentSubRun?        @relation("AgentSubRunTree", fields: [parentSubRunId], references: [id], onDelete: SetNull)
+  childSubRuns   AgentSubRun[]       @relation("AgentSubRunTree")
+  role           AgentSpecialistRole
+  label          String
+  status         AgentSubRunStatus   @default(QUEUED)
+  goal           String
+  safeSummary    String              @default("")
+  inputs         Json                @default("{}")
+  outputs        Json                @default("{}")
+  trace          Json                @default("[]")
+  costUsd        Decimal?            @db.Decimal(10, 4)
+  toolCallCount  Int                 @default(0)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([agentRunId, role])
+  @@index([status, createdAt])
+}
+
+model AgentHandoff {
+  id           String              @id @default(cuid())
+  agentRunId   String
+  agentRun     AgentRun            @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+  fromRole     AgentSpecialistRole
+  toRole       AgentSpecialistRole
+  fromSubRunId String?
+  toSubRunId   String?
+  status       AgentHandoffStatus  @default(REQUESTED)
+  reason       String
+  artifactRefs Json                @default("[]")
+  createdAt    DateTime            @default(now())
+  completedAt  DateTime?
+
+  @@index([agentRunId, createdAt])
+  @@index([fromRole, toRole])
+}
+
+model VoiceSettings {
+  id                                     String          @id @default("global")
+  voiceInputEnabled                      Boolean         @default(false)
+  voiceOutputEnabled                     Boolean         @default(false)
+  readAloudEnabled                       Boolean         @default(false)
+  verbalApprovalEnabled                  Boolean         @default(false)
+  storeTranscripts                       Boolean         @default(false)
+  storeRawAudio                          Boolean         @default(false)
+  requireConfirmationForVoiceCommands    Boolean         @default(true)
+  requireConfirmationForHighRiskApproval Boolean         @default(true)
+  preferredSpeechToTextProvider          VoiceProviderId @default(DEEPGRAM)
+  preferredTextToSpeechProvider          VoiceProviderId @default(ELEVENLABS)
+  openAiVoice                            String          @default("coral")
+  elevenLabsVoiceId                      String          @default("JBFqnCBsd6RMkjVDRZzb")
+  updatedAt                              DateTime        @default(now()) @updatedAt
+}
+
+model VoiceCommand {
+  id               String               @id @default(cuid())
+  userId           String
+  projectId        String?
+  agentRunId       String?
+  agentRun         AgentRun?            @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+  commandType      VoiceCommandType
+  parsedJson       Json                 @default("{}")
+  decision         VoiceCommandDecision
+  confidence       Float
+  riskLevel        VoiceRiskLevel
+  transcript       String?
+  transcriptStored Boolean              @default(false)
+  approvalId       String?
+  confirmationCode String?
+  rejectionReason  String?
+  providerId       VoiceProviderId?
+  createdAt        DateTime             @default(now())
+
+  @@index([userId, createdAt])
+  @@index([agentRunId, createdAt])
+  @@index([decision, createdAt])
 }
 
 enum AgentRunStatus {

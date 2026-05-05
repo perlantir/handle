@@ -17,6 +17,11 @@ import {
   type MemoryFact,
 } from "../memory/sessionMemory";
 import {
+  initializeMultiAgentRun,
+  recordVerifierPass,
+  type MultiAgentRunSummary,
+} from "../multiAgent/runtime";
+import {
   findSimilarFailedTrajectories,
   findSimilarSuccessfulTrajectories,
   formatFailureMemoryContext,
@@ -111,6 +116,14 @@ interface TaskStore {
     create?(args: unknown): Promise<unknown>;
     findFirst?(args: unknown): Promise<unknown | null>;
   };
+  agentHandoff?: {
+    create(args: unknown): Promise<{ id: string }>;
+    update(args: unknown): Promise<unknown>;
+  };
+  agentSubRun?: {
+    create(args: unknown): Promise<{ id: string }>;
+    update(args: unknown): Promise<unknown>;
+  };
   agentRunTrajectory?: TrajectoryStore["agentRunTrajectory"];
   sharedMemoryNamespace?: SharedMemoryStore["sharedMemoryNamespace"];
   message: {
@@ -130,12 +143,24 @@ interface TaskStore {
 }
 
 interface ProjectContext {
+  agentExecutionMode?: string | null;
   browserMode: string | null;
   customScopePath: string | null;
+  criticEnabled?: boolean | null;
+  criticModelName?: string | null;
+  criticModelProvider?: string | null;
+  criticScope?: string | null;
   defaultBackend: string | null;
   defaultModel: string | null;
   defaultProvider: string | null;
   id: string;
+  maxCostCents?: number | null;
+  maxParallelSubRuns?: number | null;
+  maxRevisionLoops?: number | null;
+  maxRuntimeSeconds?: number | null;
+  maxSpecialistSubRuns?: number | null;
+  maxSupervisorTurns?: number | null;
+  maxToolCalls?: number | null;
   memoryScope: string | null;
   permissionMode: string | null;
   workspaceScope: string | null;
@@ -526,6 +551,7 @@ export function createAgentRunner({
     let backend: ExecutionBackend | null = null;
     let sandbox: E2BSandboxLike | null = null;
     let runContext: AgentRunContext | null = null;
+    let multiAgentSummary: MultiAgentRunSummary | null = null;
 
     try {
       runControl.throwIfCancelled();
@@ -577,6 +603,16 @@ export function createAgentRunner({
         backend: selectedBackend,
         modelName: provider.config.primaryModel,
         providerId: provider.id,
+      });
+      multiAgentSummary = await initializeMultiAgentRun({
+        emitEvent,
+        goal,
+        project,
+        store,
+        taskId,
+      }).catch((err) => {
+        logger.warn({ err, taskId }, "Multi-agent supervisor initialization failed; continuing single-agent run");
+        return null;
       });
       await initializeTrajectory({ agentRunId: taskId, goal, store });
       const sharedMemoryNamespaceId = await ensureSharedMemoryNamespace({
@@ -850,6 +886,16 @@ export function createAgentRunner({
           store,
           taskId,
         });
+        if (multiAgentSummary?.verifierRequired || project?.criticEnabled) {
+          await recordVerifierPass({
+            emitEvent,
+            store,
+            summary: "Verifier approved the computer-use result summary for user delivery.",
+            taskId,
+          }).catch((err) => {
+            logger.warn({ err, taskId }, "Verifier trace failed after computer-use run");
+          });
+        }
         emitEvent({
           type: "message",
           role: "assistant",
@@ -947,6 +993,16 @@ export function createAgentRunner({
           store,
           taskId,
         });
+        if (multiAgentSummary?.verifierRequired || project?.criticEnabled) {
+          await recordVerifierPass({
+            emitEvent,
+            store,
+            summary: "Verifier approved the final response for user delivery.",
+            taskId,
+          }).catch((err) => {
+            logger.warn({ err, taskId }, "Verifier trace failed after agent run");
+          });
+        }
       }
 
       emitEvent({

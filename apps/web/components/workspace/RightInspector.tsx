@@ -1,6 +1,6 @@
 'use client';
 
-import { Brain, FileText, Globe, Shield } from 'lucide-react';
+import { Brain, FileText, GitBranch, Globe, Shield } from 'lucide-react';
 import type { PendingApproval } from '@handle/shared';
 import type { AgentStreamState, ToolCallState } from '@/hooks/useAgentStream';
 import { InspectorBlock, PillButton } from '@/components/design-system';
@@ -127,6 +127,23 @@ function MemoryRow({
   );
 }
 
+function SpecialistRow({ trace }: { trace: AgentStreamState['multiAgentTrace'][number] }) {
+  return (
+    <div className="flex items-start gap-2.5 py-1">
+      <div className="mt-0.5 flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[5px] border border-border-subtle bg-bg-canvas text-text-tertiary">
+        <GitBranch className="h-[11px] w-[11px]" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="break-words text-[12px] leading-[17px] text-text-primary">{trace.summary}</div>
+        <div className="mt-px text-[10.5px] text-text-tertiary">
+          {trace.role ?? trace.toRole ?? 'Supervisor'}
+          {trace.verdict ? ` · ${trace.verdict}` : ''}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RightInspector({ approvals, onReviewApproval, state }: RightInspectorProps) {
   const latestTool = latestToolCall(state.toolCalls);
   const fileTools = state.toolCalls.filter((toolCall) => toolCall.toolName.startsWith('file.'));
@@ -146,6 +163,19 @@ export function RightInspector({ approvals, onReviewApproval, state }: RightInsp
 
       <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-6 pb-6 pt-1">
         <InspectorBlock title="Current tool call">{latestTool && <ToolCallCard toolCall={latestTool} />}</InspectorBlock>
+
+        <InspectorBlock
+          {...(state.multiAgentTrace.length > 0 ? { badge: String(state.multiAgentTrace.length) } : {})}
+          title="Specialists"
+        >
+          {state.multiAgentTrace.length === 0 ? (
+            <div className="text-[12px] leading-[18px] text-text-muted">No specialist activity yet.</div>
+          ) : (
+            state.multiAgentTrace.slice(-8).map((trace, index) => (
+              <SpecialistRow key={`${trace.timestamp}-${trace.event}-${index}`} trace={trace} />
+            ))
+          )}
+        </InspectorBlock>
 
         <InspectorBlock {...(approvals.length > 0 ? { badge: String(approvals.length) } : {})} title="Approvals">
           {approvals.map((approval) => (

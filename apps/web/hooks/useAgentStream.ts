@@ -1,7 +1,15 @@
 'use client';
 
 import { useEffect, useReducer } from 'react';
-import type { ApprovalPayload, BrowserScreenshotEvent, MemoryRecallEvent, PlanStep, SSEEvent, TaskStatus } from '@handle/shared';
+import type {
+  ApprovalPayload,
+  BrowserScreenshotEvent,
+  MemoryRecallEvent,
+  MultiAgentTraceEvent,
+  PlanStep,
+  SSEEvent,
+  TaskStatus,
+} from '@handle/shared';
 
 export interface ToolCallState {
   args: Record<string, unknown>;
@@ -19,6 +27,7 @@ export interface AgentStreamState {
   error: string | null;
   finalMessage: string | null;
   memoryFacts: MemoryRecallEvent['facts'];
+  multiAgentTrace: MultiAgentTraceEvent[];
   pendingApproval: (ApprovalPayload & { approvalId: string }) | null;
   planSteps: PlanStep[];
   status: TaskStatus | 'IDLE';
@@ -33,6 +42,7 @@ const initialState: AgentStreamState = {
   error: null,
   finalMessage: null,
   memoryFacts: [],
+  multiAgentTrace: [],
   pendingApproval: null,
   planSteps: [],
   status: 'IDLE',
@@ -69,6 +79,8 @@ export function agentStreamReducer(state: AgentStreamState, action: Action): Age
       return state;
     case 'memory_recall':
       return { ...state, memoryFacts: event.facts };
+    case 'multi_agent_trace':
+      return { ...state, multiAgentTrace: [...state.multiAgentTrace, event].slice(-60) };
     case 'plan_update':
       return { ...state, planSteps: event.steps };
     case 'provider_fallback':

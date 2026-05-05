@@ -6,6 +6,7 @@ const initialState: AgentStreamState = {
   error: null,
   finalMessage: null,
   memoryFacts: [],
+  multiAgentTrace: [],
   pendingApproval: null,
   planSteps: [],
   status: 'IDLE',
