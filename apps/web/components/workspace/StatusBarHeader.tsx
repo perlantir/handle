@@ -24,7 +24,7 @@ function dotStatus(status: AgentStreamState['status'] | TaskStatus) {
   return 'running';
 }
 
-function statusSubtitle(state: AgentStreamState) {
+function statusSubtitle(state: AgentStreamState, status: AgentStreamState['status'] | TaskStatus) {
   let runningTool: ToolCallState | null = null;
   let latestTool: ToolCallState | null = null;
   for (let index = state.toolCalls.length - 1; index >= 0; index -= 1) {
@@ -38,10 +38,10 @@ function statusSubtitle(state: AgentStreamState) {
   }
 
   if (state.error) return state.error;
-  if (state.status === 'CANCELLED') return 'Cancelled';
-  if (state.status === 'PAUSED') return 'Paused';
-  if (state.status === 'WAITING') return state.pendingApproval?.reason ?? 'Waiting for approval';
-  if (state.status === 'STOPPED') return 'Complete';
+  if (status === 'CANCELLED') return 'Cancelled';
+  if (status === 'PAUSED') return 'Paused';
+  if (status === 'WAITING') return state.pendingApproval?.reason ?? 'Waiting for approval';
+  if (status === 'STOPPED') return 'Complete';
   if (latestTool) return `${runningTool ? 'Running' : 'Last ran'} ${latestTool.toolName}`;
   if (state.thought) return 'Thinking';
   if (state.status === 'IDLE') return 'Connecting to task stream';
@@ -102,7 +102,7 @@ export function StatusBarHeader({ cancelling = false, onCancel, onPause, pausing
           {task?.conversationTitle ? (
             <span className="mr-2 text-text-muted">{task.conversationTitle}</span>
           ) : null}
-          <span className={cn(status === 'ERROR' ? 'text-status-error' : 'text-accent', 'font-medium')}>{statusSubtitle(state)}</span>
+          <span className={cn(status === 'ERROR' ? 'text-status-error' : 'text-accent', 'font-medium')}>{statusSubtitle(state, status)}</span>
         </p>
       </div>
 
