@@ -1,4 +1,4 @@
-import type { ParsedSchedulePreview } from "@handle/shared";
+import type { ParsedSchedulePreview, ScheduleTargetType } from "@handle/shared";
 import { nextRunPreview } from "./preview";
 
 const DAY_TO_CRON: Record<string, string> = {
@@ -24,6 +24,7 @@ export function parseNaturalSchedule({
   let runAt: string | null = null;
   let explanation = "Custom schedule";
   let confidence = 0.55;
+  const target = inferTarget(normalized);
 
   if (/\bweekday|monday through friday|mon-?fri\b/.test(normalized)) {
     cronExpression = `${time.minute} ${time.hour} * * 1-5`;
@@ -68,7 +69,19 @@ export function parseNaturalSchedule({
     runAt: runAt ? new Date(runAt) : null,
     timezone,
   });
-  return { confidence, cronExpression, explanation, nextRuns, runAt, timezone };
+  return {
+    confidence,
+    cronExpression,
+    explanation,
+    input: target.input,
+    name: buildName({ cadence: explanation, target }),
+    nextRuns,
+    outputTarget: inferOutputTarget(normalized),
+    runAt,
+    targetRef: target.targetRef,
+    targetType: target.targetType,
+    timezone,
+  };
 }
 
 function parseTime(value: string) {
@@ -85,4 +98,128 @@ function parseTime(value: string) {
 
 function formatTime({ hour, minute }: { hour: number; minute: number }) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function inferTarget(value: string): {
+  input: Record<string, unknown>;
+  label: string;
+  targetRef: Record<string, unknown>;
+  targetType: ScheduleTargetType;
+} {
+  const company = extractResearchSubject(value);
+  if (/\bresearch|company|competitor|competitors|market\b/.test(value)) {
+    return {
+      input: {
+        company: company ?? "Company",
+        depth: /\bdeep|comprehensive|detailed\b/.test(value) ? "deep" : "standard",
+      },
+      label: `Research ${company ?? "a company"}`,
+      targetRef: { skillSlug: "research-company" },
+      targetType: "SKILL",
+    };
+  }
+
+  if (/\bnotion|workspace summary|summarize workspace\b/.test(value)) {
+    return {
+      input: { depth: "standard" },
+      label: "Summarize a Notion workspace",
+      targetRef: { skillSlug: "summarize-a-notion-workspace" },
+      targetType: "SKILL",
+    };
+  }
+
+  if (/\btrip|itinerary|travel\b/.test(value)) {
+    return {
+      input: { destination: extractAfter(value, ["to", "in", "for"]) ?? "Destination", days: 3 },
+      label: "Plan a trip",
+      targetRef: { skillSlug: "plan-a-trip" },
+      targetType: "SKILL",
+    };
+  }
+
+  if (/\bcode review|review pr|pull request\b/.test(value)) {
+    return {
+      input: { mode: /\bsecurity\b/.test(value) ? "security-focused" : "summary" },
+      label: "Code review a PR",
+      targetRef: { skillSlug: "code-review-a-pr" },
+      targetType: "SKILL",
+    };
+  }
+
+  return {
+    input: { goal: sentenceCase(value) },
+    label: sentenceCase(value) || "Scheduled task",
+    targetRef: { goal: sentenceCase(value) },
+    targetType: "TASK",
+  };
+}
+
+function inferOutputTarget(value: string) {
+  if (/\bemail|mail|inbox\b/.test(value)) {
+    return { channel: "EMAIL", label: "Email via configured notification address" };
+  }
+  if (/\bslack|channel\b/.test(value)) {
+    return { channel: "SLACK", label: "Slack via configured notification channel" };
+  }
+  if (/\bwebhook\b/.test(value)) {
+    return { channel: "WEBHOOK", label: "Webhook via configured notification URL" };
+  }
+  return { channel: "IN_APP", label: "Handle schedule history" };
+}
+
+function buildName({
+  cadence,
+  target,
+}: {
+  cadence: string;
+  target: { input: Record<string, unknown>; label: string };
+}) {
+  const company = typeof target.input.company === "string" ? target.input.company : null;
+  if (company) {
+    const cadenceLabel = cadence.toLowerCase().includes("weekday") ? "weekday digest" : "scheduled digest";
+    return `Research ${company} ${cadenceLabel}`;
+  }
+  return `${target.label} schedule`;
+}
+
+function extractResearchSubject(value: string) {
+  const patterns = [
+    /\bresearch\s+([a-z0-9][a-z0-9 .&-]{1,60}?)(?:\s+and\s+(?:email|send|post|notify)|\s+at\s+|\s+every\s+|$)/i,
+    /\btrack\s+([a-z0-9][a-z0-9 .&-]{1,60}?)(?:\s+and\s+(?:email|send|post|notify)|\s+at\s+|\s+every\s+|$)/i,
+    /\bcompany\s+([a-z0-9][a-z0-9 .&-]{1,60}?)(?:\s+and\s+(?:email|send|post|notify)|\s+at\s+|\s+every\s+|$)/i,
+  ];
+  for (const pattern of patterns) {
+    const raw = value.match(pattern)?.[1]?.trim();
+    if (raw) return titleCase(cleanSubject(raw));
+  }
+  return null;
+}
+
+function extractAfter(value: string, markers: string[]) {
+  for (const marker of markers) {
+    const raw = value.match(new RegExp(`\\b${marker}\\s+([a-z0-9][a-z0-9 .&-]{1,60})`, "i"))?.[1]?.trim();
+    if (raw) return titleCase(cleanSubject(raw));
+  }
+  return null;
+}
+
+function cleanSubject(value: string) {
+  return value
+    .replace(/\b(the|a|an)\b$/i, "")
+    .replace(/\b(report|digest|brief|summary)\b.*$/i, "")
+    .trim();
+}
+
+function titleCase(value: string) {
+  const titled = value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => (part.length <= 3 && /^[A-Z0-9]+$/.test(part) ? part : part.slice(0, 1).toUpperCase() + part.slice(1)))
+    .join(" ");
+  return titled.replace(/\bOpenai\b/g, "OpenAI").replace(/\bAnthropic\b/g, "Anthropic").replace(/\bStripe\b/g, "Stripe");
+}
+
+function sentenceCase(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 1).toUpperCase() + trimmed.slice(1) : "";
 }
