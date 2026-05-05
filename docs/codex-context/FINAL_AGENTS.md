@@ -657,6 +657,30 @@ If a UI feature requires user input that Codex can't provide (real OAuth credent
 
 
 ==================================================
+RULE 36: Live smoke means READING the output, not just verifying the wiring fired.
+==================================================
+
+A "PASS" requires more than "I clicked it and something happened." For features that produce content (artifacts, reports, summaries, drafts, recommendations), live smoke must include:
+
+1. End-to-end execution from real user-facing entry point (browser click, not API curl)
+2. Reading the produced output end-to-end
+3. Verifying output meets quality bar specified in feature requirements (not just structural shape — actual content quality)
+4. For features with citations: clicking 2-3 citations to verify they resolve to real sources
+5. For features with side effects: verifying the side effect actually happened (email arrived, file written, page created)
+6. For approval-gated features: verifying approval modal appears AND that denial actually blocks the action
+
+"Trace contains 5 steps and an artifact was created" is NOT live smoke. The artifact's content must be read and verified.
+
+"Test button works" is NOT live smoke for the feature. The real user flow must be tested.
+
+"API returned 200 with array of items" is NOT live smoke if the items are placeholders or mock data.
+
+If a smoke can't tell the difference between real output and placeholder output, the smoke is incomplete.
+
+When in doubt: pretend you're a paying customer who just used the feature. Would you be satisfied with what was produced? If not, the smoke fails.
+
+
+==================================================
 END OF STANDING RULES
 ==================================================
 
