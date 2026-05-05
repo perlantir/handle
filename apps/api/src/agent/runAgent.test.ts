@@ -4,7 +4,11 @@ import type { E2BSandboxLike, ExecutionBackend } from "../execution/types";
 import type { ProviderId, ProviderInstance } from "../providers/types";
 import { createAgentRunner } from "./runAgent";
 
-const fakeModel = {} as BaseChatModel;
+const fakeModel = {
+  invoke: vi.fn().mockResolvedValue({
+    content: "## Summary\n- Specialist test report.\n## Findings\n- Test finding.\n## Recommendations\n- Test recommendation.",
+  }),
+} as unknown as BaseChatModel;
 const fakePlanModel = { name: "plan-model" } as unknown as BaseChatModel;
 
 function provider(id: ProviderId, primaryModel: string): ProviderInstance {
@@ -161,7 +165,7 @@ describe("createAgentRunner", () => {
     expect(createAgent).toHaveBeenCalledWith(
       {
         backend,
-        memoryContext: "<memory_context>None recalled</memory_context>",
+        memoryContext: expect.stringContaining("<memory_context>None recalled</memory_context>"),
         recordTrajectoryStep: expect.any(Function),
         sandbox: testSandbox,
         taskId: "task-test",
@@ -358,7 +362,7 @@ describe("createAgentRunner", () => {
     expect(createAgent).toHaveBeenCalledWith(
       {
         backend: expect.objectContaining({ id: "e2b" }),
-        memoryContext: "<memory_context>None recalled</memory_context>",
+        memoryContext: expect.stringContaining("<memory_context>None recalled</memory_context>"),
         recordTrajectoryStep: expect.any(Function),
         sandbox: desktopSandbox,
         taskId: "task-desktop-test",
@@ -587,7 +591,7 @@ describe("createAgentRunner", () => {
     expect(createAgent).toHaveBeenCalledWith(
       {
         backend,
-        memoryContext: "<memory_context>None recalled</memory_context>",
+        memoryContext: expect.stringContaining("<memory_context>None recalled</memory_context>"),
         recordTrajectoryStep: expect.any(Function),
         sandbox: expect.objectContaining({ sandboxId: "local:task-local-test" }),
         taskId: "task-local-test",

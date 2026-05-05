@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { initializeMultiAgentRun, recordVerifierPass } from "./runtime";
 import type { MultiAgentTraceEvent } from "@handle/shared";
+import type { MultiAgentRuntimeContext } from "./types";
 
 describe("multi-agent runtime", () => {
   it("auto-escalates comparison research tasks and records specialist traces", async () => {
@@ -19,11 +20,29 @@ describe("multi-agent runtime", () => {
         update: vi.fn(async () => undefined),
       },
     };
+    const providerRegistry = {
+      getActiveModel: vi.fn(async () => ({
+        model: {
+          invoke: vi.fn(async () => ({
+            content:
+              "## Summary\n- Stripe and Adyen were compared with source-backed context.\n## Findings\n- Stripe emphasizes developer-first payments.\n- Adyen emphasizes unified commerce.\n## Recommendations\n- Validate pricing and regional coverage from official docs.\n## Sources Used\n- Official sources only.",
+          })),
+        },
+        provider: {
+          config: { enabled: true, fallbackOrder: 0, id: "openai", primaryModel: "gpt-test" },
+          description: "test",
+          id: "openai",
+          isAvailable: vi.fn(async () => true),
+          createModel: vi.fn(),
+        },
+      })),
+    } as unknown as MultiAgentRuntimeContext["providerRegistry"];
 
     const summary = await initializeMultiAgentRun({
       emitEvent: (event) => events.push(event),
       goal: "Research Stripe, compare to Adyen, and draft an executive report",
       project: { agentExecutionMode: "AUTO" },
+      providerRegistry,
       store,
       taskId: "run-test",
     });

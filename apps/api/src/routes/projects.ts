@@ -59,6 +59,9 @@ const updateConversationSchema = z.object({
 });
 
 const sendMessageSchema = z.object({
+  agentExecutionMode: z
+    .enum(["AUTO", "RESEARCHER", "CODER", "DESIGNER", "OPERATOR", "WRITER", "MULTI_AGENT_TEAM"])
+    .optional(),
   backend: z.enum(["e2b", "local"]).optional(),
   content: z.string().min(1).max(10_000),
   memoryEnabled: z.boolean().optional(),
@@ -115,7 +118,7 @@ interface CreateProjectsRouterOptions {
   runAgent?: (
     agentRunId: string,
     goal: string,
-    options?: { backend?: "e2b" | "local"; providerOverride?: ProviderId },
+    options?: { agentExecutionMode?: string; backend?: "e2b" | "local"; providerOverride?: ProviderId },
   ) => Promise<void>;
   store?: ProjectRouteStore;
 }
@@ -588,9 +591,12 @@ export function createProjectsRouter({
         },
       });
 
-      const runOptions: { backend?: "e2b" | "local"; providerOverride?: ProviderId } = {
+      const runOptions: { agentExecutionMode?: string; backend?: "e2b" | "local"; providerOverride?: ProviderId } = {
         backend: dbBackendToApi(backend as "E2B" | "LOCAL"),
       };
+      if (parsed.data.agentExecutionMode) {
+        runOptions.agentExecutionMode = parsed.data.agentExecutionMode;
+      }
       if (parsed.data.providerId) {
         runOptions.providerOverride = parsed.data.providerId;
       }

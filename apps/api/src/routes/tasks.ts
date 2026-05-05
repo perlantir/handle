@@ -43,7 +43,7 @@ interface CreateTasksRouterOptions {
   runAgent?: (
     taskId: string,
     goal: string,
-    options?: { backend?: "e2b" | "local"; providerOverride?: ProviderId },
+    options?: { agentExecutionMode?: string; backend?: "e2b" | "local"; providerOverride?: ProviderId },
   ) => Promise<void>;
   store?: TaskRouteStore;
 }

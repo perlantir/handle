@@ -24,6 +24,7 @@ import { settingsRouter } from "./routes/settings";
 import { schedulesRouter } from "./routes/schedules";
 import { sharedMemoryRouter } from "./routes/sharedMemory";
 import { skillsRouter } from "./routes/skills";
+import { specialistsRouter } from "./routes/specialists";
 import { streamRouter } from "./routes/stream";
 import { tasksRouter } from "./routes/tasks";
 import { voiceRouter } from "./routes/voice";
@@ -67,6 +68,7 @@ export async function createServer() {
   app.use("/api", schedulesRouter);
   app.use("/api", sharedMemoryRouter);
   app.use("/api", skillsRouter);
+  app.use("/api", specialistsRouter);
   app.use("/api/tasks", tasksRouter);
   app.use("/api", voiceRouter);
   app.use("/api/tasks", streamRouter);

@@ -544,6 +544,81 @@ export interface AgentRunSummary {
   lastNotifiedAt?: string | null;
 }
 
+export type SpecialistId =
+  | 'researcher'
+  | 'coder'
+  | 'designer'
+  | 'operator'
+  | 'writer'
+  | 'analyst'
+  | 'verifier'
+  | 'supervisor'
+  | 'synthesizer';
+
+export type AgentRunMode = AgentExecutionMode;
+
+export interface SpecialistDefinitionSummary {
+  id: SpecialistId;
+  role: AgentSpecialistRole;
+  label: string;
+  description: string;
+  selectable: boolean;
+  suggestedModel?: string;
+  toolPolicy: {
+    allowedToolPrefixes: string[];
+    deniedToolPrefixes: string[];
+    requiresApprovalFor: string[];
+  };
+  runtimePolicy: {
+    maxIterations: number;
+    maxToolCalls: number;
+    requiresVerifier: boolean;
+  };
+}
+
+export interface AgentSubRunSummary {
+  id: string;
+  agentRunId: string;
+  role: AgentSpecialistRole;
+  label: string;
+  status: AgentSubRunStatus;
+  goal: string;
+  safeSummary: string;
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  trace: unknown[];
+  costUsd?: string | null;
+  toolCallCount: number;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AgentHandoffSummary {
+  id: string;
+  agentRunId: string;
+  fromRole: AgentSpecialistRole;
+  toRole: AgentSpecialistRole;
+  fromSubRunId?: string | null;
+  toSubRunId?: string | null;
+  status: 'REQUESTED' | 'ACCEPTED' | 'COMPLETED' | 'REJECTED';
+  reason: string;
+  artifactRefs: unknown[];
+  createdAt?: string;
+  completedAt?: string | null;
+}
+
+export interface AgentRunDetail extends AgentRunSummary {
+  conversationTitle?: string | null;
+  goal: string;
+  handoffs: AgentHandoffSummary[];
+  projectId?: string | null;
+  projectName?: string | null;
+  subRuns: AgentSubRunSummary[];
+  trace: MultiAgentTraceEvent[];
+}
+
 export type NotificationEventType =
   | 'TASK_COMPLETED'
   | 'TASK_FAILED'

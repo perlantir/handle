@@ -233,6 +233,7 @@ interface RunAgentDependencies {
 }
 
 export interface RunAgentOptions {
+  agentExecutionMode?: string;
   backend?: "e2b" | "local";
   providerOverride?: ProviderId;
 }
@@ -605,11 +606,14 @@ export function createAgentRunner({
         providerId: provider.id,
       });
       multiAgentSummary = await initializeMultiAgentRun({
+        ...(options.agentExecutionMode ? { agentExecutionModeOverride: options.agentExecutionMode } : {}),
         emitEvent,
         goal,
         project,
+        providerRegistry,
         store,
         taskId,
+        userId: runContext.userId ?? null,
       }).catch((err) => {
         logger.warn({ err, taskId }, "Multi-agent supervisor initialization failed; continuing single-agent run");
         return null;
@@ -830,6 +834,7 @@ export function createAgentRunner({
         return "";
       });
       const memoryContext = [
+        multiAgentSummary?.contextSummary ?? "",
         formatMemoryContext(recalledMemory),
         proceduralContext,
         failureMemoryContext,
