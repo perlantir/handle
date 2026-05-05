@@ -76,6 +76,12 @@ export interface CreateIntegrationsRouterOptions {
     }): Promise<unknown>;
     deleteIntegration(integrationId: string, userId: string): Promise<unknown>;
     listSettings(userId: string): Promise<IntegrationSettingsResponse>;
+    requestIntegration?(input: {
+      connectorId: IntegrationConnectorId;
+      endpoint: string;
+      params?: Record<string, unknown>;
+      userId: string;
+    }): Promise<{ data: unknown }>;
     testIntegration(integrationId: string, userId: string): Promise<unknown>;
     saveLocalVault(input: {
       accountAlias?: string;
@@ -127,6 +133,41 @@ export function createIntegrationsRouter({
       return res.json({
         connectors: connectorOrder.map((connectorId) => connectorById(connectorId)),
       });
+    }),
+  );
+
+  router.get(
+    "/integrations/slack/channels",
+    asyncHandler(async (req, res) => {
+      const userId = getUserId(req);
+      if (!userId) return res.status(401).json({ error: "Unauthorized" });
+      if (typeof integrations.requestIntegration !== "function") {
+        return res.status(501).json({ error: "Slack channel listing is unavailable." });
+      }
+
+      try {
+        const response = await integrations.requestIntegration({
+          connectorId: "slack",
+          endpoint: "/api/conversations.list",
+          params: {
+            exclude_archived: true,
+            limit: 200,
+            types: "public_channel,private_channel,im",
+          },
+          userId,
+        });
+        const data = response.data && typeof response.data === "object"
+          ? response.data as { channels?: unknown }
+          : {};
+        const channels = Array.isArray(data.channels) ? data.channels : [];
+        return res.json({
+          channels: channels
+            .map((channel) => normalizeSlackChannel(channel))
+            .filter((channel): channel is NonNullable<ReturnType<typeof normalizeSlackChannel>> => Boolean(channel)),
+        });
+      } catch (err) {
+        return res.status(integrationHttpStatus(err)).json(formatIntegrationError(err));
+      }
     }),
   );
 
@@ -346,3 +387,25 @@ function integrationHttpStatus(err: unknown) {
 }
 
 export const integrationsRouter = createIntegrationsRouter();
+
+function normalizeSlackChannel(channel: unknown) {
+  if (!channel || typeof channel !== "object") return null;
+  const record = channel as Record<string, unknown>;
+  const id = typeof record.id === "string" ? record.id : "";
+  if (!id) return null;
+  const isIm = record.is_im === true;
+  const isPrivate = record.is_private === true;
+  const rawName =
+    typeof record.name === "string"
+      ? record.name
+      : typeof record.user === "string"
+        ? record.user
+        : id;
+  const kind = isIm ? "dm" : isPrivate ? "private" : "public";
+  const prefix = kind === "dm" ? "DM " : "#";
+  return {
+    id,
+    kind,
+    name: rawName.startsWith("#") || rawName.startsWith("DM ") ? rawName : `${prefix}${rawName}`,
+  };
+}

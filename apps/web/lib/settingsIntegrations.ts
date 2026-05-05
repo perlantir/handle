@@ -139,3 +139,13 @@ export async function deleteIntegration(integrationId: string) {
     method: "DELETE",
   });
 }
+
+export interface SlackChannelOption {
+  id: string;
+  kind: "dm" | "private" | "public";
+  name: string;
+}
+
+export async function listSlackChannels() {
+  return requestJson<{ channels: SlackChannelOption[] }>("/api/integrations/slack/channels");
+}

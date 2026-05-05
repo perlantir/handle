@@ -4,6 +4,7 @@ import { Check, Loader2, XCircle } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { NotificationChannel, NotificationChannelStatusSummary, NotificationEventType, NotificationSettingsSummary, TemporalSettingsSummary } from "@handle/shared";
 import { PillButton, Toggle } from "@/components/design-system";
+import { SlackChannelPicker } from "./SlackChannelPicker";
 import { getNotificationSettings, testNotificationChannel, updateNotificationSettings } from "@/lib/api";
 import { useHandleAuth } from "@/lib/handleAuth";
 import { cn } from "@/lib/utils";
@@ -377,12 +378,10 @@ export function NotificationsSettings() {
         testing={testing === "SLACK"}
         testResult={testResults.SLACK ?? null}
       >
-        <input
-          aria-label="Slack notification channel"
-          className="h-9 w-full rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none"
+        <SlackChannelPicker
           disabled={!draft.slackEnabled}
-          onChange={(event) => setDraft((current) => current && { ...current, slackChannelId: event.target.value })}
-          placeholder="C0123456789 or #updates"
+          label="Slack notification channel"
+          onChange={(value) => setDraft((current) => current && { ...current, slackChannelId: value })}
           value={draft.slackChannelId}
         />
       </SettingRow>
