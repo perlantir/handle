@@ -23,8 +23,8 @@ The locked-in third-party stack:
 - Memory / knowledge graph: Zep
 - Browser automation: Browser-Use + Anthropic computer-use API
 - Cloud sandbox: E2B
-- Voice input: OpenAI Whisper API
-- Voice output: OpenAI TTS
+- Voice input: Deepgram Nova-3 primary, OpenAI gpt-4o-transcribe fallback
+- Voice output: ElevenLabs primary, OpenAI TTS fallback
 - Authentication: Clerk
 - OAuth orchestration: Nango (for third-party integrations)
 - Background jobs / schedules: Temporal self-hosted (Phase 6.5 stack update)
@@ -72,7 +72,8 @@ RULED OUT:
 - Custom memory store. Use Zep.
 - Native SwiftUI Mac app for the primary UI. Use Next.js + React.
   Tauri wraps it for Mac distribution in Phase 11.
-- Custom voice / TTS pipelines. Use OpenAI Whisper + OpenAI TTS.
+- Custom voice / TTS pipelines. Use the Phase 9 voice provider abstraction
+  with Deepgram/OpenAI transcription and ElevenLabs/OpenAI TTS.
 - Custom job queue. Use Temporal.
 
 If a task seems to require any of these, stop and ask.
@@ -420,7 +421,7 @@ knowledge graph API for entity memory. Both are documented in
 Phase 5.
 
 ==================================================
-RULE 25: SCHEDULES GO THROUGH BULLMQ
+RULE 25: SCHEDULES GO THROUGH TEMPORAL
 ==================================================
 
 Every scheduled, recurring, or async background task uses Temporal.
