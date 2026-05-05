@@ -202,17 +202,43 @@ export async function initializeMultiAgentRun({
     }
   }
 
-  const verifierRequired = shouldRunVerifier({ goal, reports, verifierRequired: teamMode || project?.criticEnabled === true });
-  if (verifierRequired) {
-    await runVerifier({ budget, reports, runtime }).catch((err) => {
-      logger.warn({ err, taskId }, "Verifier execution failed");
-    });
-  }
-
   const synthesized = await synthesizeFinalResponse({ reports, runtime }).catch((err) => {
     logger.warn({ err, taskId }, "Multi-agent synthesis failed");
     return "";
   });
+
+  const reportsForVerification = synthesized
+    ? [
+        ...reports,
+        {
+          artifactIds: [`${taskId}-synthesized-output`],
+          artifacts: [
+            {
+              content: synthesized,
+              kind: "analysis" as const,
+              mimeType: "text/markdown" as const,
+              title: "Synthesized multi-agent output",
+            },
+          ],
+          blockers: [],
+          costCents: 0,
+          findings: [synthesized.slice(0, 500)],
+          recommendations: [],
+          role: "SYNTHESIZER" as const,
+          safeSummary: "Synthesizer produced final multi-agent context for user delivery.",
+          sources: reports.flatMap((report) => report.sources).slice(0, 20),
+          status: "completed" as const,
+          toolCallCount: 0,
+        },
+      ]
+    : reports;
+
+  const verifierRequired = shouldRunVerifier({ goal, reports: reportsForVerification, verifierRequired: teamMode || project?.criticEnabled === true });
+  if (verifierRequired) {
+    await runVerifier({ budget, reports: reportsForVerification, runtime }).catch((err) => {
+      logger.warn({ err, taskId }, "Verifier execution failed");
+    });
+  }
 
   const finalRoles = rolesFromReports(reports);
 
