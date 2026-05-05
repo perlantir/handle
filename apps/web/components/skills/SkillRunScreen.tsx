@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { SkillArtifactSummary, SkillRunDetail } from "@handle/shared";
-import { ArrowLeft, Box, CheckCircle2, FileText, Loader2, XCircle } from "lucide-react";
+import { ArrowLeft, Box, CheckCircle2, ExternalLink, FileText, Loader2, XCircle } from "lucide-react";
 import { useHandleAuth } from "@/lib/handleAuth";
 import { getSkillRun } from "@/lib/skills";
 import { cn } from "@/lib/utils";
@@ -123,6 +123,9 @@ export function SkillRunScreen({ runId }: { runId: string }) {
             {selectedArtifact ? (
               <div className="mt-3">
                 <div className="mb-2 text-[12px] text-text-tertiary">{selectedArtifact.citations.length} citation(s)</div>
+                {selectedArtifact.citations.length ? (
+                  <CitationList citations={selectedArtifact.citations} />
+                ) : null}
                 <pre className="max-h-[520px] overflow-auto whitespace-pre-wrap rounded-[8px] border border-border-subtle bg-bg-base p-3 text-[12px] leading-5 text-text-secondary">
                   {selectedArtifact.inlineContent ?? "Artifact stored externally."}
                 </pre>
@@ -134,6 +137,51 @@ export function SkillRunScreen({ runId }: { runId: string }) {
         </aside>
       </div>
     </main>
+  );
+}
+
+function citationString(citation: Record<string, unknown>, key: string) {
+  const value = citation[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function CitationList({ citations }: { citations: Array<Record<string, unknown>> }) {
+  return (
+    <div className="mb-3 max-h-[220px] overflow-auto rounded-[8px] border border-border-subtle bg-bg-base p-2">
+      <div className="grid gap-2">
+        {citations.map((citation, index) => {
+          const title = citationString(citation, "title") ?? `Citation ${index + 1}`;
+          const url = citationString(citation, "url");
+          const domain = citationString(citation, "domain");
+          const publishedAt = citationString(citation, "publishedAt");
+          const accessedAt = citationString(citation, "accessedAt");
+          const sourceId = citationString(citation, "sourceId");
+          return (
+            <div className="rounded-[8px] border border-border-subtle bg-bg-canvas px-2.5 py-2 text-[12px]" key={`${url ?? title}-${index}`}>
+              {url ? (
+                <a
+                  className="inline-flex items-center gap-1.5 font-medium text-text-primary hover:text-accent"
+                  href={url}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {sourceId ? `${sourceId}: ` : null}
+                  {title}
+                  <ExternalLink className="h-3 w-3 shrink-0" />
+                </a>
+              ) : (
+                <div className="font-medium text-text-primary">{sourceId ? `${sourceId}: ` : null}{title}</div>
+              )}
+              <div className="mt-1 text-[11px] leading-4 text-text-tertiary">
+                {[domain, publishedAt ? `published ${publishedAt}` : null, accessedAt ? `accessed ${accessedAt}` : null]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
