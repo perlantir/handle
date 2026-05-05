@@ -10,6 +10,7 @@ import type {
   WorkflowSummary,
 } from "@handle/shared";
 import { PillButton, Toggle } from "@/components/design-system";
+import { SlackChannelPicker } from "./SlackChannelPicker";
 import { getIntegrationSettings } from "@/lib/settingsIntegrations";
 import {
   createWorkflow,
@@ -22,6 +23,15 @@ import {
 import { cn } from "@/lib/utils";
 
 type ActionParamKind = "textarea" | "text";
+type ConditionOperator = "contains" | "equals" | "exists" | "not_exists" | "not_equals" | "starts_with";
+type ConditionCombinator = "AND" | "OR";
+
+interface TriggerConditionDraft {
+  combinator: ConditionCombinator;
+  field: string;
+  operator: ConditionOperator;
+  value: string;
+}
 
 interface ActionParamDefinition {
   key: string;
@@ -40,6 +50,12 @@ interface WorkflowActionDraft {
   connectorId: IntegrationConnectorId;
   params: Record<string, string>;
   toolName: string;
+}
+
+interface TriggerFieldDefinition {
+  label: string;
+  type: "boolean" | "number" | "text";
+  value: string;
 }
 
 const connectorLabels: Record<IntegrationConnectorId, string> = {
@@ -105,6 +121,52 @@ const triggerEvents: Record<IntegrationConnectorId, Array<{ label: string; value
   zapier: [
     { label: "Zap completed", value: "zap.completed" },
     { label: "Zap failed", value: "zap.failed" },
+  ],
+};
+
+const defaultTriggerFields: TriggerFieldDefinition[] = [
+  { label: "Resource ID", type: "text", value: "id" },
+  { label: "Title", type: "text", value: "title" },
+  { label: "Actor", type: "text", value: "actor" },
+  { label: "Created at", type: "text", value: "createdAt" },
+];
+
+const triggerFieldCatalog: Record<string, TriggerFieldDefinition[]> = {
+  "deployment.failed": [
+    { label: "Project", type: "text", value: "project" },
+    { label: "Environment", type: "text", value: "environment" },
+    { label: "Branch", type: "text", value: "branch" },
+  ],
+  "deployment.ready": [
+    { label: "Project", type: "text", value: "project" },
+    { label: "Environment", type: "text", value: "environment" },
+    { label: "Branch", type: "text", value: "branch" },
+  ],
+  "issue.opened": [
+    { label: "Repository", type: "text", value: "repository" },
+    { label: "Label", type: "text", value: "label" },
+    { label: "Author", type: "text", value: "sender" },
+  ],
+  "message.channels": [
+    { label: "Channel", type: "text", value: "channel" },
+    { label: "Sender", type: "text", value: "sender" },
+    { label: "Message text", type: "text", value: "text" },
+  ],
+  "message.received": [
+    { label: "Sender domain", type: "text", value: "senderDomain" },
+    { label: "Subject", type: "text", value: "subject" },
+    { label: "Label", type: "text", value: "label" },
+  ],
+  "pull_request.merged": [
+    { label: "Repository", type: "text", value: "repository" },
+    { label: "Branch", type: "text", value: "branch" },
+    { label: "Label", type: "text", value: "label" },
+    { label: "Author", type: "text", value: "sender" },
+  ],
+  push: [
+    { label: "Repository", type: "text", value: "repository" },
+    { label: "Branch", type: "text", value: "branch" },
+    { label: "Commit message", type: "text", value: "commitMessage" },
   ],
 };
 
@@ -254,9 +316,19 @@ const defaultAction: WorkflowActionDraft = {
   toolName: "slack.send_message",
 };
 
+const operatorOptions: Array<{ label: string; value: ConditionOperator }> = [
+  { label: "equals", value: "equals" },
+  { label: "contains", value: "contains" },
+  { label: "starts with", value: "starts_with" },
+  { label: "does not equal", value: "not_equals" },
+  { label: "exists", value: "exists" },
+  { label: "does not exist", value: "not_exists" },
+];
+
 const emptyDraft = {
   actions: [defaultAction],
   actionsJson: JSON.stringify([defaultAction], null, 2),
+  conditions: [] as TriggerConditionDraft[],
   enabled: false,
   name: "",
   triggerConnectorId: "github" as IntegrationConnectorId,
@@ -314,6 +386,31 @@ function toWorkflowActions(actions: WorkflowActionDraft[]): WorkflowActionDefini
     params: normalizeParams(action),
     toolName: action.toolName,
   }));
+}
+
+function conditionsToFilter(conditions: TriggerConditionDraft[]) {
+  const normalized = conditions
+    .filter((condition) => condition.field && (condition.value.trim() || condition.operator === "exists" || condition.operator === "not_exists"))
+    .map((condition, index) => ({
+      combinator: index === 0 ? "AND" : condition.combinator,
+      field: condition.field,
+      operator: condition.operator,
+      value: condition.operator === "exists" || condition.operator === "not_exists" ? null : condition.value,
+    }));
+  return normalized.length ? { conditions: normalized } : {};
+}
+
+function firstFieldForEvent(eventType: string) {
+  return triggerFieldCatalog[eventType]?.[0]?.value ?? defaultTriggerFields[0]?.value ?? "id";
+}
+
+function defaultCondition(eventType: string): TriggerConditionDraft {
+  return {
+    combinator: "AND",
+    field: firstFieldForEvent(eventType),
+    operator: "equals",
+    value: "",
+  };
 }
 
 function actionWithDefaultTool(connectorId: IntegrationConnectorId): WorkflowActionDraft {
@@ -385,7 +482,9 @@ export function WorkflowsSettings() {
         name: draft.name.trim(),
         triggerConnectorId: draft.triggerConnectorId,
         triggerEventType: draft.triggerEventType,
-        triggerFilter: parseJson(draft.triggerFilterJson, {}),
+        triggerFilter: draft.triggerFilterJson.trim() && draft.triggerFilterJson.trim() !== "{}"
+          ? parseJson(draft.triggerFilterJson, conditionsToFilter(draft.conditions))
+          : conditionsToFilter(draft.conditions),
       };
       const workflow = await createWorkflow(input);
       setWorkflows((current) => [workflow, ...current]);
@@ -474,8 +573,10 @@ export function WorkflowsSettings() {
                   const connectorId = event.target.value as IntegrationConnectorId;
                   setDraft((current) => ({
                     ...current,
+                    conditions: [],
                     triggerConnectorId: connectorId,
                     triggerEventType: triggerEvents[connectorId]?.[0]?.value ?? current.triggerEventType,
+                    triggerFilterJson: "{}",
                   }));
                 }}
                 value={draft.triggerConnectorId}
@@ -492,7 +593,7 @@ export function WorkflowsSettings() {
               <select
                 aria-label="Workflow trigger event"
                 className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-3 text-[12.5px] text-text-primary outline-none"
-                onChange={(event) => setDraft((current) => ({ ...current, triggerEventType: event.target.value }))}
+                onChange={(event) => setDraft((current) => ({ ...current, conditions: [], triggerEventType: event.target.value, triggerFilterJson: "{}" }))}
                 value={draft.triggerEventType}
               >
                 {triggerEventOptions.map((event) => (
@@ -504,18 +605,109 @@ export function WorkflowsSettings() {
             </label>
           </div>
 
-          <label className="grid gap-1 text-[11.5px] font-medium text-text-secondary">
-            Trigger filter JSON
-            <span className="font-normal text-text-tertiary">
-              Schema hint: {"{\"label\":\"release\",\"branch\":\"main\",\"senderDomain\":\"example.com\"}"}
-            </span>
-            <textarea
-              aria-label="Workflow trigger filter JSON"
-              className="min-h-[72px] rounded-md border border-border-subtle bg-bg-canvas p-3 font-mono text-[12px] text-text-primary outline-none"
-              onChange={(event) => setDraft((current) => ({ ...current, triggerFilterJson: event.target.value }))}
-              value={draft.triggerFilterJson}
-            />
-          </label>
+          <div className="grid gap-2 rounded-[10px] border border-border-subtle bg-bg-canvas p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11.5px] font-medium text-text-secondary">Trigger conditions</div>
+                <div className="mt-0.5 text-[11px] text-text-tertiary">Empty conditions fire on all events.</div>
+              </div>
+              <PillButton
+                className="gap-1.5"
+                onClick={() => setDraft((current) => ({
+                  ...current,
+                  conditions: [...current.conditions, defaultCondition(current.triggerEventType)],
+                  triggerFilterJson: "{}",
+                }))}
+                type="button"
+                variant="secondary"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add condition
+              </PillButton>
+            </div>
+            {draft.conditions.length === 0 ? (
+              <div className="rounded-md border border-border-subtle bg-bg-surface px-3 py-2 text-[12px] text-text-tertiary">
+                No conditions. This workflow will run for every {draft.triggerEventType} event.
+              </div>
+            ) : null}
+            {draft.conditions.map((condition, index) => {
+              const fields = triggerFieldCatalog[draft.triggerEventType] ?? defaultTriggerFields;
+              const selectedField = fields.find((field) => field.value === condition.field) ?? fields[0];
+              const valueType = selectedField?.type === "number" ? "number" : selectedField?.type === "boolean" ? "text" : "text";
+              return (
+                <div className="grid gap-2 rounded-md border border-border-subtle bg-bg-surface p-2 sm:grid-cols-[88px_1fr_140px_1fr_auto]" key={`${condition.field}-${index}`}>
+                  <select
+                    aria-label={`Workflow condition ${index + 1} combinator`}
+                    className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-2 text-[12px] text-text-primary outline-none"
+                    disabled={index === 0}
+                    onChange={(event) => {
+                      const conditions = draft.conditions.map((item, itemIndex) => itemIndex === index ? { ...item, combinator: event.target.value as ConditionCombinator } : item);
+                      setDraft((current) => ({ ...current, conditions, triggerFilterJson: "{}" }));
+                    }}
+                    value={index === 0 ? "AND" : condition.combinator}
+                  >
+                    <option value="AND">AND</option>
+                    <option value="OR">OR</option>
+                  </select>
+                  <select
+                    aria-label={`Workflow condition ${index + 1} field`}
+                    className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-2 text-[12px] text-text-primary outline-none"
+                    onChange={(event) => {
+                      const conditions = draft.conditions.map((item, itemIndex) => itemIndex === index ? { ...item, field: event.target.value } : item);
+                      setDraft((current) => ({ ...current, conditions, triggerFilterJson: "{}" }));
+                    }}
+                    value={condition.field}
+                  >
+                    {fields.map((field) => (
+                      <option key={field.value} value={field.value}>{field.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label={`Workflow condition ${index + 1} operator`}
+                    className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-2 text-[12px] text-text-primary outline-none"
+                    onChange={(event) => {
+                      const conditions = draft.conditions.map((item, itemIndex) => itemIndex === index ? { ...item, operator: event.target.value as ConditionOperator } : item);
+                      setDraft((current) => ({ ...current, conditions, triggerFilterJson: "{}" }));
+                    }}
+                    value={condition.operator}
+                  >
+                    {operatorOptions.map((operator) => (
+                      <option key={operator.value} value={operator.value}>{operator.label}</option>
+                    ))}
+                  </select>
+                  <input
+                    aria-label={`Workflow condition ${index + 1} value`}
+                    className="h-9 rounded-md border border-border-subtle bg-bg-canvas px-2 text-[12px] text-text-primary outline-none disabled:opacity-50"
+                    disabled={condition.operator === "exists" || condition.operator === "not_exists"}
+                    onChange={(event) => {
+                      const conditions = draft.conditions.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item);
+                      setDraft((current) => ({ ...current, conditions, triggerFilterJson: "{}" }));
+                    }}
+                    placeholder={selectedField?.type === "boolean" ? "true or false" : "Value"}
+                    type={valueType}
+                    value={condition.value}
+                  />
+                  <button
+                    aria-label={`Remove workflow condition ${index + 1}`}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border-subtle text-text-tertiary hover:text-status-error"
+                    onClick={() => setDraft((current) => ({ ...current, conditions: current.conditions.filter((_, itemIndex) => itemIndex !== index), triggerFilterJson: "{}" }))}
+                    type="button"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+            <details className="rounded-md border border-border-subtle bg-bg-surface p-2">
+              <summary className="cursor-pointer text-[11.5px] font-medium text-text-secondary">Advanced JSON fallback</summary>
+              <textarea
+                aria-label="Workflow trigger filter JSON"
+                className="mt-2 min-h-[72px] w-full rounded-md border border-border-subtle bg-bg-canvas p-3 font-mono text-[12px] text-text-primary outline-none"
+                onChange={(event) => setDraft((current) => ({ ...current, triggerFilterJson: event.target.value }))}
+                value={draft.triggerFilterJson}
+              />
+            </details>
+          </div>
 
           <div className="grid gap-2">
             <div className="flex items-center justify-between gap-3">
@@ -581,6 +773,21 @@ export function WorkflowsSettings() {
                   </div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     {definition?.params.map((param) => {
+                      if (action.connectorId === "slack" && param.key === "channel") {
+                        return (
+                          <SlackChannelPicker
+                            key={param.key}
+                            label={`Workflow action ${index + 1} Slack channel`}
+                            onChange={(value) => {
+                              updateAction(index, {
+                                ...action,
+                                params: { ...action.params, [param.key]: value },
+                              });
+                            }}
+                            value={action.params[param.key] ?? ""}
+                          />
+                        );
+                      }
                       const Component = param.type === "textarea" ? "textarea" : "input";
                       return (
                         <label className="grid gap-1 text-[11.5px] font-medium text-text-secondary" key={param.key}>
