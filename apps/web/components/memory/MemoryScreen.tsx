@@ -350,8 +350,8 @@ function ProceduresTable({
         {failures.length === 0 ? (
           <div className="px-4 py-3 text-[13px] text-text-secondary">No failed trajectory patterns found.</div>
         ) : (
-          failures.map((failure) => (
-            <div className="border-b border-border-subtle px-4 py-3 text-[13px] last:border-b-0" key={failure.agentRunId}>
+          failures.map((failure, index) => (
+            <div className="border-b border-border-subtle px-4 py-3 text-[13px] last:border-b-0" key={`${failure.agentRunId}-${index}`}>
               <div className="font-medium text-text-primary">{failure.goal}</div>
               <div className="mt-1 text-[12px] leading-[17px] text-text-secondary">
                 {failure.outcomeReason ? `Failed because: ${failure.outcomeReason}` : "Failed without a recorded reason"}
