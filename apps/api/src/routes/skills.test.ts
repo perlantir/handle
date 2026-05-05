@@ -9,9 +9,11 @@ function createSkillStore() {
   const steps: any[] = [];
   const artifacts: any[] = [];
   const schedules: any[] = [];
+  const scheduleRuns: any[] = [];
   const workflows: any[] = [];
   const workflowRuns: any[] = [];
   const importRecords: any[] = [];
+  const notificationDeliveries: any[] = [];
   let id = 0;
 
   function nextId(prefix: string) {
@@ -22,6 +24,34 @@ function createSkillStore() {
   const store = {
     integration: {
       findMany: async () => [],
+    },
+    notificationDelivery: {
+      create: async ({ data }: any) => {
+        const now = new Date();
+        const row = { ...data, createdAt: now, id: nextId("notification-delivery"), updatedAt: now };
+        notificationDeliveries.push(row);
+        return row;
+      },
+      update: async ({ data, where }: any) => {
+        const index = notificationDeliveries.findIndex((row) => row.id === where.id);
+        notificationDeliveries[index] = { ...notificationDeliveries[index], ...data, updatedAt: new Date() };
+        return notificationDeliveries[index];
+      },
+    },
+    notificationSettings: {
+      upsert: async () => ({
+        emailEnabled: false,
+        emailRecipient: null,
+        eventTypes: ["TASK_COMPLETED", "TASK_FAILED", "APPROVAL_NEEDED", "CRITIC_FLAGGED"],
+        id: "global",
+        slackChannelId: null,
+        slackEnabled: false,
+        webhookEnabled: false,
+        webhookUrl: null,
+      }),
+    },
+    projectNotificationSettings: {
+      findUnique: async () => null,
     },
     skill: {
       create: async ({ data }: any) => {
@@ -123,6 +153,78 @@ function createSkillStore() {
         const index = schedules.findIndex((row) => row.id === where.id);
         schedules[index] = { ...schedules[index], ...data, updatedAt: new Date() };
         return include?.skill ? { ...schedules[index], skill: skills.find((skill) => skill.id === schedules[index].skillId) } : schedules[index];
+      },
+    },
+    schedule: {
+      create: async ({ data, include }: any) => {
+        const now = new Date();
+        const row = {
+          approvalPolicy: data.approvalPolicy ?? {},
+          archivedAt: null,
+          catchupPolicy: data.catchupPolicy ?? "SKIP_MISSED",
+          changeDetectionPolicy: data.changeDetectionPolicy ?? {},
+          createdAt: now,
+          id: nextId("schedule"),
+          metadata: data.metadata ?? {},
+          notificationPolicy: data.notificationPolicy ?? {},
+          quotaPolicy: data.quotaPolicy ?? {},
+          runs: [],
+          updatedAt: now,
+          ...data,
+        };
+        schedules.push(row);
+        return include?.runs ? { ...row, runs: [] } : row;
+      },
+      findFirst: async ({ where, include }: any) => {
+        const row = schedules.find((item) => item.id === where.id && item.userId === where.userId) ?? null;
+        return row && include?.runs
+          ? { ...row, runs: scheduleRuns.filter((run) => run.scheduleId === row.id).slice(0, 1) }
+          : row;
+      },
+      findMany: async ({ include }: any = {}) => schedules.map((row) => include?.runs ? { ...row, runs: scheduleRuns.filter((run) => run.scheduleId === row.id).slice(0, 1) } : row),
+      update: async ({ data, include, where }: any) => {
+        const index = schedules.findIndex((row) => row.id === where.id);
+        schedules[index] = { ...schedules[index], ...data, updatedAt: new Date() };
+        return include?.runs ? { ...schedules[index], runs: scheduleRuns.filter((run) => run.scheduleId === schedules[index].id).slice(0, 1) } : schedules[index];
+      },
+    },
+    scheduleRun: {
+      count: async ({ where }: any) => scheduleRuns.filter((run) => run.scheduleId === where.scheduleId).length,
+      create: async ({ data }: any) => {
+        const now = new Date();
+        const row = {
+          agentRunId: null,
+          approvalState: {},
+          artifacts: [],
+          changeDetected: false,
+          completedAt: null,
+          createdAt: now,
+          healthChecks: [],
+          id: nextId("schedule-run"),
+          quotaSnapshot: {},
+          sources: [],
+          trace: [],
+          updatedAt: now,
+          ...data,
+        };
+        scheduleRuns.push(row);
+        return row;
+      },
+      findFirst: async ({ orderBy, where }: any) => {
+        const statuses = where.status?.in ?? [];
+        const rows = scheduleRuns.filter((run) =>
+          run.scheduleId === where.scheduleId &&
+          (statuses.length === 0 || statuses.includes(run.status)),
+        );
+        if (orderBy?.createdAt === "desc") {
+          return rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
+        }
+        return rows[0] ?? null;
+      },
+      update: async ({ data, where }: any) => {
+        const index = scheduleRuns.findIndex((run) => run.id === where.id);
+        scheduleRuns[index] = { ...scheduleRuns[index], ...data, updatedAt: new Date() };
+        return scheduleRuns[index];
       },
     },
     skillWorkflow: {

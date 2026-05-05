@@ -26,3 +26,8 @@ export interface SkillRunWorkflowInput {
   projectId?: string;
   trigger?: "SCHEDULED" | "WORKFLOW";
 }
+
+export interface ScheduledRunWorkflowInput {
+  scheduleId: string;
+  userId?: string;
+}

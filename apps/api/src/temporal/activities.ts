@@ -2,8 +2,9 @@ import { runAgent } from "../agent/runAgent";
 import { logger } from "../lib/logger";
 import { prisma } from "../lib/prisma";
 import { isProviderId } from "../providers/types";
+import { runScheduleNow } from "../schedules/manager";
 import { runSkill } from "../skills/skillRunner";
-import type { AgentRunWorkflowInput, SkillRunWorkflowInput } from "./constants";
+import type { AgentRunWorkflowInput, ScheduledRunWorkflowInput, SkillRunWorkflowInput } from "./constants";
 
 export async function startAgentRunActivity(input: AgentRunWorkflowInput) {
   logger.info(
@@ -73,4 +74,14 @@ export async function startSkillRunActivity(input: SkillRunWorkflowInput) {
   }
 
   return { completedAt: new Date().toISOString(), skillRunId: run.id };
+}
+
+export async function startScheduledRunActivity(input: ScheduledRunWorkflowInput) {
+  const schedule = await prisma.schedule.findUnique({ where: { id: input.scheduleId } });
+  if (!schedule) throw new Error("Schedule not found");
+  const run = await runScheduleNow({
+    scheduleId: schedule.id,
+    userId: input.userId ?? schedule.userId,
+  });
+  return { completedAt: new Date().toISOString(), scheduleRunId: run.id, status: run.status };
 }
